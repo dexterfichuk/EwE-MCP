@@ -210,6 +210,16 @@ namespace EwE_MCP_Plugin
                     return ListDomains();
                 case "list_entities":
                     return ListEntities(request.Params);
+                case "get_entity":
+                    return GetEntity(request.Params);
+                case "list_variables":
+                    return ListVariables(request.Params);
+                case "get_variable_metadata":
+                    return GetVariableMetadata(request.Params);
+                case "get_values":
+                    return GetValues(request.Params);
+                case "validate_values":
+                    return ValidateValues(request.Params);
                 case "list_ecopath_groups":
                     return ListEcopathGroups();
                 case "get_ecopath_group":
@@ -379,7 +389,26 @@ namespace EwE_MCP_Plugin
                 ["domains"] = new JArray
                 {
                     Domain("ecopath_groups", "Ecopath functional groups and read-only Ecopath input/output values", true, true),
+                    Domain("ecopath_group_outputs", "Ecopath functional group output values from the latest Ecopath run", true, true),
                     Domain("ecopath_fleets", "Ecopath fleets with landings/discards by group", true, true),
+                    Domain("ecopath_fleet_outputs", "Ecopath fleet output values from the latest Ecopath run", true, true),
+                    Domain("ecosim_scenarios", "Ecosim scenarios", true, true),
+                    Domain("ecosim_group_inputs", "Ecosim group input parameters", true, true),
+                    Domain("ecosim_group_outputs", "Ecosim group output time-series/results", true, true),
+                    Domain("ecosim_fleet_inputs", "Ecosim fleet input parameters", true, true),
+                    Domain("ecosim_fleet_outputs", "Ecosim fleet output time-series/results", true, true),
+                    Domain("ecospace_scenarios", "Ecospace scenarios", true, true),
+                    Domain("ecospace_group_inputs", "Ecospace group input parameters", true, true),
+                    Domain("ecospace_fleet_inputs", "Ecospace fleet input parameters", true, true),
+                    Domain("ecospace_group_outputs", "Ecospace group output time-series/results", true, true),
+                    Domain("ecospace_fleet_outputs", "Ecospace fleet output time-series/results", true, true),
+                    Domain("ecospace_habitats", "Ecospace habitat definitions", true, true),
+                    Domain("ecospace_mpas", "Ecospace marine protected area definitions", true, true),
+                    Domain("ecospace_region_outputs", "Ecospace region output values", true, true),
+                    Domain("ecotracer_scenarios", "Ecotracer scenarios", true, true),
+                    Domain("ecotracer_group_inputs", "Ecotracer group input parameters", true, true),
+                    Domain("taxa", "Taxonomy records linked to the model", true, true),
+                    Domain("core", "Top-level EwE cCore public scalar properties", true, true),
                     Domain("ui_commands", "Commands registered with EwE's UI command handler", true, true)
                 }
             };
@@ -402,14 +431,228 @@ namespace EwE_MCP_Plugin
             switch (domain)
             {
                 case "ecopath_groups":
+                case "ecopath_group":
                     return ListEcopathGroups();
                 case "ecopath_fleets":
+                case "ecopath_fleet":
                     return ListEcopathFleets();
+                case "ecopath_group_outputs":
+                case "ecopath_group_output":
+                    return ListGenericEntities("ecopath_group_outputs");
+                case "ecopath_fleet_outputs":
+                case "ecopath_fleet_output":
+                    return ListGenericEntities("ecopath_fleet_outputs");
+                case "ecosim_scenarios":
+                case "ecosim_scenario":
+                case "ecosim_group_inputs":
+                case "ecosim_group_input":
+                case "ecosim_group_outputs":
+                case "ecosim_group_output":
+                case "ecosim_fleet_inputs":
+                case "ecosim_fleet_input":
+                case "ecosim_fleet_outputs":
+                case "ecosim_fleet_output":
+                case "ecospace_scenarios":
+                case "ecospace_scenario":
+                case "ecospace_group_inputs":
+                case "ecospace_group_input":
+                case "ecospace_fleet_inputs":
+                case "ecospace_fleet_input":
+                case "ecospace_group_outputs":
+                case "ecospace_group_output":
+                case "ecospace_fleet_outputs":
+                case "ecospace_fleet_output":
+                case "ecospace_habitats":
+                case "ecospace_habitat":
+                case "ecospace_mpas":
+                case "ecospace_mpa":
+                case "ecospace_region_outputs":
+                case "ecospace_region_output":
+                case "ecotracer_scenarios":
+                case "ecotracer_scenario":
+                case "ecotracer_group_inputs":
+                case "ecotracer_group_input":
+                case "taxa":
+                case "taxon":
+                    return ListGenericEntities(NormalizeDomain(domain));
+                case "core":
+                    return new JObject
+                    {
+                        ["entities"] = new JArray { BuildGenericEntity(ResolveEntity("core", null).Entity, "core", null) },
+                        ["total_count"] = 1
+                    };
                 case "ui_commands":
                     return ListUiCommands();
                 default:
                     throw new EwEMcpException("unknown_domain", $"Unknown domain: {domain}");
             }
+        }
+
+        private JObject GetEntity(JObject parameters)
+        {
+            var domain = RequiredString(parameters, "domain");
+            int? index = OptionalInt(parameters, "index");
+            var target = ResolveEntity(domain, index);
+
+            if (target.NormalizedDomain == "ecopath_groups")
+            {
+                return BuildEcopathGroup(RequireCore(), target.Index.Value, true);
+            }
+            if (target.NormalizedDomain == "ecopath_fleets")
+            {
+                return BuildEcopathFleet(RequireCore(), target.Index.Value, true);
+            }
+
+            return BuildGenericEntity(target.Entity, target.NormalizedDomain, target.Index);
+        }
+
+        private JObject ListGenericEntities(string domain)
+        {
+            var core = RequireCore();
+            var entities = new JArray();
+            var count = GetDomainCount(core, domain);
+            for (var i = 1; i <= count; i++)
+            {
+                try
+                {
+                    var target = ResolveEntity(domain, i);
+                    entities.Add(BuildGenericEntity(target.Entity, target.NormalizedDomain, target.Index));
+                }
+                catch (EwEMcpException ex)
+                {
+                    entities.Add(new JObject
+                    {
+                        ["domain"] = domain,
+                        ["index"] = i,
+                        ["error"] = new JObject
+                        {
+                            ["code"] = ex.Code,
+                            ["message"] = ex.Message
+                        }
+                    });
+                }
+            }
+            return new JObject
+            {
+                ["domain"] = domain,
+                ["entities"] = entities,
+                ["total_count"] = count,
+                ["available_count"] = entities.Count(e => e["error"] == null)
+            };
+        }
+
+        private JObject BuildGenericEntity(object entity, string domain, int? index)
+        {
+            if (entity == null)
+            {
+                throw new EwEMcpException("entity_unavailable", $"Entity unavailable for domain {domain}");
+            }
+
+            var result = new JObject
+            {
+                ["domain"] = domain,
+                ["type"] = entity.GetType().FullName
+            };
+            if (index.HasValue)
+            {
+                result["index"] = index.Value;
+            }
+
+            var name = SafeStringProperty(entity, "Name");
+            if (!string.IsNullOrWhiteSpace(name))
+            {
+                result["name"] = name;
+            }
+
+            result["values"] = ReadScalarValues(entity, null, false, domain);
+            return result;
+        }
+
+        private JObject ListVariables(JObject parameters)
+        {
+            var domain = RequiredString(parameters, "domain");
+            int? index = OptionalInt(parameters, "index");
+            var target = ResolveEntity(domain, index);
+            var variables = new JArray();
+
+            foreach (var property in GetReadableProperties(target.Entity))
+            {
+                variables.Add(PropertyMetadata(property, target.NormalizedDomain));
+            }
+
+            return new JObject
+            {
+                ["domain"] = target.NormalizedDomain,
+                ["index"] = target.Index.HasValue ? JToken.FromObject(target.Index.Value) : JValue.CreateNull(),
+                ["variables"] = variables,
+                ["total_count"] = variables.Count
+            };
+        }
+
+        private JObject GetVariableMetadata(JObject parameters)
+        {
+            var domain = RequiredString(parameters, "domain");
+            var variable = RequiredString(parameters, "variable");
+            int? index = OptionalInt(parameters, "index");
+            var target = ResolveEntity(domain, index);
+            var property = FindReadableProperty(target.Entity, variable, target.NormalizedDomain);
+            if (property == null)
+            {
+                throw new EwEMcpException("unknown_variable", $"Variable not found: {variable}");
+            }
+            return PropertyMetadata(property, target.NormalizedDomain);
+        }
+
+        private JObject GetValues(JObject parameters)
+        {
+            var domain = RequiredString(parameters, "domain");
+            int? index = OptionalInt(parameters, "index");
+            var target = ResolveEntity(domain, index);
+            var variables = OptionalStringArray(parameters, "variables");
+
+            return new JObject
+            {
+                ["domain"] = target.NormalizedDomain,
+                ["index"] = target.Index.HasValue ? JToken.FromObject(target.Index.Value) : JValue.CreateNull(),
+                ["values"] = ReadScalarValues(target.Entity, variables, true, target.NormalizedDomain)
+            };
+        }
+
+        private JObject ValidateValues(JObject parameters)
+        {
+            var domain = RequiredString(parameters, "domain");
+            int? index = OptionalInt(parameters, "index");
+            var values = parameters["values"] as JObject ?? throw new EwEMcpException("missing_parameter", "Missing 'values' object");
+            var target = ResolveEntity(domain, index);
+            var result = new JObject();
+
+            foreach (var pair in values)
+            {
+                var property = FindWritableProperty(target.Entity, pair.Key, target.NormalizedDomain);
+                if (property == null)
+                {
+                    result[pair.Key] = new JObject
+                    {
+                        ["valid"] = false,
+                        ["reason"] = "unknown_or_readonly_variable"
+                    };
+                    continue;
+                }
+
+                result[pair.Key] = new JObject
+                {
+                    ["valid"] = TryConvertValue(pair.Value, property.PropertyType, out _),
+                    ["target_property"] = property.Name,
+                    ["type"] = FriendlyTypeName(property.PropertyType)
+                };
+            }
+
+            return new JObject
+            {
+                ["domain"] = target.NormalizedDomain,
+                ["index"] = target.Index.HasValue ? JToken.FromObject(target.Index.Value) : JValue.CreateNull(),
+                ["results"] = result
+            };
         }
 
         private JObject ListEcopathGroups()
@@ -822,6 +1065,371 @@ namespace EwE_MCP_Plugin
             };
         }
 
+        private EntityTarget ResolveEntity(string domain, int? requestedIndex)
+        {
+            var core = RequireCore();
+            var normalized = NormalizeDomain(domain);
+            if (normalized == "core")
+            {
+                return new EntityTarget(normalized, core, null);
+            }
+
+            var count = GetDomainCount(core, normalized);
+            var index = requestedIndex ?? 1;
+            if (index < 1 || index > count)
+            {
+                throw new EwEMcpException("index_out_of_range", $"{normalized} index {index} is outside 1..{count}");
+            }
+
+            var propertyName = GetDomainIndexedPropertyName(normalized);
+            var entity = SafeGetIndexedProperty(core, propertyName, index);
+            if (entity == null)
+            {
+                throw new EwEMcpException("entity_unavailable", $"Could not resolve {normalized}[{index}] via {propertyName}");
+            }
+
+            return new EntityTarget(normalized, entity, index);
+        }
+
+        private static string NormalizeDomain(string domain)
+        {
+            switch ((domain ?? string.Empty).Trim().ToLowerInvariant())
+            {
+                case "core":
+                    return "core";
+                case "ecopath_group":
+                case "ecopath_groups":
+                    return "ecopath_groups";
+                case "ecopath_group_output":
+                case "ecopath_group_outputs":
+                    return "ecopath_group_outputs";
+                case "ecopath_fleet":
+                case "ecopath_fleets":
+                    return "ecopath_fleets";
+                case "ecopath_fleet_output":
+                case "ecopath_fleet_outputs":
+                    return "ecopath_fleet_outputs";
+                case "ecosim_scenario":
+                case "ecosim_scenarios":
+                    return "ecosim_scenarios";
+                case "ecosim_group_input":
+                case "ecosim_group_inputs":
+                    return "ecosim_group_inputs";
+                case "ecosim_group_output":
+                case "ecosim_group_outputs":
+                    return "ecosim_group_outputs";
+                case "ecosim_fleet_input":
+                case "ecosim_fleet_inputs":
+                    return "ecosim_fleet_inputs";
+                case "ecosim_fleet_output":
+                case "ecosim_fleet_outputs":
+                    return "ecosim_fleet_outputs";
+                case "ecospace_scenario":
+                case "ecospace_scenarios":
+                    return "ecospace_scenarios";
+                case "ecospace_group_input":
+                case "ecospace_group_inputs":
+                    return "ecospace_group_inputs";
+                case "ecospace_fleet_input":
+                case "ecospace_fleet_inputs":
+                    return "ecospace_fleet_inputs";
+                case "ecospace_group_output":
+                case "ecospace_group_outputs":
+                    return "ecospace_group_outputs";
+                case "ecospace_fleet_output":
+                case "ecospace_fleet_outputs":
+                    return "ecospace_fleet_outputs";
+                case "ecospace_habitat":
+                case "ecospace_habitats":
+                    return "ecospace_habitats";
+                case "ecospace_mpa":
+                case "ecospace_mpas":
+                    return "ecospace_mpas";
+                case "ecospace_region_output":
+                case "ecospace_region_outputs":
+                    return "ecospace_region_outputs";
+                case "ecotracer_scenario":
+                case "ecotracer_scenarios":
+                    return "ecotracer_scenarios";
+                case "ecotracer_group_input":
+                case "ecotracer_group_inputs":
+                    return "ecotracer_group_inputs";
+                case "taxon":
+                case "taxa":
+                    return "taxa";
+                default:
+                    throw new EwEMcpException("unknown_domain", $"Unknown domain: {domain}");
+            }
+        }
+
+        private static int GetDomainCount(cCore core, string normalizedDomain)
+        {
+            switch (normalizedDomain)
+            {
+                case "ecopath_groups":
+                case "ecopath_group_outputs":
+                    return SafeIntProperty(core, "nGroups");
+                case "ecopath_fleets":
+                case "ecopath_fleet_outputs":
+                case "ecosim_fleet_inputs":
+                case "ecosim_fleet_outputs":
+                case "ecospace_fleet_inputs":
+                case "ecospace_fleet_outputs":
+                    return SafeIntProperty(core, "nFleets");
+                case "ecosim_scenarios":
+                    return SafeIntProperty(core, "nEcosimScenarios");
+                case "ecosim_group_inputs":
+                case "ecosim_group_outputs":
+                case "ecospace_group_inputs":
+                case "ecospace_group_outputs":
+                case "ecotracer_group_inputs":
+                    return SafeIntProperty(core, "nGroups");
+                case "ecospace_scenarios":
+                    return SafeIntProperty(core, "nEcospaceScenarios");
+                case "ecospace_habitats":
+                    return SafeIntProperty(core, "nHabitats");
+                case "ecospace_mpas":
+                    return SafeIntProperty(core, "nMPAs");
+                case "ecospace_region_outputs":
+                    return SafeIntProperty(core, "nRegions");
+                case "ecotracer_scenarios":
+                    return SafeIntProperty(core, "nEcotracerScenarios");
+                case "taxa":
+                    return SafeIntProperty(core, "nTaxon");
+                default:
+                    throw new EwEMcpException("unknown_domain", $"Unknown indexed domain: {normalizedDomain}");
+            }
+        }
+
+        private static string GetDomainIndexedPropertyName(string normalizedDomain)
+        {
+            switch (normalizedDomain)
+            {
+                case "ecopath_groups":
+                    return "EcopathGroupInputs";
+                case "ecopath_group_outputs":
+                    return "EcopathGroupOutputs";
+                case "ecopath_fleets":
+                    return "EcopathFleetInputs";
+                case "ecopath_fleet_outputs":
+                    return "EcopathFleetOutputs";
+                case "ecosim_scenarios":
+                    return "EcosimScenarios";
+                case "ecosim_group_inputs":
+                    return "EcosimGroupInputs";
+                case "ecosim_group_outputs":
+                    return "EcosimGroupOutputs";
+                case "ecosim_fleet_inputs":
+                    return "EcosimFleetInputs";
+                case "ecosim_fleet_outputs":
+                    return "EcosimFleetOutput";
+                case "ecospace_scenarios":
+                    return "EcospaceScenarios";
+                case "ecospace_group_inputs":
+                    return "EcospaceGroupInputs";
+                case "ecospace_fleet_inputs":
+                    return "EcospaceFleetInputs";
+                case "ecospace_group_outputs":
+                    return "EcospaceGroupOutput";
+                case "ecospace_fleet_outputs":
+                    return "EcospaceFleetOutput";
+                case "ecospace_habitats":
+                    return "EcospaceHabitats";
+                case "ecospace_mpas":
+                    return "EcospaceMPAs";
+                case "ecospace_region_outputs":
+                    return "EcospaceRegionOutput";
+                case "ecotracer_scenarios":
+                    return "EcotracerScenarios";
+                case "ecotracer_group_inputs":
+                    return "EcotracerGroupInputs";
+                case "taxa":
+                    return "Taxon";
+                default:
+                    throw new EwEMcpException("unknown_domain", $"Unknown indexed domain: {normalizedDomain}");
+            }
+        }
+
+        private JObject ReadScalarValues(object entity, string[] requestedVariables, bool includeErrors, string domain)
+        {
+            var result = new JObject();
+            if (entity == null)
+            {
+                return result;
+            }
+
+            if (requestedVariables != null && requestedVariables.Length > 0)
+            {
+                foreach (var variable in requestedVariables)
+                {
+                    var property = FindReadableProperty(entity, variable, domain);
+                    if (property == null)
+                    {
+                        if (includeErrors)
+                        {
+                            result[variable] = new JObject { ["error"] = "unknown_variable" };
+                        }
+                        continue;
+                    }
+                    result[variable] = ReadPropertyValue(entity, property);
+                }
+                return result;
+            }
+
+            foreach (var property in GetReadableProperties(entity)
+                         .Where(p => p.GetIndexParameters().Length == 0 && IsValueLikeType(p.PropertyType)))
+            {
+                result[ToVariableName(property.Name)] = ReadPropertyValue(entity, property);
+            }
+            return result;
+        }
+
+        private static JToken ReadPropertyValue(object entity, PropertyInfo property)
+        {
+            try
+            {
+                return ToJToken(property.GetValue(entity, null));
+            }
+            catch (Exception ex)
+            {
+                return new JObject
+                {
+                    ["error"] = "read_failed",
+                    ["message"] = ex.Message
+                };
+            }
+        }
+
+        private static IEnumerable<PropertyInfo> GetReadableProperties(object entity)
+        {
+            if (entity == null)
+            {
+                return Enumerable.Empty<PropertyInfo>();
+            }
+
+            return entity.GetType()
+                .GetProperties(BindingFlags.Instance | BindingFlags.Public)
+                .Where(p => p.CanRead)
+                .OrderBy(p => p.Name)
+                .ThenBy(p => p.GetIndexParameters().Length);
+        }
+
+        private static JObject PropertyMetadata(PropertyInfo property, string domain)
+        {
+            var indexParameters = property.GetIndexParameters();
+            return new JObject
+            {
+                ["name"] = ToVariableName(property.Name),
+                ["property"] = property.Name,
+                ["domain"] = domain ?? string.Empty,
+                ["type"] = FriendlyTypeName(property.PropertyType),
+                ["readable"] = property.CanRead,
+                ["writable"] = property.CanWrite && indexParameters.Length == 0,
+                ["indexed"] = indexParameters.Length > 0,
+                ["index_count"] = indexParameters.Length
+            };
+        }
+
+        private static PropertyInfo FindReadableProperty(object entity, string variable, string domain)
+        {
+            if (entity == null)
+            {
+                return null;
+            }
+
+            var alias = AliasPropertyName(variable, domain);
+            return GetReadableProperties(entity)
+                .Where(p => p.GetIndexParameters().Length == 0)
+                .FirstOrDefault(p =>
+                    string.Equals(p.Name, alias, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(NormalizeVariableName(p.Name), NormalizeVariableName(alias), StringComparison.OrdinalIgnoreCase));
+        }
+
+        private static PropertyInfo FindWritableProperty(object entity, string variable, string domain)
+        {
+            var alias = AliasPropertyName(variable, domain);
+            return GetReadableProperties(entity)
+                .Where(p => p.CanWrite && p.GetIndexParameters().Length == 0)
+                .FirstOrDefault(p =>
+                    string.Equals(p.Name, alias, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(NormalizeVariableName(p.Name), NormalizeVariableName(alias), StringComparison.OrdinalIgnoreCase));
+        }
+
+        private static string AliasPropertyName(string variable, string domain)
+        {
+            var key = (variable ?? string.Empty).Trim().ToLowerInvariant();
+            switch (key)
+            {
+                case "biomass_area":
+                    return domain == "ecopath_group_outputs" ? "BiomassArea" : "BiomassAreaInput";
+                case "pb":
+                    return "PBInput";
+                case "qb":
+                    return "QBInput";
+                case "ee":
+                    return "EEInput";
+                case "name":
+                    return "Name";
+                default:
+                    return variable;
+            }
+        }
+
+        private static string ToVariableName(string propertyName)
+        {
+            if (string.IsNullOrWhiteSpace(propertyName))
+            {
+                return string.Empty;
+            }
+
+            var chars = new List<char>();
+            for (var i = 0; i < propertyName.Length; i++)
+            {
+                var c = propertyName[i];
+                if (i > 0 && char.IsUpper(c) && (char.IsLower(propertyName[i - 1]) || char.IsDigit(propertyName[i - 1])))
+                {
+                    chars.Add('_');
+                }
+                chars.Add(char.ToLowerInvariant(c));
+            }
+            return new string(chars.ToArray());
+        }
+
+        private static string NormalizeVariableName(string value)
+        {
+            return new string((value ?? string.Empty)
+                .Where(char.IsLetterOrDigit)
+                .Select(char.ToLowerInvariant)
+                .ToArray());
+        }
+
+        private static bool IsValueLikeType(Type type)
+        {
+            if (type == null)
+            {
+                return false;
+            }
+            if (type.IsArray)
+            {
+                return IsValueLikeType(type.GetElementType());
+            }
+            var t = Nullable.GetUnderlyingType(type) ?? type;
+            return t.IsPrimitive || t.IsEnum || t == typeof(string) || t == typeof(decimal) || t == typeof(DateTime);
+        }
+
+        private static string FriendlyTypeName(Type type)
+        {
+            if (type == null)
+            {
+                return string.Empty;
+            }
+            if (type.IsArray)
+            {
+                return $"{FriendlyTypeName(type.GetElementType())}[]";
+            }
+            return (Nullable.GetUnderlyingType(type) ?? type).Name;
+        }
+
         private JObject ExecuteEweCode(JObject parameters)
         {
             if (!_config.EnableEval)
@@ -907,18 +1515,9 @@ namespace EwE_MCP_Plugin
             if (obj == null) return false;
             try
             {
-                var property = obj.GetType().GetProperty(propertyName, BindingFlags.Instance | BindingFlags.Public);
+                var property = FindWritableProperty(obj, propertyName, null);
                 if (property == null || !property.CanWrite) return false;
-
-                object convertedValue;
-                if (value is JToken token)
-                {
-                    convertedValue = token.ToObject(property.PropertyType);
-                }
-                else
-                {
-                    convertedValue = Convert.ChangeType(value, property.PropertyType);
-                }
+                if (!TryConvertValue(value, property.PropertyType, out var convertedValue)) return false;
 
                 property.SetValue(obj, convertedValue, null);
                 return true;
@@ -958,6 +1557,35 @@ namespace EwE_MCP_Plugin
                 throw new EwEMcpException("missing_parameter", $"Missing required integer parameter: {name}");
             }
             return value;
+        }
+
+        private static int? OptionalInt(JObject parameters, string name)
+        {
+            var token = parameters?[name];
+            if (token == null || token.Type == JTokenType.Null || string.IsNullOrWhiteSpace(token.ToString()))
+            {
+                return null;
+            }
+            if (!int.TryParse(token.ToString(), out var value))
+            {
+                throw new EwEMcpException("invalid_parameter", $"Parameter must be an integer: {name}");
+            }
+            return value;
+        }
+
+        private static string[] OptionalStringArray(JObject parameters, string name)
+        {
+            var token = parameters?[name];
+            if (token == null || token.Type == JTokenType.Null)
+            {
+                return null;
+            }
+            if (token is JArray arr)
+            {
+                return arr.Select(t => t.ToString()).Where(s => !string.IsNullOrWhiteSpace(s)).ToArray();
+            }
+            var value = token.ToString();
+            return string.IsNullOrWhiteSpace(value) ? null : new[] { value };
         }
 
         private static JObject GetPluginAssemblyInfo()
@@ -1065,7 +1693,44 @@ namespace EwE_MCP_Plugin
 
         private static JToken ToJToken(object value)
         {
-            return value == null ? JValue.CreateNull() : JToken.FromObject(value);
+            try
+            {
+                return value == null ? JValue.CreateNull() : JToken.FromObject(value);
+            }
+            catch (Exception ex)
+            {
+                return new JObject
+                {
+                    ["error"] = "serialization_failed",
+                    ["message"] = ex.Message,
+                    ["type"] = value?.GetType().FullName ?? string.Empty
+                };
+            }
+        }
+
+        private static bool TryConvertValue(object value, Type targetType, out object convertedValue)
+        {
+            convertedValue = null;
+            try
+            {
+                var t = Nullable.GetUnderlyingType(targetType) ?? targetType;
+                if (value is JToken token)
+                {
+                    convertedValue = token.ToObject(t);
+                    return true;
+                }
+                if (t.IsEnum)
+                {
+                    convertedValue = Enum.Parse(t, value.ToString(), true);
+                    return true;
+                }
+                convertedValue = Convert.ChangeType(value, t);
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         private static bool IsNonZero(object value)
@@ -1083,6 +1748,20 @@ namespace EwE_MCP_Plugin
             {
                 return false;
             }
+        }
+
+        private sealed class EntityTarget
+        {
+            public EntityTarget(string normalizedDomain, object entity, int? index)
+            {
+                NormalizedDomain = normalizedDomain;
+                Entity = entity;
+                Index = index;
+            }
+
+            public string NormalizedDomain { get; }
+            public object Entity { get; }
+            public int? Index { get; }
         }
     }
 }

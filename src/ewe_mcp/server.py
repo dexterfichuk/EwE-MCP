@@ -182,6 +182,53 @@ async def list_entities(domain: str) -> dict[str, Any]:
 
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+async def get_entity(domain: str, index: int | None = None) -> dict[str, Any]:
+    """Get one entity from a supported EwE domain."""
+    params: dict[str, Any] = {"domain": domain}
+    if index is not None:
+        params["index"] = index
+    return await _send("get_entity", params)
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+async def list_variables(domain: str, index: int | None = None) -> dict[str, Any]:
+    """List readable/writable variables exposed by an EwE entity domain."""
+    params: dict[str, Any] = {"domain": domain}
+    if index is not None:
+        params["index"] = index
+    return await _send("list_variables", params)
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+async def get_variable_metadata(domain: str, variable: str, index: int | None = None) -> dict[str, Any]:
+    """Get metadata for one variable on an EwE entity domain."""
+    params: dict[str, Any] = {"domain": domain, "variable": variable}
+    if index is not None:
+        params["index"] = index
+    return await _send("get_variable_metadata", params)
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+async def get_values(domain: str, index: int | None = None, variables: list[str] | None = None) -> dict[str, Any]:
+    """Read values from an EwE entity. Omit variables to read all scalar/simple array values."""
+    params: dict[str, Any] = {"domain": domain}
+    if index is not None:
+        params["index"] = index
+    if variables is not None:
+        params["variables"] = variables
+    return await _send("get_values", params)
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+async def validate_values(domain: str, values: dict[str, Any], index: int | None = None) -> dict[str, Any]:
+    """Validate proposed values against writable EwE entity properties without mutating."""
+    params: dict[str, Any] = {"domain": domain, "values": values}
+    if index is not None:
+        params["index"] = index
+    return await _send("validate_values", params)
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
 async def list_ecopath_groups() -> dict[str, Any]:
     """List Ecopath functional groups with key read-only input/output values."""
     return await _send("list_ecopath_groups")
@@ -231,7 +278,7 @@ async def refresh_ui() -> dict[str, Any]:
 
 @mcp.tool()
 async def set_values(domain: str, index: int, values: dict[str, Any]) -> dict[str, Any]:
-    """Set values for an EwE entity and refresh the UI. Supported domains: ecopath_group."""
+    """Set values for an EwE entity and refresh the UI. Supported domains: ecopath_group, ecopath_fleet."""
     result = await _send("set_values", {"domain": domain, "index": index, "values": values}, timeout=TIMEOUT_LONG)
     # Automatically refresh UI after setting values
     await refresh_ui()

@@ -12,6 +12,7 @@ Build EwE MCP as a separate plugin-first project in `/Users/dexterfichuk/Project
 ### Completed
 - Created the standalone project, separate from the EwE source tree.
 - Created and pushed a private GitHub repository: `https://github.com/dexterfichuk/EwE-MCP`.
+- Reviewed merged PR work through `main` at commit `3ccb962`.
 - Implemented the first C# plugin vertical slice in `src/EwE_MCP_Plugin`.
 - Implemented `IPlugin`, `IUIContextPlugin`, and `IDisposedPlugin` against the installed EwE plugin API.
 - Captured live EwE runtime references: `cCore`, `cUIContext`, `cCommandHandler`, and `SynchronizationContext`.
@@ -39,6 +40,11 @@ Build EwE MCP as a separate plugin-first project in `/Users/dexterfichuk/Project
   - `get_core_counters`
   - `list_domains`
   - `list_entities`
+  - `get_entity`
+  - `list_variables`
+  - `get_variable_metadata`
+  - `get_values`
+  - `validate_values`
   - `list_ecopath_groups`
   - `get_ecopath_group`
   - `list_ecopath_fleets`
@@ -46,16 +52,58 @@ Build EwE MCP as a separate plugin-first project in `/Users/dexterfichuk/Project
   - `run_ecopath`
   - `run_ecosim`
   - `stop_ecosim`
+  - `refresh_ui`
+  - `set_values`
   - `batch`
-  - Implemented `batch_commands`
-  - Implemented `refresh_ui` (FormMain.Refresh and ~navigate)
-  - Implemented `set_values` (ecopath_group, ecopath_fleet) with automatic UI refresh
-  - Implemented `execute_ewe_code` with nested property and method support (gated by EWE_MCP_ENABLE_EVAL=1)
-  - Implemented Python package in `src/ewe_mcp`.
-
+  - `batch_commands`
+  - gated limited `execute_ewe_code`
+- Implemented `refresh_ui` using `FormMain.Refresh` and a best-effort `~navigate` invoke.
+- Implemented `set_values` for `ecopath_group` and `ecopath_fleet`.
+- Implemented Python-side automatic UI refresh after `set_values`.
+- Implemented generic reflection-backed entity/value tools:
+  - `get_entity`
+  - `list_variables`
+  - `get_variable_metadata`
+  - `get_values`
+  - `validate_values`
+- Expanded `list_domains`/`list_entities` beyond Ecopath to cover generic domains:
+  - `ecopath_groups`
+  - `ecopath_group_outputs`
+  - `ecopath_fleets`
+  - `ecopath_fleet_outputs`
+  - `ecosim_scenarios`
+  - `ecosim_group_inputs`
+  - `ecosim_group_outputs`
+  - `ecosim_fleet_inputs`
+  - `ecosim_fleet_outputs`
+  - `ecospace_scenarios`
+  - `ecospace_group_inputs`
+  - `ecospace_fleet_inputs`
+  - `ecospace_group_outputs`
+  - `ecospace_fleet_outputs`
+  - `ecospace_habitats`
+  - `ecospace_mpas`
+  - `ecospace_region_outputs`
+  - `ecotracer_scenarios`
+  - `ecotracer_group_inputs`
+  - `taxa`
+  - `core`
+  - `ui_commands`
+- Generic `list_entities` now degrades per entity with structured errors when EwE reports a count but the collection object is unavailable until a subsystem/scenario is initialized.
+- Implemented a limited gated `execute_ewe_code` reflection helper:
+  - disabled unless `EWE_MCP_ENABLE_EVAL=1`
+  - supports `Core.Property`
+  - supports `Core.Property = Value`
+  - supports `Core.Method()`
+  - supports simple nested property/method paths
+- Implemented Python package in `src/ewe_mcp`.
 - Implemented Python socket client and FastMCP server skeleton.
+- Added structured Python client error type `EwEMCPError` with plugin error code/message preservation.
 - Exposed initial Python tools and resources, including `ewe://state` and `ewe://commands`.
 - Added Python protocol/helper tests.
+- Added edge-case tests for structured errors, batch blocking, unknown commands, invalid paths, and mutation validation.
+- Added mutation tests for group/fleet name updates and eval-disabled behavior.
+- Live tests are skipped by default and enabled with `EWE_LIVE_TESTS=1`.
 - Added VM build workflow using `sshpass -e`, without committing credentials.
 - Confirmed the Windows VM has EwE installed at:
   `C:\Program Files (x86)\Ecopath with Ecosim 40 years 6.7.0.18865_32-bit`
@@ -71,6 +119,13 @@ Build EwE MCP as a separate plugin-first project in `/Users/dexterfichuk/Project
   - group summaries with biomass/PB/QB/EE input values
   - group detail with non-zero diet entries
   - fleet detail with non-zero landings/discards by group
+- Confirmed live generic value inspection against `Tampa_Bay.EwEmdb`:
+  - `list_domains` returns 22 domains
+  - `list_variables` returns 77 variables for Ecopath group inputs
+  - `get_values` reads scalar values and simple arrays, including `diet_comp`, fleet `landings`, and fleet `discards`
+  - `validate_values` validates writable values and rejects unknown/read-only values without mutation
+  - Ecosim and Ecospace scenario domains return live scenario entities
+  - unavailable subsystem collections return per-entity `entity_unavailable` errors instead of failing full-domain discovery
 - Added helper scripts:
   - `scripts/build-plugin-vm.sh`
   - `scripts/deploy-built-plugin-vm.sh`
@@ -86,8 +141,143 @@ SSHPASS=... ./scripts/launch-ewe-vm.sh
 SSHPASS=... ./scripts/vm-live-smoke.sh
 ```
 
+Current local test expectation:
+
+```text
+5 passed, 9 skipped
+```
+
+The skipped tests are live EwE integration tests. Run them only when the VM plugin is deployed, EwE is launched, and a tunnel or direct connection is configured.
+
 ### Important Discovery
 Do not launch the EwE GUI directly from the SSH service session for live testing. EwE may start and then exit before the socket remains available. Use `scripts/launch-ewe-vm.sh`, which launches EwE through an interactive scheduled task in the logged-in Windows desktop session.
+
+## Agent VM Setup Runbook
+
+Use this section when a new agent needs a working EwE MCP environment with the Windows VM.
+
+### 1. Confirm Clean Local State
+Do not overwrite untracked or user-created files. Start with:
+
+```bash
+cd /Users/dexterfichuk/Projects/EwE-MCP
+git status --short --branch
+git fetch origin
+git log --oneline --decorate --max-count=12
+```
+
+If local tracked files are modified, inspect before editing. If only untracked scratch files are present, leave them alone unless the user asks otherwise.
+
+### 2. Local Python Environment
+Run the default test suite first. These tests do not require live EwE by default.
+
+```bash
+uv sync
+uv run pytest
+```
+
+Expected baseline at the time of this update:
+
+```text
+5 passed, 9 skipped
+```
+
+### 3. VM Environment Variables
+Use the password only through the shell environment. Never write it into tracked files.
+
+```bash
+export SSHPASS='...'
+export EWE_VM_HOST=192.168.64.2
+export EWE_VM_USER=dexter
+export EWE_VM_EWE_DIR='C:\Program Files (x86)\Ecopath with Ecosim 40 years 6.7.0.18865_32-bit'
+export EWE_MCP_TOKEN=ewe-mcp-local-dev
+```
+
+Optional defaults:
+
+```bash
+export EWE_BUILD_CONFIGURATION=Release
+export EWE_BUILD_PLATFORM=x86
+export EWE_MCP_LOCAL_TUNNEL_PORT=19877
+export EWE_MCP_REMOTE_PORT=9877
+export EWE_MODEL_PATH='C:\Users\dexter\Eii.Ecopath\Database\Tampa_Bay.EwEmdb'
+```
+
+### 4. Build, Deploy, Launch
+Build on the Windows VM against the installed EwE binaries, then deploy into the installed EwE `Plugins` folder.
+
+```bash
+./scripts/build-plugin-vm.sh
+./scripts/deploy-built-plugin-vm.sh
+./scripts/launch-ewe-vm.sh
+```
+
+Notes:
+
+- `deploy-built-plugin-vm.sh` stops `ewe6.exe` by default to avoid Windows DLL locks.
+- `launch-ewe-vm.sh` starts EwE via an interactive scheduled task. This is required for a stable GUI/plugin process.
+- A healthy launch shows `TcpTestSucceeded True` for `127.0.0.1:9877`.
+
+### 5. Smoke Test Through SSH Tunnel
+Run the script:
+
+```bash
+./scripts/vm-live-smoke.sh
+```
+
+This opens a temporary local tunnel from `127.0.0.1:19877` to the VM plugin at `127.0.0.1:9877` and checks:
+
+- `ping`
+- `diagnose`
+- `get_ewe_info`
+- `list_domains`
+
+### 6. Run Live Tests
+Only run live tests after build/deploy/launch/smoke succeeds.
+
+```bash
+SSHPASS="$SSHPASS" sshpass -e ssh -f -N \
+  -L 19877:127.0.0.1:9877 \
+  -o StrictHostKeyChecking=no \
+  dexter@192.168.64.2
+
+EWE_MCP_HOST=127.0.0.1 \
+EWE_MCP_PORT=19877 \
+EWE_MCP_TOKEN=ewe-mcp-local-dev \
+EWE_LIVE_TESTS=1 \
+EWE_MODEL_PATH='C:\Users\dexter\Eii.Ecopath\Database\Tampa_Bay.EwEmdb' \
+uv run pytest
+```
+
+After live tests, close the tunnel:
+
+```bash
+pkill -f 'ssh.*19877:127.0.0.1:9877' || true
+```
+
+### 7. Manual Live Probe
+For a quick manual probe:
+
+```bash
+EWE_MCP_HOST=127.0.0.1 EWE_MCP_PORT=19877 uv run python - <<'PY'
+from ewe_mcp.client import EwEMCPClient
+
+client = EwEMCPClient()
+assert client.connect()
+print(client.command_result("ping"))
+print(client.command_result("load_model", {"path": r"C:\Users\dexter\Eii.Ecopath\Database\Tampa_Bay.EwEmdb"}, timeout=60))
+print(client.command_result("get_core_counters"))
+print(client.command_result("get_ecopath_group", {"index": 20}))
+client.disconnect()
+PY
+```
+
+### 8. Troubleshooting Checklist
+- If the plugin DLL cannot be copied, EwE is probably running. Run `./scripts/deploy-built-plugin-vm.sh`, which stops EwE by default.
+- If the port is closed after launch, check `%APPDATA%\Ecopath with Ecosim\EwE_MCP_Plugin.log` on the VM.
+- If EwE starts then exits, make sure it was launched with `./scripts/launch-ewe-vm.sh`, not direct SSH `Start-Process`.
+- If Python cannot connect, confirm the SSH tunnel and `EWE_MCP_HOST/EWE_MCP_PORT`.
+- If live tests mutate names, restore values or reload the sample model before leaving the VM for the next agent.
 
 ## Architecture
 
@@ -149,15 +339,16 @@ Do not launch the EwE GUI directly from the SSH service session for live testing
 - Implement robust `load_model`, `save_model_as`, `close_model`, and reload smoke tests against a copy of a sample model.
 - Expand read-only inspection tools beyond the completed group/fleet/diet/landings slice:
   stanzas, vulnerabilities, detritus fate, full diet matrix, remarks/statuses, and Ecopath balancing diagnostics.
-- Add safe mutation workflow:
+- Harden the safe mutation workflow:
   - copy sample model
-  - edit harmless value
+  - edit harmless value through `set_values`
   - validate
   - save as new file
   - close/reload
 
 ### Phase 3: Generic EwE Object And Variable Layer
-- Build a generic data layer around EwE’s variable APIs, likely including:
+- Initial generic reflection-backed entity/value reads are done for available domains.
+- Initial domain-specific mutation is done for Ecopath groups/fleets via `set_values`; the remaining deeper generic data layer should build around EwE’s variable APIs, likely including:
   - `cCoreInputOutputBase`
   - `eVarNameFlags`
   - `cVariableMetaData`
@@ -165,15 +356,12 @@ Do not launch the EwE GUI directly from the SSH service session for live testing
   - `SetVariable`
   - status and remark fields
   - entity IDs
-- Implement MCP tools:
-  - `list_domains`
-  - `list_entities`
-  - `get_entity`
-  - `list_variables`
-  - `get_variable_metadata`
-  - `get_values`
-  - `validate_values`
-  - `set_values`
+- Remaining MCP/value work:
+  - support indexed cell reads/writes such as a single `DietComp(prey)` or `Landings(group)` value
+  - expose EwE metadata/status/remarks from `cCoreInputOutputBase`
+  - initialize/load subsystem scenario data before reading unavailable Ecosim/Ecospace/Ecotracer collections
+  - add generic `set_values` support beyond Ecopath groups/fleets
+- Expand `set_values` beyond `ecopath_group` and `ecopath_fleet`
 - Add batch safety rules for mixed read/write command groups.
 
 ### Phase 4: Ecopath And Ecosim Control
@@ -230,18 +418,20 @@ Do not launch the EwE GUI directly from the SSH service session for live testing
   - export report-ready outputs
 
 ### Phase 7: Gated Power-User Escape Hatch
-- Implement `execute_ewe_code` only after named tools and the generic value layer are stable.
-- Keep it disabled by default.
-- Require token auth and `EWE_MCP_ENABLE_EVAL=1`.
-- Audit every eval request.
-- Prevent eval from being allowed in batches.
-- Document risk clearly.
+- A limited `execute_ewe_code` exists now. Remaining work is hardening, not initial implementation.
+- Keep it disabled by default and require token auth plus `EWE_MCP_ENABLE_EVAL=1`.
+- Keep it blocked from batches.
+- Add stricter allow/deny rules before broadening beyond simple `Core.*` reflection.
+- Audit every eval request and document risk clearly.
 
 ## Test Plan
 
 ### Current Passing Tests
 - Python framing/protocol tests.
 - Python helper/config tests.
+- Structured client error tests via `EwEMCPError`.
+- Edge-case tests for batch blocking, unknown commands, invalid model paths, invalid domains, out-of-range indices, and unknown mutation properties.
+- Mutation tests for Ecopath group/fleet names and disabled eval behavior.
 - Live VM smoke test for plugin startup and basic commands.
 - Live VM sample-model smoke test for Ecopath groups, diets, fleets, and counters.
 
@@ -277,11 +467,13 @@ Do not launch the EwE GUI directly from the SSH service session for live testing
   - eval disabled by default
   - destructive tools annotated
   - audit logs generated
+  - mutation restore/rollback leaves sample model clean
 
 ## Operational Notes
 - Main EwE source/reference tree: `/Users/dexterfichuk/Downloads/Eii.Ecopath-master`
 - Live Windows VM: `dexter@192.168.64.2`
 - Use `SSHPASS` for VM commands; do not write passwords to tracked files.
+- Default local tunnel for agents: `127.0.0.1:19877 -> VM 127.0.0.1:9877`
 - Installed EwE target on VM:
   `C:\Program Files (x86)\Ecopath with Ecosim 40 years 6.7.0.18865_32-bit`
 - Installed plugin target on VM:
