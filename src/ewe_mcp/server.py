@@ -223,6 +223,21 @@ async def stop_ecosim() -> dict[str, Any]:
     return await _send("stop_ecosim")
 
 
+@mcp.tool()
+async def refresh_ui() -> dict[str, Any]:
+    """Try to trigger a refresh of the EwE GUI to show updated values."""
+    return await _send("refresh_ui")
+
+
+@mcp.tool()
+async def set_values(domain: str, index: int, values: dict[str, Any]) -> dict[str, Any]:
+    """Set values for an EwE entity and refresh the UI. Supported domains: ecopath_group."""
+    result = await _send("set_values", {"domain": domain, "index": index, "values": values}, timeout=TIMEOUT_LONG)
+    # Automatically refresh UI after setting values
+    await refresh_ui()
+    return result
+
+
 @mcp.tool(
     description="Execute multiple EwE MCP commands in one round-trip. "
     "Blocked commands: execute_ewe_code, close_model.",

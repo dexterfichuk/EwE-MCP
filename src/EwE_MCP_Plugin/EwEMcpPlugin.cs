@@ -224,11 +224,15 @@ namespace EwE_MCP_Plugin
                     return OnUiThread(RunEcosim);
                 case "stop_ecosim":
                     return OnUiThread(StopEcosim);
+                case "refresh_ui":
+                    return OnUiThread(RefreshUI);
+                case "set_values":
+                    return OnUiThread(() => SetValues(request.Params));
                 case "batch":
                 case "batch_commands":
                     return OnUiThread(() => Batch(request.Params));
                 case "execute_ewe_code":
-                    return ExecuteEweCode();
+                    return OnUiThread(() => ExecuteEweCode(request.Params));
                 default:
                     throw new EwEMcpException("unknown_command", $"Unknown command type: {request.Type}");
             }
@@ -660,15 +664,271 @@ namespace EwE_MCP_Plugin
             return new JObject { ["results"] = results };
         }
 
-        private JObject ExecuteEweCode()
+        private JObject RefreshUI()
+        {
+            var uic = _uiContext();
+            if (uic == null) return new JObject { ["success"] = false, ["error"] = "UI context unavailable" };
+
+            var methodsTried = new JArray();
+            bool success = false;
+
+            // Try refreshing the Main Form
+            var formMain = SafeGetProperty(uic, "FormMain");
+            if (formMain != null)
+            {
+                var refreshMethod = formMain.GetType().GetMethod("Refresh", BindingFlags.Instance | BindingFlags.Public, null, Type.EmptyTypes, null);
+                if (refreshMethod != null)
+                {
+                    try
+                    {
+                        refreshMethod.Invoke(formMain, null);
+                        methodsTried.Add("FormMain.Refresh() invoked");
+                        success = true;
+                    }
+                    catch (Exception ex)
+                    {
+                        methodsTried.Add("FormMain.Refresh() failed: " + ex.Message);
+                    }
+                }
+            }
+
+            // Also try navigating to the current node if possible
+            var cmdh = _commandHandler();
+            if (cmdh != null)
+            {
+                var navigateCmd = cmdh.GetCommand("~navigate");
+                if (navigateCmd != null)
+                {
+                    // Invoking navigate without a tag often refreshes the current view
+                    try
+                    {
+                        navigateCmd.Invoke();
+                        methodsTried.Add("~navigate invoked");
+                        success = true;
+                    }
+                    catch { }
+                }
+            }
+
+            return new JObject
+            {
+                ["success"] = success,
+                ["methods_tried"] = methodsTried
+            };
+        }
+
+        private JObject SetValues(JObject parameters)
+        {
+            var domain = RequiredString(parameters, "domain").Trim().ToLowerInvariant();
+            var index = RequiredInt(parameters, "index");
+            var values = parameters["values"] as JObject ?? throw new EwEMcpException("missing_parameter", "Missing 'values' object");
+            var core = RequireCore();
+
+            switch (domain)
+            {
+                case "ecopath_group":
+                    return SetEcopathGroupValues(core, index, values);
+                case "ecopath_fleet":
+                    return SetEcopathFleetValues(core, index, values);
+                default:
+                    throw new EwEMcpException("unsupported_domain", $"Setting values for domain '{domain}' is not supported yet.");
+            }
+        }
+
+        private JObject SetEcopathGroupValues(cCore core, int index, JObject values)
+        {
+            var input = SafeGetIndexedProperty(core, "EcopathGroupInputs", index);
+            if (input == null) throw new EwEMcpException("index_out_of_range", $"Group index {index} not found.");
+
+            var results = new JObject();
+            foreach (var pair in values)
+            {
+                var key = pair.Key;
+                var value = pair.Value;
+
+                // Map common keys to EwE property names
+                string propertyName = null;
+                switch (key.ToLowerInvariant())
+                {
+                    case "name": propertyName = "Name"; break;
+                    case "biomass_area": propertyName = "BiomassAreaInput"; break;
+                    case "pb": propertyName = "PBInput"; break;
+                    case "qb": propertyName = "QBInput"; break;
+                    case "ee": propertyName = "EEInput"; break;
+                }
+
+                if (propertyName != null)
+                {
+                    if (SafeSetProperty(input, propertyName, value))
+                    {
+                        results[key] = "updated";
+                    }
+                    else
+                    {
+                        results[key] = "failed_to_set";
+                    }
+                }
+                else
+                {
+                    results[key] = "unknown_property";
+                }
+            }
+
+            return new JObject
+            {
+                ["index"] = index,
+                ["results"] = results
+            };
+        }
+
+        private JObject SetEcopathFleetValues(cCore core, int index, JObject values)
+        {
+            var fleet = SafeGetIndexedProperty(core, "EcopathFleetInputs", index);
+            if (fleet == null) throw new EwEMcpException("index_out_of_range", $"Fleet index {index} not found.");
+
+            var results = new JObject();
+            foreach (var pair in values)
+            {
+                var key = pair.Key;
+                var value = pair.Value;
+
+                string propertyName = null;
+                switch (key.ToLowerInvariant())
+                {
+                    case "name": propertyName = "Name"; break;
+                }
+
+                if (propertyName != null)
+                {
+                    if (SafeSetProperty(fleet, propertyName, value))
+                    {
+                        results[key] = "updated";
+                    }
+                    else
+                    {
+                        results[key] = "failed_to_set";
+                    }
+                }
+                else
+                {
+                    results[key] = "unknown_property";
+                }
+            }
+
+            return new JObject
+            {
+                ["index"] = index,
+                ["results"] = results
+            };
+        }
+
+        private JObject ExecuteEweCode(JObject parameters)
         {
             if (!_config.EnableEval)
             {
                 throw new EwEMcpException("eval_disabled", "execute_ewe_code is disabled. Set EWE_MCP_ENABLE_EVAL=1 to opt in.");
             }
 
-            throw new EwEMcpException("not_implemented", "execute_ewe_code is intentionally gated and has not been implemented in this vertical slice.");
+            var code = RequiredString(parameters, "code").Trim();
+            var core = RequireCore();
+
+            // Handle "Core.Property = Value"
+            if (code.StartsWith("Core.", StringComparison.OrdinalIgnoreCase) && code.Contains("="))
+            {
+                var parts = code.Split(new[] { '=' }, 2);
+                var path = parts[0].Trim().Substring(5); // Remove "Core."
+                var valStr = parts[1].Trim();
+
+                if (path.Contains("."))
+                {
+                    var pathParts = path.Split('.');
+                    var parent = SafeGetNestedProperty(core, pathParts.Take(pathParts.Length - 1));
+                    if (SafeSetProperty(parent, pathParts.Last(), valStr))
+                    {
+                        return new JObject { ["success"] = true, ["action"] = "set", ["path"] = path, ["value"] = valStr };
+                    }
+                }
+                else
+                {
+                    if (SafeSetProperty(core, path, valStr))
+                    {
+                        return new JObject { ["success"] = true, ["action"] = "set", ["property"] = path, ["value"] = valStr };
+                    }
+                }
+            }
+            // Handle "Core.Method()" or "Core.Property.Method()"
+            else if (code.EndsWith("()"))
+            {
+                var path = code.Substring(0, code.Length - 2);
+                object target = null;
+                string methodName = null;
+
+                if (path.StartsWith("Core.", StringComparison.OrdinalIgnoreCase))
+                {
+                    var pathParts = path.Substring(5).Split('.');
+                    target = pathParts.Length > 1 ? SafeGetNestedProperty(core, pathParts.Take(pathParts.Length - 1)) : core;
+                    methodName = pathParts.Last();
+                }
+
+                if (target != null && methodName != null)
+                {
+                    var method = target.GetType().GetMethod(methodName, BindingFlags.Instance | BindingFlags.Public, null, Type.EmptyTypes, null);
+                    if (method != null)
+                    {
+                        var res = method.Invoke(target, null);
+                        return new JObject { ["success"] = true, ["action"] = "invoke", ["method"] = methodName, ["result"] = ToJToken(res) };
+                    }
+                }
+            }
+            // Handle "Core.Property" (with nesting)
+            else if (code.StartsWith("Core.", StringComparison.OrdinalIgnoreCase))
+            {
+                var path = code.Substring(5);
+                var val = SafeGetNestedProperty(core, path.Split('.'));
+                return new JObject { ["success"] = true, ["action"] = "get", ["path"] = path, ["value"] = ToJToken(val) };
+            }
+
+            throw new EwEMcpException("not_implemented", "Complex execute_ewe_code is not implemented. Use 'Core.Prop', 'Core.Prop = Val', or 'Core.Method()'.");
         }
+
+        private object SafeGetNestedProperty(object obj, IEnumerable<string> path)
+        {
+            var current = obj;
+            foreach (var part in path)
+            {
+                current = SafeGetProperty(current, part);
+                if (current == null) return null;
+            }
+            return current;
+        }
+
+        private bool SafeSetProperty(object obj, string propertyName, object value)
+        {
+            if (obj == null) return false;
+            try
+            {
+                var property = obj.GetType().GetProperty(propertyName, BindingFlags.Instance | BindingFlags.Public);
+                if (property == null || !property.CanWrite) return false;
+
+                object convertedValue;
+                if (value is JToken token)
+                {
+                    convertedValue = token.ToObject(property.PropertyType);
+                }
+                else
+                {
+                    convertedValue = Convert.ChangeType(value, property.PropertyType);
+                }
+
+                property.SetValue(obj, convertedValue, null);
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
 
         private cCore RequireCore()
         {
