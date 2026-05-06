@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Reflection;
 using System.Threading;
 using EwECore;
@@ -103,6 +104,8 @@ namespace EwE_MCP_Plugin
     {
         private static readonly object Gate = new object();
 
+        public static string Path => GetPath();
+
         public static void Info(string message)
         {
             Write("INFO", message, null);
@@ -134,12 +137,12 @@ namespace EwE_MCP_Plugin
             var root = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
             if (string.IsNullOrWhiteSpace(root))
             {
-                root = Path.GetTempPath();
+                root = System.IO.Path.GetTempPath();
             }
 
-            var dir = Path.Combine(root, "Ecopath with Ecosim");
+            var dir = System.IO.Path.Combine(root, "Ecopath with Ecosim");
             Directory.CreateDirectory(dir);
-            return Path.Combine(dir, "EwE_MCP_Plugin.log");
+            return System.IO.Path.Combine(dir, "EwE_MCP_Plugin.log");
         }
     }
 
@@ -203,6 +206,18 @@ namespace EwE_MCP_Plugin
                     return GetModelInfo();
                 case "get_core_counters":
                     return GetCoreCounters();
+                case "list_domains":
+                    return ListDomains();
+                case "list_entities":
+                    return ListEntities(request.Params);
+                case "list_ecopath_groups":
+                    return ListEcopathGroups();
+                case "get_ecopath_group":
+                    return GetEcopathGroup(request.Params);
+                case "list_ecopath_fleets":
+                    return ListEcopathFleets();
+                case "get_ecopath_fleet":
+                    return GetEcopathFleet(request.Params);
                 case "run_ecopath":
                     return OnUiThread(RunEcopath);
                 case "run_ecosim":
@@ -260,11 +275,13 @@ namespace EwE_MCP_Plugin
                     Check("core", core != null, core?.GetType().FullName),
                     Check("ui_context", uic != null, uic?.GetType().FullName),
                     Check("command_handler", cmdh != null, cmdh?.GetType().FullName),
+                    Check("plugin_log", File.Exists(EwEMcpFileLog.Path), EwEMcpFileLog.Path),
                     Check("token", !string.IsNullOrWhiteSpace(_config.Token), _config.UsingDefaultToken ? "default development token" : "configured"),
                     Check("eval_enabled", _config.EnableEval, _config.EnableEval ? "enabled" : "disabled")
                 },
                 ["host"] = _config.Host,
-                ["port"] = _config.Port
+                ["port"] = _config.Port,
+                ["plugin"] = GetPluginAssemblyInfo()
             };
         }
 
@@ -287,7 +304,10 @@ namespace EwE_MCP_Plugin
                 ["core_type"] = core.GetType().FullName,
                 ["core_assembly"] = asm.GetName().Name,
                 ["core_version"] = asm.GetName().Version?.ToString(),
-                ["app_domain"] = AppDomain.CurrentDomain.FriendlyName
+                ["core_location"] = asm.Location,
+                ["app_domain"] = AppDomain.CurrentDomain.FriendlyName,
+                ["base_directory"] = AppDomain.CurrentDomain.BaseDirectory,
+                ["plugin"] = GetPluginAssemblyInfo()
             };
         }
 
@@ -320,9 +340,16 @@ namespace EwE_MCP_Plugin
         {
             var core = RequireCore();
             var result = new JObject();
-            var enumType = core.GetType().Assembly.GetType("EwECore.eCoreCounterTypes");
+            var method = core.GetType().GetMethods()
+                .FirstOrDefault(m => m.Name == "GetCoreCounter" && m.GetParameters().Length == 1 && m.GetParameters()[0].ParameterType.IsEnum);
+            var enumType = method?.GetParameters()[0].ParameterType;
             if (enumType == null)
             {
+                result["nGroups"] = SafeIntProperty(core, "nGroups");
+                result["nLivingGroups"] = SafeIntProperty(core, "nLivingGroups");
+                result["nFleets"] = SafeIntProperty(core, "nFleets");
+                result["nDetritus"] = SafeIntProperty(core, "nDetritus");
+                result["nEcosimYears"] = SafeIntProperty(core, "nEcosimYears");
                 return result;
             }
 
@@ -330,11 +357,6 @@ namespace EwE_MCP_Plugin
             {
                 try
                 {
-                    var method = core.GetType().GetMethod("GetCoreCounter", new[] { enumType });
-                    if (method == null)
-                    {
-                        continue;
-                    }
                     var count = method.Invoke(core, new[] { value });
                     result[value.ToString()] = count == null ? JValue.CreateNull() : JToken.FromObject(count);
                 }
@@ -343,6 +365,186 @@ namespace EwE_MCP_Plugin
                     // Some counters may not be valid in every runtime state.
                 }
             }
+            return result;
+        }
+
+        private JObject ListDomains()
+        {
+            return new JObject
+            {
+                ["domains"] = new JArray
+                {
+                    Domain("ecopath_groups", "Ecopath functional groups and read-only Ecopath input/output values", true, true),
+                    Domain("ecopath_fleets", "Ecopath fleets with landings/discards by group", true, true),
+                    Domain("ui_commands", "Commands registered with EwE's UI command handler", true, true)
+                }
+            };
+        }
+
+        private static JObject Domain(string name, string description, bool readable, bool implemented)
+        {
+            return new JObject
+            {
+                ["name"] = name,
+                ["description"] = description,
+                ["readable"] = readable,
+                ["implemented"] = implemented
+            };
+        }
+
+        private JObject ListEntities(JObject parameters)
+        {
+            var domain = RequiredString(parameters, "domain").Trim().ToLowerInvariant();
+            switch (domain)
+            {
+                case "ecopath_groups":
+                    return ListEcopathGroups();
+                case "ecopath_fleets":
+                    return ListEcopathFleets();
+                case "ui_commands":
+                    return ListUiCommands();
+                default:
+                    throw new EwEMcpException("unknown_domain", $"Unknown domain: {domain}");
+            }
+        }
+
+        private JObject ListEcopathGroups()
+        {
+            var core = RequireCore();
+            var groups = new JArray();
+            var count = SafeIntProperty(core, "nGroups");
+            var livingCount = SafeIntProperty(core, "nLivingGroups");
+            for (var i = 1; i <= count; i++)
+            {
+                groups.Add(BuildEcopathGroup(core, i, false));
+            }
+
+            return new JObject
+            {
+                ["groups"] = groups,
+                ["total_count"] = count,
+                ["living_count"] = livingCount
+            };
+        }
+
+        private JObject GetEcopathGroup(JObject parameters)
+        {
+            var index = RequiredInt(parameters, "index");
+            var core = RequireCore();
+            var count = SafeIntProperty(core, "nGroups");
+            if (index < 1 || index > count)
+            {
+                throw new EwEMcpException("index_out_of_range", $"Group index {index} is outside 1..{count}");
+            }
+            return BuildEcopathGroup(core, index, true);
+        }
+
+        private JObject BuildEcopathGroup(cCore core, int index, bool includeDiet)
+        {
+            var input = SafeGetIndexedProperty(core, "EcopathGroupInputs", index);
+            var output = SafeGetIndexedProperty(core, "EcopathGroupOutputs", index);
+            var group = new JObject
+            {
+                ["index"] = index,
+                ["name"] = SafeStringProperty(input, "Name"),
+                ["type"] = GroupType(input),
+                ["is_living"] = !SafeBoolProperty(input, "IsDetritus"),
+                ["input"] = new JObject
+                {
+                    ["biomass_area"] = SafeJTokenProperty(input, "BiomassAreaInput"),
+                    ["pb"] = SafeJTokenProperty(input, "PBInput"),
+                    ["qb"] = SafeJTokenProperty(input, "QBInput"),
+                    ["ee"] = SafeJTokenProperty(input, "EEInput")
+                },
+                ["output"] = new JObject
+                {
+                    ["biomass"] = SafeJTokenProperty(output, "Biomass"),
+                    ["biomass_area"] = SafeJTokenProperty(output, "BiomassArea")
+                }
+            };
+
+            if (includeDiet)
+            {
+                var diet = new JArray();
+                var preyCount = SafeIntProperty(core, "nGroups");
+                for (var prey = 1; prey <= preyCount; prey++)
+                {
+                    var amount = SafeGetIndexedProperty(input, "DietComp", prey);
+                    if (IsNonZero(amount))
+                    {
+                        var preyInput = SafeGetIndexedProperty(core, "EcopathGroupInputs", prey);
+                        diet.Add(new JObject
+                        {
+                            ["prey_index"] = prey,
+                            ["prey_name"] = SafeStringProperty(preyInput, "Name"),
+                            ["amount"] = ToJToken(amount)
+                        });
+                    }
+                }
+                group["diet"] = diet;
+            }
+
+            return group;
+        }
+
+        private JObject ListEcopathFleets()
+        {
+            var core = RequireCore();
+            var fleets = new JArray();
+            var count = SafeIntProperty(core, "nFleets");
+            for (var i = 1; i <= count; i++)
+            {
+                fleets.Add(BuildEcopathFleet(core, i, false));
+            }
+            return new JObject { ["fleets"] = fleets, ["total_count"] = count };
+        }
+
+        private JObject GetEcopathFleet(JObject parameters)
+        {
+            var index = RequiredInt(parameters, "index");
+            var core = RequireCore();
+            var count = SafeIntProperty(core, "nFleets");
+            if (index < 1 || index > count)
+            {
+                throw new EwEMcpException("index_out_of_range", $"Fleet index {index} is outside 1..{count}");
+            }
+            return BuildEcopathFleet(core, index, true);
+        }
+
+        private JObject BuildEcopathFleet(cCore core, int index, bool includeCatchByGroup)
+        {
+            var fleet = SafeGetIndexedProperty(core, "EcopathFleetInputs", index);
+            var result = new JObject
+            {
+                ["index"] = index,
+                ["name"] = SafeStringProperty(fleet, "Name")
+            };
+
+            if (includeCatchByGroup)
+            {
+                var catches = new JArray();
+                var groupCount = SafeIntProperty(core, "nGroups");
+                for (var groupIndex = 1; groupIndex <= groupCount; groupIndex++)
+                {
+                    var landings = SafeGetIndexedProperty(fleet, "Landings", groupIndex);
+                    var discards = SafeGetIndexedProperty(fleet, "Discards", groupIndex);
+                    if (!IsNonZero(landings) && !IsNonZero(discards))
+                    {
+                        continue;
+                    }
+
+                    var group = SafeGetIndexedProperty(core, "EcopathGroupInputs", groupIndex);
+                    catches.Add(new JObject
+                    {
+                        ["group_index"] = groupIndex,
+                        ["group_name"] = SafeStringProperty(group, "Name"),
+                        ["landings"] = ToJToken(landings),
+                        ["discards"] = ToJToken(discards)
+                    });
+                }
+                result["catch_by_group"] = catches;
+            }
+
             return result;
         }
 
@@ -441,9 +643,10 @@ namespace EwE_MCP_Plugin
             foreach (var item in commands)
             {
                 var type = item?["type"]?.ToString();
-                if (string.Equals(type, "execute_ewe_code", StringComparison.OrdinalIgnoreCase))
+                if (string.Equals(type, "execute_ewe_code", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(type, "close_model", StringComparison.OrdinalIgnoreCase))
                 {
-                    throw new EwEMcpException("blocked_batch_command", "execute_ewe_code is not allowed in batch");
+                    throw new EwEMcpException("blocked_batch_command", $"{type} is not allowed in batch");
                 }
                 var child = new EwEMcpRequest
                 {
@@ -487,13 +690,139 @@ namespace EwE_MCP_Plugin
             return value;
         }
 
+        private static int RequiredInt(JObject parameters, string name)
+        {
+            var token = parameters?[name];
+            if (token == null || !int.TryParse(token.ToString(), out var value))
+            {
+                throw new EwEMcpException("missing_parameter", $"Missing required integer parameter: {name}");
+            }
+            return value;
+        }
+
+        private static JObject GetPluginAssemblyInfo()
+        {
+            var asm = typeof(EwEMcpPlugin).Assembly;
+            return new JObject
+            {
+                ["assembly"] = asm.GetName().Name,
+                ["version"] = asm.GetName().Version?.ToString(),
+                ["location"] = asm.Location,
+                ["log_path"] = EwEMcpFileLog.Path
+            };
+        }
+
+        private static string GroupType(object group)
+        {
+            if (SafeBoolProperty(group, "IsDetritus"))
+            {
+                return "detritus";
+            }
+            if (SafeBoolProperty(group, "IsProducer"))
+            {
+                return "producer";
+            }
+            if (SafeBoolProperty(group, "IsConsumer"))
+            {
+                return "consumer";
+            }
+            return "unknown";
+        }
+
         private static object SafeGetProperty(object obj, string propertyName)
         {
             if (obj == null)
             {
                 return null;
             }
-            return obj.GetType().GetProperty(propertyName, BindingFlags.Instance | BindingFlags.Public)?.GetValue(obj, null);
+
+            try
+            {
+                var property = obj.GetType()
+                    .GetProperties(BindingFlags.Instance | BindingFlags.Public)
+                    .FirstOrDefault(p => p.Name == propertyName && p.GetIndexParameters().Length == 0);
+                return property?.GetValue(obj, null);
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static object SafeGetIndexedProperty(object obj, string propertyName, int index)
+        {
+            if (obj == null)
+            {
+                return null;
+            }
+
+            try
+            {
+                var property = obj.GetType()
+                    .GetProperties(BindingFlags.Instance | BindingFlags.Public)
+                    .FirstOrDefault(p => p.Name == propertyName && p.GetIndexParameters().Length == 1);
+                return property?.GetValue(obj, new object[] { index });
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static string SafeStringProperty(object obj, string propertyName)
+        {
+            return SafeGetProperty(obj, propertyName)?.ToString() ?? string.Empty;
+        }
+
+        private static bool SafeBoolProperty(object obj, string propertyName)
+        {
+            var value = SafeGetProperty(obj, propertyName);
+            return value is bool boolValue && boolValue;
+        }
+
+        private static int SafeIntProperty(object obj, string propertyName)
+        {
+            var value = SafeGetProperty(obj, propertyName);
+            if (value == null)
+            {
+                return 0;
+            }
+
+            try
+            {
+                return Convert.ToInt32(value);
+            }
+            catch
+            {
+                return 0;
+            }
+        }
+
+        private static JToken SafeJTokenProperty(object obj, string propertyName)
+        {
+            return ToJToken(SafeGetProperty(obj, propertyName));
+        }
+
+        private static JToken ToJToken(object value)
+        {
+            return value == null ? JValue.CreateNull() : JToken.FromObject(value);
+        }
+
+        private static bool IsNonZero(object value)
+        {
+            if (value == null)
+            {
+                return false;
+            }
+
+            try
+            {
+                return Math.Abs(Convert.ToDouble(value)) > 0.0000001;
+            }
+            catch
+            {
+                return false;
+            }
         }
     }
 }

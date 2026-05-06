@@ -15,6 +15,7 @@ Implemented now:
 - EwE plugin lifecycle: `IPlugin`, `IUIContextPlugin`, `IDisposedPlugin`.
 - Core tools: `ping`, `diagnose`, `get_ewe_info`, `get_runtime_state`, `get_message_log`.
 - Model/run tools: `load_model`, `save_model`, `save_model_as`, `close_model`, `get_model_info`, `get_core_counters`, `run_ecopath`, `run_ecosim`, `stop_ecosim`.
+- Read-only Ecopath tools: `list_domains`, `list_entities`, `list_ecopath_groups`, `get_ecopath_group`, `list_ecopath_fleets`, `get_ecopath_fleet`.
 - UI command tools: `list_ui_commands`, `invoke_ui_command`.
 - Python MCP server, socket client, batch command guard, and protocol tests.
 
@@ -70,6 +71,12 @@ Launch EwE in the VM's interactive desktop session, then smoke-test the live plu
 ```
 
 Launching through an interactive scheduled task is intentional: starting the GUI directly from the SSH service session can exit before the socket stays available.
+
+The live Ecopath read-only smoke path has been verified with:
+
+```text
+C:\Users\dexter\Eii.Ecopath\Database\Tampa_Bay.EwEmdb
+```
 
 ## Run Python MCP Server
 

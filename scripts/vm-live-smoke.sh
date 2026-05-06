@@ -31,7 +31,7 @@ client = EwEMCPClient()
 if not client.connect():
     raise SystemExit("Could not connect to EwE MCP plugin through SSH tunnel")
 
-for command in ("ping", "diagnose", "get_ewe_info"):
+for command in ("ping", "diagnose", "get_ewe_info", "list_domains"):
     print(f"{command}: {client.command_result(command)}")
 
 client.disconnect()

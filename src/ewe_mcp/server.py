@@ -169,6 +169,42 @@ async def get_core_counters() -> dict[str, Any]:
     return await _send("get_core_counters")
 
 
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+async def list_domains() -> dict[str, Any]:
+    """List implemented EwE data domains."""
+    return await _send("list_domains")
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+async def list_entities(domain: str) -> dict[str, Any]:
+    """List entities for a supported EwE domain."""
+    return await _send("list_entities", {"domain": domain})
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+async def list_ecopath_groups() -> dict[str, Any]:
+    """List Ecopath functional groups with key read-only input/output values."""
+    return await _send("list_ecopath_groups")
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+async def get_ecopath_group(index: int) -> dict[str, Any]:
+    """Get one Ecopath functional group, including non-zero diet entries."""
+    return await _send("get_ecopath_group", {"index": index})
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+async def list_ecopath_fleets() -> dict[str, Any]:
+    """List Ecopath fishing fleets."""
+    return await _send("list_ecopath_fleets")
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+async def get_ecopath_fleet(index: int) -> dict[str, Any]:
+    """Get one Ecopath fleet, including non-zero landings/discards by group."""
+    return await _send("get_ecopath_fleet", {"index": index})
+
+
 @mcp.tool()
 async def run_ecopath() -> dict[str, Any]:
     """Run Ecopath mass balance."""
@@ -214,6 +250,16 @@ async def state_resource() -> str:
 @mcp.resource("ewe://commands")
 async def commands_resource() -> str:
     return str(await _send("list_ui_commands"))
+
+
+@mcp.resource("ewe://entities/ecopath_groups")
+async def ecopath_groups_resource() -> str:
+    return str(await _send("list_ecopath_groups"))
+
+
+@mcp.resource("ewe://entities/ecopath_fleets")
+async def ecopath_fleets_resource() -> str:
+    return str(await _send("list_ecopath_fleets"))
 
 
 def main() -> None:

@@ -37,6 +37,12 @@ Build EwE MCP as a separate plugin-first project in `/Users/dexterfichuk/Project
   - `close_model`
   - `get_model_info`
   - `get_core_counters`
+  - `list_domains`
+  - `list_entities`
+  - `list_ecopath_groups`
+  - `get_ecopath_group`
+  - `list_ecopath_fleets`
+  - `get_ecopath_fleet`
   - `run_ecopath`
   - `run_ecosim`
   - `stop_ecosim`
@@ -57,6 +63,11 @@ Build EwE MCP as a separate plugin-first project in `/Users/dexterfichuk/Project
   - `ping`
   - `diagnose`
   - `get_ewe_info`
+- Confirmed live Ecopath read-only inspection against `C:\Users\dexter\Eii.Ecopath\Database\Tampa_Bay.EwEmdb`:
+  - counters: 52 groups, 51 living groups, 7 fleets, 1 detritus group
+  - group summaries with biomass/PB/QB/EE input values
+  - group detail with non-zero diet entries
+  - fleet detail with non-zero landings/discards by group
 - Added helper scripts:
   - `scripts/build-plugin-vm.sh`
   - `scripts/deploy-built-plugin-vm.sh`
@@ -129,10 +140,12 @@ Do not launch the EwE GUI directly from the SSH service session for live testing
 - Add a `shutdown_server` or `restart_server` development-only command if useful.
 
 ### Phase 2: Model Inspection And Safe Model Workflow
-- Locate sample model files on the VM or in EwE install/source directories.
+- Locate sample model files on the VM or in EwE install/source directories. Initial sample located and verified:
+  `C:\Users\dexter\Eii.Ecopath\Database\Tampa_Bay.EwEmdb`
 - Implement `list_open_model_metadata`.
 - Implement robust `load_model`, `save_model_as`, `close_model`, and reload smoke tests against a copy of a sample model.
-- Add read-only inspection tools for groups, fleets, stanzas, vulnerabilities, diets, landings, and basic Ecopath inputs.
+- Expand read-only inspection tools beyond the completed group/fleet/diet/landings slice:
+  stanzas, vulnerabilities, detritus fate, full diet matrix, remarks/statuses, and Ecopath balancing diagnostics.
 - Add safe mutation workflow:
   - copy sample model
   - edit harmless value
@@ -227,6 +240,7 @@ Do not launch the EwE GUI directly from the SSH service session for live testing
 - Python framing/protocol tests.
 - Python helper/config tests.
 - Live VM smoke test for plugin startup and basic commands.
+- Live VM sample-model smoke test for Ecopath groups, diets, fleets, and counters.
 
 ### Next Tests To Add
 - Plugin routing tests with fake handlers where possible:
@@ -273,6 +287,8 @@ Do not launch the EwE GUI directly from the SSH service session for live testing
   `%APPDATA%\Ecopath with Ecosim\EwE_MCP_Plugin.log`
 - EwE log:
   `%APPDATA%\Ecopath with Ecosim\EwE6_log.xml`
+- Verified sample model:
+  `C:\Users\dexter\Eii.Ecopath\Database\Tampa_Bay.EwEmdb`
 
 ## Rollback
 The integration is optional and external. To disable it, close EwE and remove these files from the installed EwE `Plugins` folder:
