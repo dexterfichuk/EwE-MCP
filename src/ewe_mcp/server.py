@@ -223,6 +223,12 @@ async def stop_ecosim() -> dict[str, Any]:
     return await _send("stop_ecosim")
 
 
+@mcp.tool()
+async def set_values(domain: str, index: int, values: dict[str, Any]) -> dict[str, Any]:
+    """Set values for an EwE entity. Supported domains: ecopath_group."""
+    return await _send("set_values", {"domain": domain, "index": index, "values": values}, timeout=TIMEOUT_LONG)
+
+
 @mcp.tool(
     description="Execute multiple EwE MCP commands in one round-trip. "
     "Blocked commands: execute_ewe_code, close_model.",
