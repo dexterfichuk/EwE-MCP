@@ -8,6 +8,7 @@ VM_HOST="${EWE_VM_HOST:-192.168.64.2}"
 EWE_DIR="${EWE_VM_EWE_DIR:-C:\\Program Files (x86)\\Ecopath with Ecosim 40 years 6.7.0.18865_32-bit}"
 TASK_NAME="${EWE_VM_LAUNCH_TASK:-EwE-MCP-Launch}"
 REMOTE_SCRIPT="${EWE_VM_REMOTE_LAUNCH_SCRIPT:-C:/Users/dexter/ewe-mcp-launch.ps1}"
+SSH_OPTS=(-o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no)
 
 TMP_SCRIPT="$(mktemp)"
 trap 'rm -f "$TMP_SCRIPT"' EXIT
@@ -39,6 +40,6 @@ if (Test-Path \$log) {
 }
 PS
 
-sshpass -e scp -o StrictHostKeyChecking=no "$TMP_SCRIPT" "${VM_USER}@${VM_HOST}:$REMOTE_SCRIPT"
-sshpass -e ssh -o StrictHostKeyChecking=no "${VM_USER}@${VM_HOST}" \
+sshpass -e scp "${SSH_OPTS[@]}" "$TMP_SCRIPT" "${VM_USER}@${VM_HOST}:$REMOTE_SCRIPT"
+sshpass -e ssh "${SSH_OPTS[@]}" "${VM_USER}@${VM_HOST}" \
   "powershell -NoProfile -ExecutionPolicy Bypass -File $REMOTE_SCRIPT"

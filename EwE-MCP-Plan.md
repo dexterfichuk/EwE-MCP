@@ -45,6 +45,8 @@ Build EwE MCP as a separate plugin-first project in `/Users/dexterfichuk/Project
   - `get_variable_metadata`
   - `get_values`
   - `validate_values`
+  - `get_indexed_value`
+  - `validate_indexed_value`
   - `list_ecopath_groups`
   - `get_ecopath_group`
   - `list_ecopath_fleets`
@@ -54,6 +56,7 @@ Build EwE MCP as a separate plugin-first project in `/Users/dexterfichuk/Project
   - `stop_ecosim`
   - `refresh_ui`
   - `set_values`
+  - `set_indexed_value`
   - `batch`
   - `batch_commands`
   - gated limited `execute_ewe_code`
@@ -66,6 +69,17 @@ Build EwE MCP as a separate plugin-first project in `/Users/dexterfichuk/Project
   - `get_variable_metadata`
   - `get_values`
   - `validate_values`
+- Implemented indexed value tools for targeted cell-level control:
+  - `get_indexed_value`
+  - `validate_indexed_value`
+  - `set_indexed_value`
+- Hardened indexed value safety:
+  - mutation tools are annotated with MCP `destructiveHint`
+  - indexed getter failures return structured error envelopes
+  - known group-backed indexed values reject out-of-range group/prey indices before EwE accessors can silently default or create sparse entries
+- Verified indexed reads/writes/restores against `Tampa_Bay.EwEmdb`:
+  - Ecopath group `DietComp(prey)` via group 20, prey 25
+  - Ecopath fleet `Landings(group)` via fleet 1, group 18
 - Expanded `list_domains`/`list_entities` beyond Ecopath to cover generic domains:
   - `ecopath_groups`
   - `ecopath_group_outputs`
@@ -131,6 +145,10 @@ Build EwE MCP as a separate plugin-first project in `/Users/dexterfichuk/Project
   - `scripts/deploy-built-plugin-vm.sh`
   - `scripts/launch-ewe-vm.sh`
   - `scripts/vm-live-smoke.sh`
+- Hardened VM helper scripts for repeated agent use from worktrees:
+  - default remote source directory is derived from the local worktree name
+  - SSH/SCP use explicit password authentication options with `sshpass -e`
+  - credentials remain outside tracked files
 
 ### Verified Commands
 ```bash
@@ -144,10 +162,27 @@ SSHPASS=... ./scripts/vm-live-smoke.sh
 Current local test expectation:
 
 ```text
-5 passed, 9 skipped
+5 passed, 16 skipped
 ```
 
 The skipped tests are live EwE integration tests. Run them only when the VM plugin is deployed, EwE is launched, and a tunnel or direct connection is configured.
+
+Current focused live indexed-value expectation:
+
+```text
+7 passed
+```
+
+Run it from the feature worktree after build/deploy/launch with:
+
+```bash
+EWE_MCP_HOST=127.0.0.1 \
+EWE_MCP_PORT=19877 \
+EWE_MCP_TOKEN=ewe-mcp-local-dev \
+EWE_LIVE_TESTS=1 \
+EWE_MODEL_PATH='C:\Users\dexter\Eii.Ecopath\Database\Tampa_Bay.EwEmdb' \
+uv run pytest tests/test_indexed_values.py
+```
 
 ### Important Discovery
 Do not launch the EwE GUI directly from the SSH service session for live testing. EwE may start and then exit before the socket remains available. Use `scripts/launch-ewe-vm.sh`, which launches EwE through an interactive scheduled task in the logged-in Windows desktop session.
@@ -357,10 +392,10 @@ PY
   - status and remark fields
   - entity IDs
 - Remaining MCP/value work:
-  - support indexed cell reads/writes such as a single `DietComp(prey)` or `Landings(group)` value
   - expose EwE metadata/status/remarks from `cCoreInputOutputBase`
   - initialize/load subsystem scenario data before reading unavailable Ecosim/Ecospace/Ecotracer collections
   - add generic `set_values` support beyond Ecopath groups/fleets
+  - extend indexed writes into multi-index variables and additional domains after the initial single-index Ecopath group/fleet slice
 - Expand `set_values` beyond `ecopath_group` and `ecopath_fleet`
 - Add batch safety rules for mixed read/write command groups.
 
@@ -432,6 +467,7 @@ PY
 - Structured client error tests via `EwEMCPError`.
 - Edge-case tests for batch blocking, unknown commands, invalid model paths, invalid domains, out-of-range indices, and unknown mutation properties.
 - Mutation tests for Ecopath group/fleet names and disabled eval behavior.
+- Indexed value tests for live read/write/restore plus unknown variable, empty indices, bad conversion, target index out of range, and indexed cell bounds.
 - Live VM smoke test for plugin startup and basic commands.
 - Live VM sample-model smoke test for Ecopath groups, diets, fleets, and counters.
 
