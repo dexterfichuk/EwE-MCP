@@ -12,7 +12,7 @@ Build EwE MCP as a separate plugin-first project in `/Users/dexterfichuk/Project
 ### Completed
 - Created the standalone project, separate from the EwE source tree.
 - Created and pushed a private GitHub repository: `https://github.com/dexterfichuk/EwE-MCP`.
-- Reviewed merged PR work through `main` at commit `3ccb962`.
+- Reviewed merged PR work through `main` at commit `dff53a5`.
 - Implemented the first C# plugin vertical slice in `src/EwE_MCP_Plugin`.
 - Implemented `IPlugin`, `IUIContextPlugin`, and `IDisposedPlugin` against the installed EwE plugin API.
 - Captured live EwE runtime references: `cCore`, `cUIContext`, `cCommandHandler`, and `SynchronizationContext`.
@@ -51,6 +51,21 @@ Build EwE MCP as a separate plugin-first project in `/Users/dexterfichuk/Project
   - `get_ecopath_group`
   - `list_ecopath_fleets`
   - `get_ecopath_fleet`
+  - `list_ecosim_scenarios`
+  - `get_ecosim_scenario`
+  - `load_ecosim_scenario`
+  - `create_ecosim_scenario`
+  - `copy_ecosim_scenario`
+  - `delete_ecosim_scenario`
+  - `save_ecosim_scenario`
+  - `get_ecosim_run_state`
+  - `list_ecosim_group_inputs`
+  - `get_ecosim_group_input`
+  - `list_ecosim_fleet_inputs`
+  - `get_ecosim_fleet_input`
+  - `get_ecosim_group_results`
+  - `get_ecosim_fleet_results`
+  - `export_ecosim_results`
   - `run_ecopath`
   - `run_ecosim`
   - `stop_ecosim`
@@ -61,8 +76,18 @@ Build EwE MCP as a separate plugin-first project in `/Users/dexterfichuk/Project
   - `batch_commands`
   - gated limited `execute_ewe_code`
 - Implemented `refresh_ui` using `FormMain.Refresh` and a best-effort `~navigate` invoke.
-- Implemented `set_values` for `ecopath_group` and `ecopath_fleet`.
+- Implemented `set_values` for `ecopath_group`, `ecopath_fleet`, `ecosim_group_input`, and `ecosim_fleet_input`.
 - Implemented Python-side automatic UI refresh after `set_values`.
+- Implemented the first explicit Ecosim control loop:
+  - list/get scenarios
+  - load a scenario
+  - create/copy/delete/save scenarios
+  - inspect run state
+  - inspect group/fleet inputs
+  - run/stop Ecosim using existing run tools
+  - fetch group/fleet result time-series after a run
+  - export Ecosim results to a host-side path
+- Blocked destructive Ecosim scenario management from `batch_commands`.
 - Implemented generic reflection-backed entity/value tools:
   - `get_entity`
   - `list_variables`
@@ -162,7 +187,7 @@ SSHPASS=... ./scripts/vm-live-smoke.sh
 Current local test expectation:
 
 ```text
-5 passed, 16 skipped
+6 passed, 20 skipped
 ```
 
 The skipped tests are live EwE integration tests. Run them only when the VM plugin is deployed, EwE is launched, and a tunnel or direct connection is configured.
@@ -182,6 +207,23 @@ EWE_MCP_TOKEN=ewe-mcp-local-dev \
 EWE_LIVE_TESTS=1 \
 EWE_MODEL_PATH='C:\Users\dexter\Eii.Ecopath\Database\Tampa_Bay.EwEmdb' \
 uv run pytest tests/test_indexed_values.py
+```
+
+Current focused live Ecosim-control expectation:
+
+```text
+1 local batch-safety test plus live scenario/input/run/result tests when `EWE_LIVE_TESTS=1`
+```
+
+Run it from the repo or active worktree after build/deploy/launch with:
+
+```bash
+EWE_MCP_HOST=127.0.0.1 \
+EWE_MCP_PORT=19877 \
+EWE_MCP_TOKEN=ewe-mcp-local-dev \
+EWE_LIVE_TESTS=1 \
+EWE_MODEL_PATH='C:\Users\dexter\Eii.Ecopath\Database\Tampa_Bay.EwEmdb' \
+uv run pytest tests/test_ecosim_control.py
 ```
 
 ### Important Discovery
@@ -214,7 +256,7 @@ uv run pytest
 Expected baseline at the time of this update:
 
 ```text
-5 passed, 16 skipped
+6 passed, 20 skipped
 ```
 
 ### 3. VM Environment Variables
@@ -383,7 +425,7 @@ PY
 
 ### Phase 3: Generic EwE Object And Variable Layer
 - Initial generic reflection-backed entity/value reads are done for available domains.
-- Initial domain-specific mutation is done for Ecopath groups/fleets via `set_values`; the remaining deeper generic data layer should build around EwE’s variable APIs, likely including:
+- Initial domain-specific mutation is done for Ecopath groups/fleets and Ecosim group/fleet inputs via `set_values`; the remaining deeper generic data layer should build around EwE’s variable APIs, likely including:
   - `cCoreInputOutputBase`
   - `eVarNameFlags`
   - `cVariableMetaData`
@@ -393,11 +435,10 @@ PY
   - entity IDs
 - Remaining MCP/value work:
   - expose EwE metadata/status/remarks from `cCoreInputOutputBase`
-  - initialize/load subsystem scenario data before reading unavailable Ecosim/Ecospace/Ecotracer collections
-  - add generic `set_values` support beyond Ecopath groups/fleets
+  - initialize/load subsystem scenario data before reading unavailable Ecospace/Ecotracer collections
+  - add generic `set_values` support beyond Ecopath groups/fleets and Ecosim group/fleet inputs
   - extend indexed writes into multi-index variables and additional domains after the initial single-index Ecopath group/fleet slice
-- Expand `set_values` beyond `ecopath_group` and `ecopath_fleet`
-- Add batch safety rules for mixed read/write command groups.
+- Add broader batch safety rules for mixed read/write command groups; destructive scenario management is already blocked.
 
 ### Phase 4: Ecopath And Ecosim Control
 - Implement explicit Ecopath tools:
@@ -406,14 +447,14 @@ PY
   - fetch group/fleet values
   - export key Ecopath tables
 - Implement explicit Ecosim tools:
-  - list scenarios
-  - create/copy/delete scenario
-  - load scenario
-  - set scenario parameters
-  - run/stop Ecosim
+  - list scenarios: done
+  - create/copy/delete scenario: done
+  - load scenario: done
+  - set scenario parameters: initial group/fleet input support done
+  - run/stop Ecosim: done
   - subscribe to progress/completion events where available
-  - fetch time-series outputs
-  - export results
+  - fetch time-series outputs: initial group/fleet result series done
+  - export results: initial `dumpEcosimModelResults` wrapper done
 
 ### Phase 5: Full EwE Suite Coverage
 - Add Ecospace tools:

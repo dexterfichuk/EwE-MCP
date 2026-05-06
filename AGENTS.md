@@ -122,7 +122,7 @@ EWE_MCP_TOKEN=ewe-mcp-local-dev \
 uv run ewe-mcp
 ```
 
-The MCP server exposes tools backed by the running EwE plugin. Current main-branch tools include diagnostics, model load/save/close, Ecopath group/fleet reads, generic entity/value reads, indexed value reads/writes such as `DietComp(prey)` and `Landings(group)`, selected mutations through `set_values` and `set_indexed_value`, UI command invocation, batching, and a disabled-by-default eval helper.
+The MCP server exposes tools backed by the running EwE plugin. Current main-branch tools include diagnostics, model load/save/close, Ecopath group/fleet reads, generic entity/value reads, indexed value reads/writes such as `DietComp(prey)` and `Landings(group)`, Ecosim scenario load/create/copy/delete/save, Ecosim run state, Ecosim group/fleet inputs, Ecosim group/fleet result time-series, selected mutations through `set_values` and `set_indexed_value`, UI command invocation, batching, and a disabled-by-default eval helper.
 
 ## Live Tests
 Run live tests only after build/deploy/launch/smoke succeeds:
@@ -136,7 +136,7 @@ EWE_MODEL_PATH='C:\Users\dexter\Eii.Ecopath\Database\Tampa_Bay.EwEmdb' \
 uv run pytest
 ```
 
-Expected local baseline with live tests skipped is `5 passed, 16 skipped`. The focused indexed live suite is:
+Expected local baseline with live tests skipped is `6 passed, 20 skipped`. The focused indexed live suite is:
 
 ```bash
 EWE_MCP_HOST=127.0.0.1 \
@@ -149,11 +149,24 @@ uv run pytest tests/test_indexed_values.py
 
 Expected focused indexed live result is `7 passed`.
 
+The focused Ecosim control suite is:
+
+```bash
+EWE_MCP_HOST=127.0.0.1 \
+EWE_MCP_PORT=19877 \
+EWE_MCP_TOKEN=ewe-mcp-local-dev \
+EWE_LIVE_TESTS=1 \
+EWE_MODEL_PATH='C:\Users\dexter\Eii.Ecopath\Database\Tampa_Bay.EwEmdb' \
+uv run pytest tests/test_ecosim_control.py
+```
+
+The suite loads the sample model, loads an Ecosim scenario, inspects group/fleet inputs, runs Ecosim, and reads short result time-series windows.
+
 Prefer testing mutations against copied models. If you mutate the shared sample model, restore the original value in a `finally` block or reload the model before handing off.
 
 ## Safety Rules
 - Keep `execute_ewe_code` disabled unless the user explicitly asks for it and understands the risk.
-- Do not batch `execute_ewe_code` or model-closing/destructive operations.
+- Do not batch `execute_ewe_code`, model-closing operations, or destructive Ecosim scenario management.
 - Use `validate_values` before `set_values` when possible.
 - For model-changing workflows, prefer `save_model_as` to a temporary/copy path instead of overwriting the shared model.
 - Record what you changed and what you restored in your final message.

@@ -15,7 +15,15 @@ RECV_CHUNK_SIZE = 65_536
 MAX_RESPONSE_SIZE = 100 * 1024 * 1024
 HEADER_STRUCT = struct.Struct(">I")
 
-BATCH_BLOCKED_COMMANDS = frozenset({"execute_ewe_code", "close_model"})
+BATCH_BLOCKED_COMMANDS = frozenset(
+    {
+        "execute_ewe_code",
+        "close_model",
+        "create_ecosim_scenario",
+        "copy_ecosim_scenario",
+        "delete_ecosim_scenario",
+    }
+)
 
 
 def get_host() -> str:

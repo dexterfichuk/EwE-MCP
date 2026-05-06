@@ -276,6 +276,132 @@ async def get_ecopath_fleet(index: int) -> dict[str, Any]:
     return await _send("get_ecopath_fleet", {"index": index})
 
 
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+async def list_ecosim_scenarios() -> dict[str, Any]:
+    """List Ecosim scenarios in the loaded model."""
+    return await _send("list_ecosim_scenarios")
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+async def get_ecosim_scenario(index: int) -> dict[str, Any]:
+    """Get Ecosim scenario metadata by one-based index."""
+    return await _send("get_ecosim_scenario", {"index": index})
+
+
+@mcp.tool()
+async def load_ecosim_scenario(index: int) -> dict[str, Any]:
+    """Load an Ecosim scenario by one-based index."""
+    return await _send("load_ecosim_scenario", {"index": index}, timeout=TIMEOUT_LONG)
+
+
+@mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
+async def create_ecosim_scenario(
+    name: str,
+    description: str = "",
+    author: str = "",
+    contact: str = "",
+) -> dict[str, Any]:
+    """Create and load a new Ecosim scenario."""
+    return await _send(
+        "create_ecosim_scenario",
+        {"name": name, "description": description, "author": author, "contact": contact},
+        timeout=TIMEOUT_LONG,
+    )
+
+
+@mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
+async def copy_ecosim_scenario(name: str, description: str = "") -> dict[str, Any]:
+    """Copy the active Ecosim scenario under a new name and load the copy."""
+    return await _send("copy_ecosim_scenario", {"name": name, "description": description}, timeout=TIMEOUT_LONG)
+
+
+@mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
+async def delete_ecosim_scenario(index: int) -> dict[str, Any]:
+    """Delete an unloaded Ecosim scenario by one-based index."""
+    return await _send("delete_ecosim_scenario", {"index": index}, timeout=TIMEOUT_LONG)
+
+
+@mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
+async def save_ecosim_scenario() -> dict[str, Any]:
+    """Save the active Ecosim scenario."""
+    return await _send("save_ecosim_scenario", timeout=TIMEOUT_LONG)
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+async def get_ecosim_run_state() -> dict[str, Any]:
+    """Get Ecosim scenario/run state, active scenario, run flags, and counters."""
+    return await _send("get_ecosim_run_state")
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+async def list_ecosim_group_inputs() -> dict[str, Any]:
+    """List Ecosim group input parameters for the active scenario."""
+    return await _send("list_ecosim_group_inputs")
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+async def get_ecosim_group_input(index: int) -> dict[str, Any]:
+    """Get one Ecosim group input parameter record."""
+    return await _send("get_ecosim_group_input", {"index": index})
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+async def list_ecosim_fleet_inputs() -> dict[str, Any]:
+    """List Ecosim fleet input parameters for the active scenario."""
+    return await _send("list_ecosim_fleet_inputs")
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+async def get_ecosim_fleet_input(index: int) -> dict[str, Any]:
+    """Get one Ecosim fleet input parameter record."""
+    return await _send("get_ecosim_fleet_input", {"index": index})
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+async def get_ecosim_group_results(
+    index: int,
+    variables: list[str] | None = None,
+    start_time: int | None = None,
+    end_time: int | None = None,
+    fleet_index: int | None = None,
+) -> dict[str, Any]:
+    """Read Ecosim group result time-series after a run."""
+    params: dict[str, Any] = {"index": index}
+    if variables is not None:
+        params["variables"] = variables
+    if start_time is not None:
+        params["start_time"] = start_time
+    if end_time is not None:
+        params["end_time"] = end_time
+    if fleet_index is not None:
+        params["fleet_index"] = fleet_index
+    return await _send("get_ecosim_group_results", params, timeout=TIMEOUT_LONG)
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+async def get_ecosim_fleet_results(
+    index: int,
+    variables: list[str] | None = None,
+    start_time: int | None = None,
+    end_time: int | None = None,
+) -> dict[str, Any]:
+    """Read Ecosim fleet result time-series after a run."""
+    params: dict[str, Any] = {"index": index}
+    if variables is not None:
+        params["variables"] = variables
+    if start_time is not None:
+        params["start_time"] = start_time
+    if end_time is not None:
+        params["end_time"] = end_time
+    return await _send("get_ecosim_fleet_results", params, timeout=TIMEOUT_LONG)
+
+
+@mcp.tool()
+async def export_ecosim_results(path: str) -> dict[str, Any]:
+    """Export Ecosim model results to a file path on the EwE host."""
+    return await _send("export_ecosim_results", {"path": path}, timeout=TIMEOUT_LONG)
+
+
 @mcp.tool()
 async def run_ecopath() -> dict[str, Any]:
     """Run Ecopath mass balance."""
@@ -302,7 +428,7 @@ async def refresh_ui() -> dict[str, Any]:
 
 @mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
 async def set_values(domain: str, index: int, values: dict[str, Any]) -> dict[str, Any]:
-    """Set values for an EwE entity and refresh the UI. Supported domains: ecopath_group, ecopath_fleet."""
+    """Set values for an EwE entity and refresh the UI. Supported domains include Ecopath groups/fleets and Ecosim group/fleet inputs."""
     result = await _send("set_values", {"domain": domain, "index": index, "values": values}, timeout=TIMEOUT_LONG)
     # Automatically refresh UI after setting values
     await refresh_ui()
@@ -328,7 +454,7 @@ async def set_indexed_value(
 
 @mcp.tool(
     description="Execute multiple EwE MCP commands in one round-trip. "
-    "Blocked commands: execute_ewe_code, close_model.",
+    "Blocked commands include execute_ewe_code, close_model, and destructive Ecosim scenario management.",
 )
 async def batch_commands(commands: list[dict[str, Any]]) -> dict[str, Any]:
     """Execute multiple non-blocked commands through the EwE plugin."""
