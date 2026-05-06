@@ -1,11 +1,13 @@
 import pytest
 import asyncio
+import os
 from ewe_mcp.server import set_values, get_ecopath_group, list_ecopath_fleets, execute_ewe_code, load_model
 
 @pytest.mark.asyncio
 async def test_set_values_group():
     # Ensure model is loaded
-    await load_model(r"C:\Users\dexter\Eii.Ecopath\Database\Tampa_Bay.EwEmdb")
+    model_path = os.environ.get("EWE_MODEL_PATH", r"C:\Users\dexter\Eii.Ecopath\Database\Tampa_Bay.EwEmdb")
+    await load_model(model_path)
     
     idx = 1
     # Test setting name
