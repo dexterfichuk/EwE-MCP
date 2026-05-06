@@ -137,7 +137,7 @@ namespace EwE_MCP_Plugin
                 }
 
                 var result = _router.Dispatch(request);
-                _auditLog.Add(request.Type, "success");
+                _auditLog.Add(request.Type, "success", request.Params?.ToString(Formatting.None));
                 return new JObject
                 {
                     ["id"] = request.Id,
