@@ -4,6 +4,8 @@ import json
 import socket
 import threading
 
+import pytest
+
 from ewe_mcp.client import EwEMCPClient, EwEMCPError
 from ewe_mcp.helpers import HEADER_STRUCT
 
@@ -46,8 +48,6 @@ def test_client_sends_token_and_unwraps_success():
     client.disconnect()
     thread.join(timeout=2)
 
-
-import pytest
 
 def test_client_raises_on_error_response():
     def handler(request):
