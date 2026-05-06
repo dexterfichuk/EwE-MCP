@@ -17,6 +17,7 @@ Implemented now:
 - Model/run tools: `load_model`, `save_model`, `save_model_as`, `close_model`, `get_model_info`, `get_core_counters`, `run_ecopath`, `run_ecosim`, `stop_ecosim`.
 - Read-only Ecopath tools: `list_domains`, `list_entities`, `list_ecopath_groups`, `get_ecopath_group`, `list_ecopath_fleets`, `get_ecopath_fleet`.
 - Generic entity/value tools: `get_entity`, `list_variables`, `get_variable_metadata`, `get_values`, `validate_values`.
+- Indexed value tools: `get_indexed_value`, `validate_indexed_value`, `set_indexed_value` for targeted cell-level control such as `DietComp(prey)` or `Landings(group)`.
 - Expanded generic domains now include Ecopath, Ecosim, Ecospace, Ecotracer, taxa, `core`, and UI commands. Some subsystem entity collections remain unavailable until EwE initializes or loads the relevant scenario.
 - UI command tools: `list_ui_commands`, `invoke_ui_command`.
 - Python MCP server, socket client, batch command guard, and protocol tests.

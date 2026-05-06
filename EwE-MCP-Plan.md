@@ -45,6 +45,8 @@ Build EwE MCP as a separate plugin-first project in `/Users/dexterfichuk/Project
   - `get_variable_metadata`
   - `get_values`
   - `validate_values`
+  - `get_indexed_value`
+  - `validate_indexed_value`
   - `list_ecopath_groups`
   - `get_ecopath_group`
   - `list_ecopath_fleets`
@@ -54,6 +56,7 @@ Build EwE MCP as a separate plugin-first project in `/Users/dexterfichuk/Project
   - `stop_ecosim`
   - `refresh_ui`
   - `set_values`
+  - `set_indexed_value`
   - `batch`
   - `batch_commands`
   - gated limited `execute_ewe_code`
@@ -66,6 +69,13 @@ Build EwE MCP as a separate plugin-first project in `/Users/dexterfichuk/Project
   - `get_variable_metadata`
   - `get_values`
   - `validate_values`
+- Implemented indexed value tools for targeted cell-level control:
+  - `get_indexed_value`
+  - `validate_indexed_value`
+  - `set_indexed_value`
+- Verified indexed reads/writes/restores against `Tampa_Bay.EwEmdb`:
+  - Ecopath group `DietComp(prey)` via group 20, prey 25
+  - Ecopath fleet `Landings(group)` via fleet 1, group 18
 - Expanded `list_domains`/`list_entities` beyond Ecopath to cover generic domains:
   - `ecopath_groups`
   - `ecopath_group_outputs`
@@ -357,10 +367,10 @@ PY
   - status and remark fields
   - entity IDs
 - Remaining MCP/value work:
-  - support indexed cell reads/writes such as a single `DietComp(prey)` or `Landings(group)` value
   - expose EwE metadata/status/remarks from `cCoreInputOutputBase`
   - initialize/load subsystem scenario data before reading unavailable Ecosim/Ecospace/Ecotracer collections
   - add generic `set_values` support beyond Ecopath groups/fleets
+  - extend indexed writes into multi-index variables and additional domains after live validation
 - Expand `set_values` beyond `ecopath_group` and `ecopath_fleet`
 - Add batch safety rules for mixed read/write command groups.
 

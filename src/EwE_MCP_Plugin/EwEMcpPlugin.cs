@@ -220,6 +220,10 @@ namespace EwE_MCP_Plugin
                     return GetValues(request.Params);
                 case "validate_values":
                     return ValidateValues(request.Params);
+                case "get_indexed_value":
+                    return GetIndexedValue(request.Params);
+                case "validate_indexed_value":
+                    return ValidateIndexedValue(request.Params);
                 case "list_ecopath_groups":
                     return ListEcopathGroups();
                 case "get_ecopath_group":
@@ -238,6 +242,8 @@ namespace EwE_MCP_Plugin
                     return OnUiThread(RefreshUI);
                 case "set_values":
                     return OnUiThread(() => SetValues(request.Params));
+                case "set_indexed_value":
+                    return OnUiThread(() => SetIndexedValue(request.Params));
                 case "batch":
                 case "batch_commands":
                     return OnUiThread(() => Batch(request.Params));
@@ -655,6 +661,45 @@ namespace EwE_MCP_Plugin
             };
         }
 
+        private JObject GetIndexedValue(JObject parameters)
+        {
+            var target = ResolveEntity(RequiredString(parameters, "domain"), OptionalInt(parameters, "index"));
+            var variable = RequiredString(parameters, "variable");
+            var indices = RequiredIntArray(parameters, "indices");
+            var property = FindIndexedProperty(target.Entity, variable, target.NormalizedDomain, indices.Length, requireWritable: false);
+            if (property == null)
+            {
+                throw new EwEMcpException("unknown_indexed_variable", $"Indexed variable not found: {variable} with {indices.Length} index value(s)");
+            }
+
+            var value = ReadIndexedPropertyValue(target.Entity, property, indices);
+            return new JObject
+            {
+                ["domain"] = target.NormalizedDomain,
+                ["index"] = target.Index.HasValue ? JToken.FromObject(target.Index.Value) : JValue.CreateNull(),
+                ["variable"] = ToVariableName(property.Name),
+                ["property"] = property.Name,
+                ["indices"] = JArray.FromObject(indices),
+                ["value"] = value
+            };
+        }
+
+        private JObject ValidateIndexedValue(JObject parameters)
+        {
+            var target = ResolveEntity(RequiredString(parameters, "domain"), OptionalInt(parameters, "index"));
+            var variable = RequiredString(parameters, "variable");
+            var indices = RequiredIntArray(parameters, "indices");
+            var value = parameters["value"] ?? throw new EwEMcpException("missing_parameter", "Missing value");
+            var property = FindIndexedProperty(target.Entity, variable, target.NormalizedDomain, indices.Length, requireWritable: true);
+            if (property == null)
+            {
+                return IndexedValidationResult(target, variable, indices, false, "unknown_or_readonly_indexed_variable", null);
+            }
+
+            var valid = TryConvertValue(value, property.PropertyType, out _);
+            return IndexedValidationResult(target, property.Name, indices, valid, valid ? string.Empty : "conversion_failed", property);
+        }
+
         private JObject ListEcopathGroups()
         {
             var core = RequireCore();
@@ -976,6 +1021,43 @@ namespace EwE_MCP_Plugin
                 default:
                     throw new EwEMcpException("unsupported_domain", $"Setting values for domain '{domain}' is not supported yet.");
             }
+        }
+
+        private JObject SetIndexedValue(JObject parameters)
+        {
+            var target = ResolveEntity(RequiredString(parameters, "domain"), OptionalInt(parameters, "index"));
+            var variable = RequiredString(parameters, "variable");
+            var indices = RequiredIntArray(parameters, "indices");
+            var value = parameters["value"] ?? throw new EwEMcpException("missing_parameter", "Missing value");
+            var property = FindIndexedProperty(target.Entity, variable, target.NormalizedDomain, indices.Length, requireWritable: true);
+            if (property == null)
+            {
+                throw new EwEMcpException("unknown_or_readonly_indexed_variable", $"Indexed variable is not writable or not found: {variable}");
+            }
+            if (!TryConvertValue(value, property.PropertyType, out var convertedValue))
+            {
+                throw new EwEMcpException("conversion_failed", $"Could not convert value to {FriendlyTypeName(property.PropertyType)}");
+            }
+
+            try
+            {
+                property.SetValue(target.Entity, convertedValue, indices.Cast<object>().ToArray());
+            }
+            catch (Exception ex)
+            {
+                throw new EwEMcpException("set_failed", ex.Message);
+            }
+
+            return new JObject
+            {
+                ["domain"] = target.NormalizedDomain,
+                ["index"] = target.Index.HasValue ? JToken.FromObject(target.Index.Value) : JValue.CreateNull(),
+                ["variable"] = ToVariableName(property.Name),
+                ["property"] = property.Name,
+                ["indices"] = JArray.FromObject(indices),
+                ["result"] = "updated",
+                ["value"] = ToJToken(convertedValue)
+            };
         }
 
         private JObject SetEcopathGroupValues(cCore core, int index, JObject values)
@@ -1300,6 +1382,22 @@ namespace EwE_MCP_Plugin
             }
         }
 
+        private static JToken ReadIndexedPropertyValue(object entity, PropertyInfo property, int[] indices)
+        {
+            try
+            {
+                return ToJToken(property.GetValue(entity, indices.Cast<object>().ToArray()));
+            }
+            catch (Exception ex)
+            {
+                return new JObject
+                {
+                    ["error"] = "read_failed",
+                    ["message"] = ex.Message
+                };
+            }
+        }
+
         private static IEnumerable<PropertyInfo> GetReadableProperties(object entity)
         {
             if (entity == null)
@@ -1353,6 +1451,44 @@ namespace EwE_MCP_Plugin
                 .FirstOrDefault(p =>
                     string.Equals(p.Name, alias, StringComparison.OrdinalIgnoreCase) ||
                     string.Equals(NormalizeVariableName(p.Name), NormalizeVariableName(alias), StringComparison.OrdinalIgnoreCase));
+        }
+
+        private static PropertyInfo FindIndexedProperty(object entity, string variable, string domain, int indexCount, bool requireWritable)
+        {
+            if (entity == null)
+            {
+                return null;
+            }
+
+            var alias = AliasPropertyName(variable, domain);
+            return GetReadableProperties(entity)
+                .Where(p => p.GetIndexParameters().Length == indexCount)
+                .Where(p => !requireWritable || p.CanWrite)
+                .FirstOrDefault(p =>
+                    string.Equals(p.Name, alias, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(NormalizeVariableName(p.Name), NormalizeVariableName(alias), StringComparison.OrdinalIgnoreCase));
+        }
+
+        private static JObject IndexedValidationResult(EntityTarget target, string variable, int[] indices, bool valid, string reason, PropertyInfo property)
+        {
+            var result = new JObject
+            {
+                ["domain"] = target.NormalizedDomain,
+                ["index"] = target.Index.HasValue ? JToken.FromObject(target.Index.Value) : JValue.CreateNull(),
+                ["variable"] = property == null ? variable : ToVariableName(property.Name),
+                ["indices"] = JArray.FromObject(indices),
+                ["valid"] = valid
+            };
+            if (property != null)
+            {
+                result["property"] = property.Name;
+                result["type"] = FriendlyTypeName(property.PropertyType);
+            }
+            if (!string.IsNullOrWhiteSpace(reason))
+            {
+                result["reason"] = reason;
+            }
+            return result;
         }
 
         private static string AliasPropertyName(string variable, string domain)
@@ -1586,6 +1722,39 @@ namespace EwE_MCP_Plugin
             }
             var value = token.ToString();
             return string.IsNullOrWhiteSpace(value) ? null : new[] { value };
+        }
+
+        private static int[] RequiredIntArray(JObject parameters, string name)
+        {
+            var token = parameters?[name];
+            if (token == null || token.Type == JTokenType.Null)
+            {
+                throw new EwEMcpException("missing_parameter", $"Missing required integer array parameter: {name}");
+            }
+
+            if (token is JArray arr)
+            {
+                var values = new List<int>();
+                foreach (var item in arr)
+                {
+                    if (!int.TryParse(item.ToString(), out var value))
+                    {
+                        throw new EwEMcpException("invalid_parameter", $"All values in {name} must be integers");
+                    }
+                    values.Add(value);
+                }
+                if (values.Count == 0)
+                {
+                    throw new EwEMcpException("invalid_parameter", $"{name} must contain at least one index");
+                }
+                return values.ToArray();
+            }
+
+            if (!int.TryParse(token.ToString(), out var single))
+            {
+                throw new EwEMcpException("invalid_parameter", $"Parameter must be an integer or integer array: {name}");
+            }
+            return new[] { single };
         }
 
         private static JObject GetPluginAssemblyInfo()

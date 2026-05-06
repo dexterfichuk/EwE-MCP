@@ -5,12 +5,13 @@ set -euo pipefail
 
 VM_USER="${EWE_VM_USER:-dexter}"
 VM_HOST="${EWE_VM_HOST:-192.168.64.2}"
-REMOTE_ROOT="${EWE_VM_REMOTE_ROOT:-C:/Users/dexter/EwE-MCP}"
 EWE_DIR="${EWE_VM_EWE_DIR:-C:\\Program Files (x86)\\Ecopath with Ecosim 40 years 6.7.0.18865_32-bit}"
 CONFIGURATION="${EWE_BUILD_CONFIGURATION:-Release}"
 PLATFORM="${EWE_BUILD_PLATFORM:-x86}"
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT_NAME="$(basename "$ROOT_DIR")"
+REMOTE_ROOT="${EWE_VM_REMOTE_ROOT:-C:/Users/dexter/$ROOT_NAME}"
 ARCHIVE="/tmp/ewe-mcp-src.tgz"
 
 COPYFILE_DISABLE=1 tar \

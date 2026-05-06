@@ -229,6 +229,30 @@ async def validate_values(domain: str, values: dict[str, Any], index: int | None
 
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+async def get_indexed_value(domain: str, variable: str, indices: list[int], index: int | None = None) -> dict[str, Any]:
+    """Read one indexed EwE value, such as DietComp(prey) or Landings(group)."""
+    params: dict[str, Any] = {"domain": domain, "variable": variable, "indices": indices}
+    if index is not None:
+        params["index"] = index
+    return await _send("get_indexed_value", params)
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+async def validate_indexed_value(
+    domain: str,
+    variable: str,
+    indices: list[int],
+    value: Any,
+    index: int | None = None,
+) -> dict[str, Any]:
+    """Validate one indexed EwE value without mutating."""
+    params: dict[str, Any] = {"domain": domain, "variable": variable, "indices": indices, "value": value}
+    if index is not None:
+        params["index"] = index
+    return await _send("validate_indexed_value", params)
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
 async def list_ecopath_groups() -> dict[str, Any]:
     """List Ecopath functional groups with key read-only input/output values."""
     return await _send("list_ecopath_groups")
@@ -281,6 +305,23 @@ async def set_values(domain: str, index: int, values: dict[str, Any]) -> dict[st
     """Set values for an EwE entity and refresh the UI. Supported domains: ecopath_group, ecopath_fleet."""
     result = await _send("set_values", {"domain": domain, "index": index, "values": values}, timeout=TIMEOUT_LONG)
     # Automatically refresh UI after setting values
+    await refresh_ui()
+    return result
+
+
+@mcp.tool()
+async def set_indexed_value(
+    domain: str,
+    variable: str,
+    indices: list[int],
+    value: Any,
+    index: int | None = None,
+) -> dict[str, Any]:
+    """Set one indexed EwE value and refresh the UI, such as DietComp(prey) or Landings(group)."""
+    params: dict[str, Any] = {"domain": domain, "variable": variable, "indices": indices, "value": value}
+    if index is not None:
+        params["index"] = index
+    result = await _send("set_indexed_value", params, timeout=TIMEOUT_LONG)
     await refresh_ui()
     return result
 
