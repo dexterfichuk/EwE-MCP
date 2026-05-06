@@ -232,6 +232,36 @@ namespace EwE_MCP_Plugin
                     return ListEcopathFleets();
                 case "get_ecopath_fleet":
                     return GetEcopathFleet(request.Params);
+                case "list_ecosim_scenarios":
+                    return ListEcosimScenarios();
+                case "get_ecosim_scenario":
+                    return GetEcosimScenario(request.Params);
+                case "load_ecosim_scenario":
+                    return OnUiThread(() => LoadEcosimScenario(request.Params));
+                case "create_ecosim_scenario":
+                    return OnUiThread(() => CreateEcosimScenario(request.Params));
+                case "copy_ecosim_scenario":
+                    return OnUiThread(() => CopyEcosimScenario(request.Params));
+                case "delete_ecosim_scenario":
+                    return OnUiThread(() => DeleteEcosimScenario(request.Params));
+                case "save_ecosim_scenario":
+                    return OnUiThread(SaveEcosimScenario);
+                case "get_ecosim_run_state":
+                    return GetEcosimRunState();
+                case "list_ecosim_group_inputs":
+                    return ListEcosimGroupInputs();
+                case "get_ecosim_group_input":
+                    return GetEcosimGroupInput(request.Params);
+                case "list_ecosim_fleet_inputs":
+                    return ListEcosimFleetInputs();
+                case "get_ecosim_fleet_input":
+                    return GetEcosimFleetInput(request.Params);
+                case "get_ecosim_group_results":
+                    return GetEcosimGroupResults(request.Params);
+                case "get_ecosim_fleet_results":
+                    return GetEcosimFleetResults(request.Params);
+                case "export_ecosim_results":
+                    return OnUiThread(() => ExportEcosimResults(request.Params));
                 case "run_ecopath":
                     return OnUiThread(RunEcopath);
                 case "run_ecosim":
@@ -846,6 +876,416 @@ namespace EwE_MCP_Plugin
             return result;
         }
 
+        private JObject ListEcosimScenarios()
+        {
+            var core = RequireCore();
+            var scenarios = new JArray();
+            var count = SafeIntProperty(core, "nEcosimScenarios");
+            var activeIndex = SafeIntProperty(core, "ActiveEcosimScenarioIndex");
+            for (var i = 1; i <= count; i++)
+            {
+                scenarios.Add(BuildEcosimScenario(core, i, activeIndex));
+            }
+
+            return new JObject
+            {
+                ["scenarios"] = scenarios,
+                ["total_count"] = count,
+                ["active_index"] = activeIndex > 0 ? JToken.FromObject(activeIndex) : JValue.CreateNull()
+            };
+        }
+
+        private JObject GetEcosimScenario(JObject parameters)
+        {
+            var index = RequiredInt(parameters, "index");
+            var core = RequireCore();
+            var count = SafeIntProperty(core, "nEcosimScenarios");
+            if (index < 1 || index > count)
+            {
+                throw new EwEMcpException("index_out_of_range", $"Ecosim scenario index {index} is outside 1..{count}");
+            }
+            return BuildEcosimScenario(core, index, SafeIntProperty(core, "ActiveEcosimScenarioIndex"));
+        }
+
+        private JObject BuildEcosimScenario(cCore core, int index, int activeIndex)
+        {
+            var scenario = SafeGetIndexedProperty(core, "EcosimScenarios", index);
+            var values = scenario == null ? new JObject() : ReadScalarValues(scenario, null, false, "ecosim_scenarios");
+            return new JObject
+            {
+                ["index"] = index,
+                ["name"] = SafeStringProperty(scenario, "Name"),
+                ["description"] = SafeStringProperty(scenario, "Description"),
+                ["author"] = SafeStringProperty(scenario, "Author"),
+                ["contact"] = SafeStringProperty(scenario, "Contact"),
+                ["dbid"] = SafeJTokenProperty(scenario, "DBID"),
+                ["is_loaded"] = index == activeIndex,
+                ["values"] = values
+            };
+        }
+
+        private JObject LoadEcosimScenario(JObject parameters)
+        {
+            var index = RequiredInt(parameters, "index");
+            var core = RequireCore();
+            var ok = core.LoadEcosimScenario(index);
+            return new JObject
+            {
+                ["loaded"] = ok,
+                ["index"] = index,
+                ["scenario"] = ok ? BuildEcosimScenario(core, index, SafeIntProperty(core, "ActiveEcosimScenarioIndex")) : null
+            };
+        }
+
+        private JObject CreateEcosimScenario(JObject parameters)
+        {
+            var name = RequiredString(parameters, "name");
+            var description = parameters?["description"]?.ToString() ?? string.Empty;
+            var author = parameters?["author"]?.ToString() ?? string.Empty;
+            var contact = parameters?["contact"]?.ToString() ?? string.Empty;
+            var core = RequireCore();
+            var ok = core.NewEcosimScenario(name, description, author, contact);
+            return new JObject
+            {
+                ["created"] = ok,
+                ["name"] = name,
+                ["active_index"] = SafeIntProperty(core, "ActiveEcosimScenarioIndex")
+            };
+        }
+
+        private JObject CopyEcosimScenario(JObject parameters)
+        {
+            var name = RequiredString(parameters, "name");
+            var description = parameters?["description"]?.ToString() ?? string.Empty;
+            var core = RequireCore();
+            if (SafeIntProperty(core, "ActiveEcosimScenarioIndex") < 1)
+            {
+                throw new EwEMcpException("ecosim_scenario_not_loaded", "Load an Ecosim scenario before copying it.");
+            }
+
+            var ok = core.SaveEcosimScenarioAs(name, description);
+            return new JObject
+            {
+                ["copied"] = ok,
+                ["name"] = name,
+                ["active_index"] = SafeIntProperty(core, "ActiveEcosimScenarioIndex")
+            };
+        }
+
+        private JObject DeleteEcosimScenario(JObject parameters)
+        {
+            var index = RequiredInt(parameters, "index");
+            var core = RequireCore();
+            var activeIndex = SafeIntProperty(core, "ActiveEcosimScenarioIndex");
+            if (index == activeIndex)
+            {
+                throw new EwEMcpException("cannot_delete_active_scenario", "Close or load a different Ecosim scenario before deleting this one.");
+            }
+            var ok = core.RemoveEcosimScenario(index);
+            return new JObject { ["deleted"] = ok, ["index"] = index };
+        }
+
+        private JObject SaveEcosimScenario()
+        {
+            var core = RequireCore();
+            var ok = core.SaveEcosimScenario();
+            return new JObject
+            {
+                ["saved"] = ok,
+                ["active_index"] = SafeIntProperty(core, "ActiveEcosimScenarioIndex")
+            };
+        }
+
+        private JObject GetEcosimRunState()
+        {
+            var core = RequireCore();
+            var sm = SafeGetProperty(core, "StateMonitor");
+            var activeIndex = SafeIntProperty(core, "ActiveEcosimScenarioIndex");
+            var state = new JObject
+            {
+                ["core_execution_state"] = SafeInvokeToString(sm, "CoreExecutionState"),
+                ["is_busy"] = SafeInvokeBool(sm, "IsBusy"),
+                ["has_ecopath_loaded"] = SafeInvokeBool(sm, "HasEcopathLoaded"),
+                ["has_ecopath_ran"] = SafeInvokeBool(sm, "HasEcopathRan"),
+                ["has_ecosim_loaded"] = SafeInvokeBool(sm, "HasEcosimLoaded"),
+                ["has_ecosim_initialized"] = SafeInvokeBool(sm, "HasEcosimInitialized"),
+                ["is_ecosim_running"] = SafeInvokeBool(sm, "IsEcosimRunning"),
+                ["has_ecosim_ran"] = SafeInvokeBool(sm, "HasEcosimRan"),
+                ["active_scenario_index"] = activeIndex > 0 ? JToken.FromObject(activeIndex) : JValue.CreateNull(),
+                ["scenario_count"] = SafeIntProperty(core, "nEcosimScenarios"),
+                ["years"] = SafeIntProperty(core, "nEcosimYears"),
+                ["time_steps"] = SafeIntProperty(core, "nEcosimTimeSteps"),
+                ["first_year"] = SafeInvokeInt(core, "EcosimFirstYear")
+            };
+            if (activeIndex > 0)
+            {
+                state["active_scenario"] = BuildEcosimScenario(core, activeIndex, activeIndex);
+            }
+            return state;
+        }
+
+        private JObject ListEcosimGroupInputs()
+        {
+            var core = RequireCore();
+            var groups = new JArray();
+            var count = SafeIntProperty(core, "nGroups");
+            for (var i = 1; i <= count; i++)
+            {
+                groups.Add(BuildEcosimGroupInput(core, i));
+            }
+            return new JObject { ["groups"] = groups, ["total_count"] = count };
+        }
+
+        private JObject GetEcosimGroupInput(JObject parameters)
+        {
+            return BuildEcosimGroupInput(RequireCore(), RequiredInt(parameters, "index"));
+        }
+
+        private JObject BuildEcosimGroupInput(cCore core, int index)
+        {
+            var count = SafeIntProperty(core, "nGroups");
+            if (index < 1 || index > count)
+            {
+                throw new EwEMcpException("index_out_of_range", $"Ecosim group index {index} is outside 1..{count}");
+            }
+            var input = SafeGetIndexedProperty(core, "EcosimGroupInputs", index);
+            if (input == null)
+            {
+                throw new EwEMcpException("entity_unavailable", $"Ecosim group input {index} is unavailable. Load an Ecosim scenario first.");
+            }
+            return new JObject
+            {
+                ["index"] = index,
+                ["name"] = SafeStringProperty(input, "Name"),
+                ["values"] = ReadScalarValues(input, null, false, "ecosim_group_inputs")
+            };
+        }
+
+        private JObject ListEcosimFleetInputs()
+        {
+            var core = RequireCore();
+            var fleets = new JArray();
+            var count = SafeIntProperty(core, "nFleets");
+            for (var i = 1; i <= count; i++)
+            {
+                fleets.Add(BuildEcosimFleetInput(core, i));
+            }
+            return new JObject { ["fleets"] = fleets, ["total_count"] = count };
+        }
+
+        private JObject GetEcosimFleetInput(JObject parameters)
+        {
+            return BuildEcosimFleetInput(RequireCore(), RequiredInt(parameters, "index"));
+        }
+
+        private JObject BuildEcosimFleetInput(cCore core, int index)
+        {
+            var count = SafeIntProperty(core, "nFleets");
+            if (index < 1 || index > count)
+            {
+                throw new EwEMcpException("index_out_of_range", $"Ecosim fleet index {index} is outside 1..{count}");
+            }
+            var input = SafeGetIndexedProperty(core, "EcosimFleetInputs", index);
+            if (input == null)
+            {
+                throw new EwEMcpException("entity_unavailable", $"Ecosim fleet input {index} is unavailable. Load an Ecosim scenario first.");
+            }
+            return new JObject
+            {
+                ["index"] = index,
+                ["values"] = ReadScalarValues(input, null, false, "ecosim_fleet_inputs")
+            };
+        }
+
+        private JObject GetEcosimGroupResults(JObject parameters)
+        {
+            var core = RequireCore();
+            EnsureEcosimRan(core);
+            var index = RequiredInt(parameters, "index");
+            var groupCount = SafeIntProperty(core, "nGroups");
+            if (index < 1 || index > groupCount)
+            {
+                throw new EwEMcpException("index_out_of_range", $"Ecosim group result index {index} is outside 1..{groupCount}");
+            }
+            var output = SafeGetIndexedProperty(core, "EcosimGroupOutputs", index);
+            if (output == null)
+            {
+                throw new EwEMcpException("entity_unavailable", $"Ecosim group output {index} is unavailable. Run Ecosim first.");
+            }
+
+            var timeRange = EcosimTimeRange(core, parameters);
+            var variables = OptionalStringArray(parameters, "variables") ?? new[]
+            {
+                "biomass",
+                "biomass_rel",
+                "catch",
+                "feeding_time",
+                "fish_mort",
+                "total_mort"
+            };
+            int? fleetIndex = OptionalInt(parameters, "fleet_index");
+            var series = new JObject();
+            foreach (var variable in variables)
+            {
+                series[variable] = ReadEcosimGroupSeries(output, variable, timeRange.Item1, timeRange.Item2, fleetIndex);
+            }
+
+            return new JObject
+            {
+                ["index"] = index,
+                ["name"] = SafeStringProperty(output, "Name"),
+                ["time_start"] = timeRange.Item1,
+                ["time_end"] = timeRange.Item2,
+                ["time_steps"] = SafeIntProperty(core, "nEcosimTimeSteps"),
+                ["first_year"] = SafeInvokeInt(core, "EcosimFirstYear"),
+                ["summary"] = new JObject
+                {
+                    ["biomass_start"] = SafeJTokenProperty(output, "BiomassStart"),
+                    ["biomass_end"] = SafeJTokenProperty(output, "BiomassEnd"),
+                    ["is_catch_aggregated"] = SafeJTokenProperty(output, "isCatchAggregated")
+                },
+                ["series"] = series
+            };
+        }
+
+        private JObject GetEcosimFleetResults(JObject parameters)
+        {
+            var core = RequireCore();
+            EnsureEcosimRan(core);
+            var index = RequiredInt(parameters, "index");
+            var fleetCount = SafeIntProperty(core, "nFleets");
+            if (index < 1 || index > fleetCount)
+            {
+                throw new EwEMcpException("index_out_of_range", $"Ecosim fleet result index {index} is outside 1..{fleetCount}");
+            }
+            var output = SafeGetIndexedProperty(core, "EcosimFleetOutput", index);
+            if (output == null)
+            {
+                throw new EwEMcpException("entity_unavailable", $"Ecosim fleet output {index} is unavailable. Run Ecosim first.");
+            }
+
+            var timeRange = EcosimTimeRange(core, parameters);
+            var variables = OptionalStringArray(parameters, "variables") ?? new[] { "catch_biomass", "value" };
+            var series = new JObject();
+            foreach (var variable in variables)
+            {
+                series[variable] = ReadEcosimFleetSeries(output, variable, timeRange.Item1, timeRange.Item2);
+            }
+
+            return new JObject
+            {
+                ["index"] = index,
+                ["time_start"] = timeRange.Item1,
+                ["time_end"] = timeRange.Item2,
+                ["time_steps"] = SafeIntProperty(core, "nEcosimTimeSteps"),
+                ["first_year"] = SafeInvokeInt(core, "EcosimFirstYear"),
+                ["summary"] = ReadScalarValues(output, null, false, "ecosim_fleet_outputs"),
+                ["series"] = series
+            };
+        }
+
+        private JObject ExportEcosimResults(JObject parameters)
+        {
+            var path = RequiredString(parameters, "path");
+            var ok = RequireCore().dumpEcosimModelResults(path);
+            return new JObject { ["exported"] = ok, ["path"] = path };
+        }
+
+        private void EnsureEcosimRan(cCore core)
+        {
+            var sm = SafeGetProperty(core, "StateMonitor");
+            if (!SafeInvokeBool(sm, "HasEcosimRan"))
+            {
+                throw new EwEMcpException("ecosim_results_unavailable", "Run Ecosim before reading Ecosim result time-series.");
+            }
+        }
+
+        private Tuple<int, int> EcosimTimeRange(cCore core, JObject parameters)
+        {
+            var max = SafeIntProperty(core, "nEcosimTimeSteps");
+            if (max < 1)
+            {
+                throw new EwEMcpException("ecosim_results_unavailable", "Ecosim has no result timesteps.");
+            }
+            var start = OptionalInt(parameters, "start_time") ?? 1;
+            var end = OptionalInt(parameters, "end_time") ?? Math.Min(max, start + 119);
+            if (start < 1 || start > max || end < start || end > max)
+            {
+                throw new EwEMcpException("time_range_out_of_range", $"Ecosim time range {start}..{end} is outside 1..{max}");
+            }
+            return Tuple.Create(start, end);
+        }
+
+        private JArray ReadEcosimGroupSeries(object output, string variable, int start, int end, int? fleetIndex)
+        {
+            string propertyName;
+            switch ((variable ?? string.Empty).Trim().ToLowerInvariant())
+            {
+                case "biomass": propertyName = "Biomass"; break;
+                case "biomass_rel": propertyName = "BiomassRel"; break;
+                case "catch":
+                case "yield": propertyName = "Catch"; break;
+                case "catch_rel": propertyName = "CatchRel"; break;
+                case "feeding_time": propertyName = "FeedingTime"; break;
+                case "fish_mort": propertyName = "FishMort"; break;
+                case "total_mort": propertyName = "TotalMort"; break;
+                case "pred_mort": propertyName = "PredMort"; break;
+                case "consump_biomass": propertyName = "ConsumpBiomass"; break;
+                case "tl": propertyName = "TL"; break;
+                case "value": propertyName = "Value"; break;
+                case "value_rel": propertyName = "ValueRel"; break;
+                case "avg_weight": propertyName = "AvgWeight"; break;
+                case "prod_consump": propertyName = "ProdConsump"; break;
+                case "catch_by_fleet": propertyName = "CatchByFleet"; break;
+                case "fishing_mort_by_fleet": propertyName = "FishingMortByFleet"; break;
+                case "value_by_fleet": propertyName = "ValueByFleet"; break;
+                case "landings_by_fleet": propertyName = "LandingsByFleet"; break;
+                case "discard_by_fleet": propertyName = "DiscardByFleet"; break;
+                default:
+                    throw new EwEMcpException("unknown_ecosim_result_variable", $"Unknown Ecosim group result variable: {variable}");
+            }
+
+            var needsFleet = propertyName.EndsWith("ByFleet", StringComparison.OrdinalIgnoreCase);
+            if (needsFleet && !fleetIndex.HasValue)
+            {
+                throw new EwEMcpException("missing_parameter", $"{variable} requires fleet_index.");
+            }
+
+            var result = new JArray();
+            for (var t = start; t <= end; t++)
+            {
+                var value = needsFleet
+                    ? SafeGetIndexedProperty(output, propertyName, fleetIndex.Value, t)
+                    : SafeGetIndexedProperty(output, propertyName, t);
+                result.Add(new JObject { ["time"] = t, ["value"] = ToJToken(value) });
+            }
+            return result;
+        }
+
+        private JArray ReadEcosimFleetSeries(object output, string variable, int start, int end)
+        {
+            string propertyName;
+            switch ((variable ?? string.Empty).Trim().ToLowerInvariant())
+            {
+                case "catch":
+                case "catch_biomass":
+                    propertyName = "CatchBiomass";
+                    break;
+                case "value":
+                    propertyName = "Value";
+                    break;
+                default:
+                    throw new EwEMcpException("unknown_ecosim_result_variable", $"Unknown Ecosim fleet result variable: {variable}");
+            }
+
+            var result = new JArray();
+            for (var t = start; t <= end; t++)
+            {
+                result.Add(new JObject { ["time"] = t, ["value"] = ToJToken(SafeGetIndexedProperty(output, propertyName, t)) });
+            }
+            return result;
+        }
+
         private JObject ListUiCommands()
         {
             var cmdh = _commandHandler();
@@ -942,7 +1382,10 @@ namespace EwE_MCP_Plugin
             {
                 var type = item?["type"]?.ToString();
                 if (string.Equals(type, "execute_ewe_code", StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(type, "close_model", StringComparison.OrdinalIgnoreCase))
+                    string.Equals(type, "close_model", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(type, "create_ecosim_scenario", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(type, "copy_ecosim_scenario", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(type, "delete_ecosim_scenario", StringComparison.OrdinalIgnoreCase))
                 {
                     throw new EwEMcpException("blocked_batch_command", $"{type} is not allowed in batch");
                 }
@@ -1024,6 +1467,12 @@ namespace EwE_MCP_Plugin
                     return SetEcopathGroupValues(core, index, values);
                 case "ecopath_fleet":
                     return SetEcopathFleetValues(core, index, values);
+                case "ecosim_group_input":
+                case "ecosim_group_inputs":
+                    return SetGenericValues("ecosim_group_inputs", SafeGetIndexedProperty(core, "EcosimGroupInputs", index), index, values);
+                case "ecosim_fleet_input":
+                case "ecosim_fleet_inputs":
+                    return SetGenericValues("ecosim_fleet_inputs", SafeGetIndexedProperty(core, "EcosimFleetInputs", index), index, values);
                 default:
                     throw new EwEMcpException("unsupported_domain", $"Setting values for domain '{domain}' is not supported yet.");
             }
@@ -1149,6 +1598,48 @@ namespace EwE_MCP_Plugin
 
             return new JObject
             {
+                ["index"] = index,
+                ["results"] = results
+            };
+        }
+
+        private JObject SetGenericValues(string domain, object entity, int index, JObject values)
+        {
+            if (entity == null)
+            {
+                throw new EwEMcpException("entity_unavailable", $"{domain} index {index} is unavailable.");
+            }
+
+            var results = new JObject();
+            foreach (var pair in values)
+            {
+                var property = FindWritableProperty(entity, pair.Key, domain);
+                if (property == null)
+                {
+                    results[pair.Key] = "unknown_or_readonly_property";
+                    continue;
+                }
+
+                if (!TryConvertValue(pair.Value, property.PropertyType, out var convertedValue))
+                {
+                    results[pair.Key] = "conversion_failed";
+                    continue;
+                }
+
+                try
+                {
+                    property.SetValue(entity, convertedValue, null);
+                    results[pair.Key] = "updated";
+                }
+                catch
+                {
+                    results[pair.Key] = "failed_to_set";
+                }
+            }
+
+            return new JObject
+            {
+                ["domain"] = domain,
                 ["index"] = index,
                 ["results"] = results
             };
@@ -1866,6 +2357,26 @@ namespace EwE_MCP_Plugin
             }
         }
 
+        private static object SafeGetIndexedProperty(object obj, string propertyName, int index1, int index2)
+        {
+            if (obj == null)
+            {
+                return null;
+            }
+
+            try
+            {
+                var property = obj.GetType()
+                    .GetProperties(BindingFlags.Instance | BindingFlags.Public)
+                    .FirstOrDefault(p => p.Name == propertyName && p.GetIndexParameters().Length == 2);
+                return property?.GetValue(obj, new object[] { index1, index2 });
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
         private static string SafeStringProperty(object obj, string propertyName)
         {
             return SafeGetProperty(obj, propertyName)?.ToString() ?? string.Empty;
@@ -1893,6 +2404,52 @@ namespace EwE_MCP_Plugin
             {
                 return 0;
             }
+        }
+
+        private static object SafeInvoke(object obj, string methodName)
+        {
+            if (obj == null)
+            {
+                return null;
+            }
+
+            try
+            {
+                var method = obj.GetType().GetMethod(methodName, BindingFlags.Instance | BindingFlags.Public, null, Type.EmptyTypes, null);
+                return method?.Invoke(obj, null);
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static bool SafeInvokeBool(object obj, string methodName)
+        {
+            var value = SafeInvoke(obj, methodName);
+            return value is bool boolValue && boolValue;
+        }
+
+        private static int SafeInvokeInt(object obj, string methodName)
+        {
+            var value = SafeInvoke(obj, methodName);
+            if (value == null)
+            {
+                return 0;
+            }
+            try
+            {
+                return Convert.ToInt32(value);
+            }
+            catch
+            {
+                return 0;
+            }
+        }
+
+        private static string SafeInvokeToString(object obj, string methodName)
+        {
+            return SafeInvoke(obj, methodName)?.ToString() ?? string.Empty;
         }
 
         private static JToken SafeJTokenProperty(object obj, string propertyName)
