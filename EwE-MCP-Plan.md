@@ -173,7 +173,7 @@ Current focused live indexed-value expectation:
 7 passed
 ```
 
-Run it from the feature worktree after build/deploy/launch with:
+Run it from the repo or active worktree after build/deploy/launch with:
 
 ```bash
 EWE_MCP_HOST=127.0.0.1 \
@@ -214,7 +214,7 @@ uv run pytest
 Expected baseline at the time of this update:
 
 ```text
-5 passed, 9 skipped
+5 passed, 16 skipped
 ```
 
 ### 3. VM Environment Variables

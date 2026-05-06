@@ -122,7 +122,7 @@ EWE_MCP_TOKEN=ewe-mcp-local-dev \
 uv run ewe-mcp
 ```
 
-The MCP server exposes tools backed by the running EwE plugin. Current main-branch tools include diagnostics, model load/save/close, Ecopath group/fleet reads, generic entity/value reads, selected mutations through `set_values`, UI command invocation, batching, and a disabled-by-default eval helper.
+The MCP server exposes tools backed by the running EwE plugin. Current main-branch tools include diagnostics, model load/save/close, Ecopath group/fleet reads, generic entity/value reads, indexed value reads/writes such as `DietComp(prey)` and `Landings(group)`, selected mutations through `set_values` and `set_indexed_value`, UI command invocation, batching, and a disabled-by-default eval helper.
 
 ## Live Tests
 Run live tests only after build/deploy/launch/smoke succeeds:
@@ -135,6 +135,19 @@ EWE_LIVE_TESTS=1 \
 EWE_MODEL_PATH='C:\Users\dexter\Eii.Ecopath\Database\Tampa_Bay.EwEmdb' \
 uv run pytest
 ```
+
+Expected local baseline with live tests skipped is `5 passed, 16 skipped`. The focused indexed live suite is:
+
+```bash
+EWE_MCP_HOST=127.0.0.1 \
+EWE_MCP_PORT=19877 \
+EWE_MCP_TOKEN=ewe-mcp-local-dev \
+EWE_LIVE_TESTS=1 \
+EWE_MODEL_PATH='C:\Users\dexter\Eii.Ecopath\Database\Tampa_Bay.EwEmdb' \
+uv run pytest tests/test_indexed_values.py
+```
+
+Expected focused indexed live result is `7 passed`.
 
 Prefer testing mutations against copied models. If you mutate the shared sample model, restore the original value in a `finally` block or reload the model before handing off.
 
@@ -151,4 +164,3 @@ Prefer testing mutations against copied models. If you mutate the shared sample 
 - Python cannot connect: confirm the tunnel, `EWE_MCP_HOST`, `EWE_MCP_PORT`, and token.
 - EwE exits after launch: use `./scripts/launch-ewe-vm.sh`, not direct SSH GUI launch.
 - SSH password auth flakes: retry with explicit options: `-o PreferredAuthentications=password -o PubkeyAuthentication=no`.
-
