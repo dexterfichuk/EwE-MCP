@@ -1,0 +1,45 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net48</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <PlatformTarget Condition="'$(PlatformTarget)' == ''">x86</PlatformTarget>
+    <AssemblyName>EwE_MCP_Plugin</AssemblyName>
+    <RootNamespace>EwE_MCP_Plugin</RootNamespace>
+    <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
+    <OutputType>Library</OutputType>
+    <EwEAssemblyDir Condition="'$(EwEAssemblyDir)' == ''">/Users/dexterfichuk/Downloads/Eii.Ecopath-master/Sources</EwEAssemblyDir>
+    <EwEAssemblyConfiguration Condition="'$(EwEAssemblyConfiguration)' == ''">Release</EwEAssemblyConfiguration>
+    <EwEAssemblyPlatform Condition="'$(EwEAssemblyPlatform)' == ''">x86</EwEAssemblyPlatform>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <EwECoreAssemblyDir>$(EwEAssemblyDir)/EwECore/bin/$(EwEAssemblyPlatform)/$(EwEAssemblyConfiguration)</EwECoreAssemblyDir>
+    <EwEUtilsAssemblyDir>$(EwEAssemblyDir)/EwEUtils/bin/$(EwEAssemblyPlatform)/$(EwEAssemblyConfiguration)</EwEUtilsAssemblyDir>
+    <ScientificInterfaceSharedAssemblyDir>$(EwEAssemblyDir)/ScientificInterfaceShared/bin/$(EwEAssemblyPlatform)/$(EwEAssemblyConfiguration)</ScientificInterfaceSharedAssemblyDir>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="All" />
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="EwECore">
+      <HintPath>$(EwECoreAssemblyDir)/EwECore.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="EwEUtils">
+      <HintPath>$(EwEUtilsAssemblyDir)/EwEUtils.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="ScientificInterfaceShared">
+      <HintPath>$(ScientificInterfaceSharedAssemblyDir)/ScientificInterfaceShared.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="System" />
+    <Reference Include="System.Core" />
+    <Reference Include="System.Windows.Forms" />
+  </ItemGroup>
+
+</Project>

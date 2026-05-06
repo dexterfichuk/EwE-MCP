@@ -1,0 +1,62 @@
+"""Shared constants and helpers for EwE MCP."""
+
+from __future__ import annotations
+
+import os
+import struct
+from typing import Any
+
+DEFAULT_HOST = "127.0.0.1"
+DEFAULT_PORT = 9877
+DEFAULT_TOKEN = "ewe-mcp-local-dev"
+TIMEOUT_DEFAULT = 30
+TIMEOUT_LONG = 120
+RECV_CHUNK_SIZE = 65_536
+MAX_RESPONSE_SIZE = 100 * 1024 * 1024
+HEADER_STRUCT = struct.Struct(">I")
+
+BATCH_BLOCKED_COMMANDS = frozenset({"execute_ewe_code", "close_model"})
+
+
+def get_host() -> str:
+    return os.environ.get("EWE_MCP_HOST", DEFAULT_HOST)
+
+
+def get_port() -> int:
+    raw = os.environ.get("EWE_MCP_PORT", str(DEFAULT_PORT))
+    try:
+        port = int(raw)
+    except ValueError as exc:
+        raise ValueError(f"EWE_MCP_PORT must be an integer, got {raw!r}") from exc
+    if not 1 <= port <= 65535:
+        raise ValueError(f"EWE_MCP_PORT out of range: {port}")
+    return port
+
+
+def get_token() -> str:
+    return os.environ.get("EWE_MCP_TOKEN", DEFAULT_TOKEN)
+
+
+def error_hint(message: str) -> str | None:
+    lower = message.lower()
+    if "connection" in lower or "refused" in lower:
+        return "Ensure EwE is running and the EwE MCP plugin is loaded and listening."
+    if "unauthorized" in lower or "token" in lower:
+        return "Set the same EWE_MCP_TOKEN for the EwE plugin and Python MCP server."
+    if "command" in lower and "not found" in lower:
+        return "Call list_ui_commands or get_command_catalog to inspect available EwE UI commands."
+    if "core" in lower and "unavailable" in lower:
+        return "Wait for EwE startup to finish or load a model before using model/run tools."
+    return None
+
+
+def enrich_diagnose(result: dict[str, Any]) -> dict[str, Any]:
+    checks = result.setdefault("checks", [])
+    checks.append(
+        {
+            "name": "python_server",
+            "status": "ok",
+            "detail": {"package": "ewe-mcp"},
+        }
+    )
+    return result

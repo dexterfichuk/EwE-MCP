@@ -1,0 +1,224 @@
+"""FastMCP server exposing a running EwE instance."""
+
+from __future__ import annotations
+
+import asyncio
+import contextlib
+import logging
+import time
+from typing import Any
+
+from mcp.server.fastmcp import FastMCP
+from mcp.types import ToolAnnotations
+
+from ewe_mcp.client import EwEMCPClient
+from ewe_mcp.helpers import (
+    BATCH_BLOCKED_COMMANDS,
+    TIMEOUT_DEFAULT,
+    TIMEOUT_LONG,
+    enrich_diagnose,
+    error_hint,
+    get_host,
+    get_port,
+    get_token,
+)
+
+logger = logging.getLogger("ewe_mcp")
+mcp = FastMCP("EwE MCP")
+
+_connection: EwEMCPClient | None = None
+_validated_at = 0.0
+_connection_ttl = 5.0
+
+
+def _invalidate_connection() -> None:
+    global _connection, _validated_at
+    if _connection is not None:
+        with contextlib.suppress(Exception):
+            _connection.disconnect()
+    _connection = None
+    _validated_at = 0.0
+
+
+def _get_connection() -> EwEMCPClient:
+    global _connection, _validated_at
+    if _connection is not None:
+        now = time.monotonic()
+        if now - _validated_at < _connection_ttl:
+            return _connection
+        try:
+            assert _connection.socket is not None
+            _connection.socket.getpeername()
+            _validated_at = now
+            return _connection
+        except OSError:
+            _invalidate_connection()
+
+    client = EwEMCPClient(host=get_host(), port=get_port(), token=get_token())
+    if not client.connect():
+        raise ConnectionError(f"Could not connect to EwE MCP plugin at {client.host}:{client.port}")
+    _connection = client
+    _validated_at = time.monotonic()
+    return client
+
+
+def _send_sync(command_type: str, params: dict[str, Any] | None = None, timeout: int = TIMEOUT_DEFAULT):
+    last_error: Exception | None = None
+    for attempt in range(3):
+        try:
+            return _get_connection().command_result(command_type, params, timeout=timeout)
+        except (OSError, ConnectionError) as exc:
+            last_error = exc
+            _invalidate_connection()
+            if attempt < 2:
+                time.sleep(0.5 * (attempt + 1))
+    if last_error is not None:
+        raise last_error
+    raise RuntimeError("EwE MCP command failed")
+
+
+async def _send(command_type: str, params: dict[str, Any] | None = None, timeout: int = TIMEOUT_DEFAULT):
+    try:
+        return await asyncio.to_thread(_send_sync, command_type, params, timeout)
+    except Exception as exc:
+        hint = error_hint(str(exc))
+        if hint:
+            raise RuntimeError(f"{exc}\n\nHINT: {hint}") from exc
+        raise
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+async def ping() -> dict[str, Any]:
+    """Check connectivity to the EwE plugin."""
+    return await _send("ping")
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+async def diagnose() -> dict[str, Any]:
+    """Run diagnostic checks on the EwE MCP stack."""
+    return enrich_diagnose(await _send("diagnose"))
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+async def get_ewe_info() -> dict[str, Any]:
+    """Get EwE core/plugin version information."""
+    return await _send("get_ewe_info")
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+async def get_runtime_state() -> dict[str, Any]:
+    """Get current EwE runtime state, model status, and command summary."""
+    return await _send("get_runtime_state")
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+async def get_message_log() -> dict[str, Any]:
+    """Get recent EwE MCP audit log entries."""
+    return await _send("get_message_log")
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+async def list_ui_commands() -> dict[str, Any]:
+    """List EwE UI commands known to the command handler."""
+    return await _send("list_ui_commands")
+
+
+@mcp.tool()
+async def invoke_ui_command(name: str, tag: str | None = None) -> dict[str, Any]:
+    """Invoke a named EwE UI command. Optional tag is passed as cCommand.Tag."""
+    params: dict[str, Any] = {"name": name}
+    if tag is not None:
+        params["tag"] = tag
+    return await _send("invoke_ui_command", params)
+
+
+@mcp.tool()
+async def load_model(path: str) -> dict[str, Any]:
+    """Load an EwE model file inside the running EwE instance."""
+    return await _send("load_model", {"path": path}, timeout=TIMEOUT_LONG)
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+async def get_model_info() -> dict[str, Any]:
+    """Get the currently loaded model summary."""
+    return await _send("get_model_info")
+
+
+@mcp.tool()
+async def save_model(path: str | None = None) -> dict[str, Any]:
+    """Save the current model, optionally to a new path."""
+    params = {"path": path} if path else {}
+    return await _send("save_model", params, timeout=TIMEOUT_LONG)
+
+
+@mcp.tool()
+async def save_model_as(path: str) -> dict[str, Any]:
+    """Save the current model to a new path."""
+    return await _send("save_model_as", {"path": path}, timeout=TIMEOUT_LONG)
+
+
+@mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
+async def close_model() -> dict[str, Any]:
+    """Close the current model."""
+    return await _send("close_model")
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+async def get_core_counters() -> dict[str, Any]:
+    """Get EwE core counters such as groups/fleets where available."""
+    return await _send("get_core_counters")
+
+
+@mcp.tool()
+async def run_ecopath() -> dict[str, Any]:
+    """Run Ecopath mass balance."""
+    return await _send("run_ecopath", timeout=TIMEOUT_LONG)
+
+
+@mcp.tool()
+async def run_ecosim() -> dict[str, Any]:
+    """Run the active Ecosim scenario."""
+    return await _send("run_ecosim", timeout=TIMEOUT_LONG)
+
+
+@mcp.tool()
+async def stop_ecosim() -> dict[str, Any]:
+    """Stop the active Ecosim run."""
+    return await _send("stop_ecosim")
+
+
+@mcp.tool(
+    description="Execute multiple EwE MCP commands in one round-trip. "
+    "Blocked commands: execute_ewe_code, close_model.",
+)
+async def batch_commands(commands: list[dict[str, Any]]) -> dict[str, Any]:
+    """Execute multiple non-blocked commands through the EwE plugin."""
+    for command in commands:
+        command_type = command.get("type")
+        if command_type in BATCH_BLOCKED_COMMANDS:
+            raise ValueError(f"Command {command_type!r} is not allowed in batch")
+    return await _send("batch", {"commands": commands}, timeout=TIMEOUT_LONG)
+
+
+@mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
+async def execute_ewe_code(code: str) -> dict[str, Any]:
+    """Gated future escape hatch for in-process EwE code/reflection execution."""
+    return await _send("execute_ewe_code", {"code": code}, timeout=TIMEOUT_LONG)
+
+
+@mcp.resource("ewe://state")
+async def state_resource() -> str:
+    return str(await _send("get_runtime_state"))
+
+
+@mcp.resource("ewe://commands")
+async def commands_resource() -> str:
+    return str(await _send("list_ui_commands"))
+
+
+def main() -> None:
+    mcp.run()
+
+
+if __name__ == "__main__":
+    main()
