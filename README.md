@@ -2,6 +2,8 @@
 
 External plugin-first MCP bridge for Ecopath with Ecosim.
 
+Agents working in this repo should start with [AGENTS.md](/Users/dexterfichuk/Projects/EwE-MCP/AGENTS.md) for VM connection, launch, tunnel, MCP usage, and safety instructions.
+
 The project follows the same two-piece shape as `qgis-mcp`:
 
 - `src/EwE_MCP_Plugin`: .NET Framework 4.8 EwE plugin DLL that runs inside EwE and exposes a local authenticated socket.
