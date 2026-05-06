@@ -224,6 +224,8 @@ namespace EwE_MCP_Plugin
                     return OnUiThread(RunEcosim);
                 case "stop_ecosim":
                     return OnUiThread(StopEcosim);
+                case "refresh_ui":
+                    return OnUiThread(RefreshUI);
                 case "set_values":
                     return OnUiThread(() => SetValues(request.Params));
                 case "batch":
@@ -660,6 +662,59 @@ namespace EwE_MCP_Plugin
                 results.Add(Dispatch(child));
             }
             return new JObject { ["results"] = results };
+        }
+
+        private JObject RefreshUI()
+        {
+            var uic = _uiContext();
+            if (uic == null) return new JObject { ["success"] = false, ["error"] = "UI context unavailable" };
+
+            var methodsTried = new JArray();
+            bool success = false;
+
+            // Try refreshing the Main Form
+            var formMain = SafeGetProperty(uic, "FormMain");
+            if (formMain != null)
+            {
+                var refreshMethod = formMain.GetType().GetMethod("Refresh", BindingFlags.Instance | BindingFlags.Public, null, Type.EmptyTypes, null);
+                if (refreshMethod != null)
+                {
+                    try
+                    {
+                        refreshMethod.Invoke(formMain, null);
+                        methodsTried.Add("FormMain.Refresh() invoked");
+                        success = true;
+                    }
+                    catch (Exception ex)
+                    {
+                        methodsTried.Add("FormMain.Refresh() failed: " + ex.Message);
+                    }
+                }
+            }
+
+            // Also try navigating to the current node if possible
+            var cmdh = _commandHandler();
+            if (cmdh != null)
+            {
+                var navigateCmd = cmdh.GetCommand("~navigate");
+                if (navigateCmd != null)
+                {
+                    // Invoking navigate without a tag often refreshes the current view
+                    try
+                    {
+                        navigateCmd.Invoke();
+                        methodsTried.Add("~navigate invoked");
+                        success = true;
+                    }
+                    catch { }
+                }
+            }
+
+            return new JObject
+            {
+                ["success"] = success,
+                ["methods_tried"] = methodsTried
+            };
         }
 
         private JObject SetValues(JObject parameters)

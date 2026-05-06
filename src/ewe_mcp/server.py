@@ -224,9 +224,18 @@ async def stop_ecosim() -> dict[str, Any]:
 
 
 @mcp.tool()
+async def refresh_ui() -> dict[str, Any]:
+    """Try to trigger a refresh of the EwE GUI to show updated values."""
+    return await _send("refresh_ui")
+
+
+@mcp.tool()
 async def set_values(domain: str, index: int, values: dict[str, Any]) -> dict[str, Any]:
-    """Set values for an EwE entity. Supported domains: ecopath_group."""
-    return await _send("set_values", {"domain": domain, "index": index, "values": values}, timeout=TIMEOUT_LONG)
+    """Set values for an EwE entity and refresh the UI. Supported domains: ecopath_group."""
+    result = await _send("set_values", {"domain": domain, "index": index, "values": values}, timeout=TIMEOUT_LONG)
+    # Automatically refresh UI after setting values
+    await refresh_ui()
+    return result
 
 
 @mcp.tool(
