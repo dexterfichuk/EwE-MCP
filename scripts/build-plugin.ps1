@@ -5,7 +5,7 @@ param(
 )
 
 if ([string]::IsNullOrWhiteSpace($EwEAssemblyDir)) {
-    throw "Set EWE_ASSEMBLY_DIR to the EwE Sources directory containing EwECore, EwEUtils, and ScientificInterfaceShared."
+    throw "Set EWE_ASSEMBLY_DIR to either the EwE install directory or a built EwE Sources directory."
 }
 
 dotnet build "$PSScriptRoot\..\src\EwE_MCP_Plugin\EwE_MCP_Plugin.csproj" `

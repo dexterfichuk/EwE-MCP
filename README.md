@@ -34,10 +34,10 @@ The plugin defaults to `ewe-mcp-local-dev` if no token is configured. That is fo
 
 ## Build Plugin
 
-Build against compiled EwE assemblies:
+Build against either an installed EwE directory or compiled EwE assemblies:
 
 ```powershell
-$env:EWE_ASSEMBLY_DIR = "C:\Path\To\Eii.Ecopath-master\Sources"
+$env:EWE_ASSEMBLY_DIR = "C:\Program Files (x86)\Ecopath with Ecosim 40 years 6.7.0.18865_32-bit"
 .\scripts\build-plugin.ps1 -Configuration Release -Platform x86
 ```
 
@@ -58,14 +58,18 @@ export EWE_VM_EWE_DIR='C:\Path\To\EwE'
 Deploy after building:
 
 ```bash
-./scripts/deploy-plugin-vm.sh
+./scripts/build-plugin-vm.sh
+./scripts/deploy-built-plugin-vm.sh
 ```
 
-Run a basic VM path smoke check:
+Launch EwE in the VM's interactive desktop session, then smoke-test the live plugin through an SSH tunnel:
 
 ```bash
-./scripts/vm-smoke.sh
+./scripts/launch-ewe-vm.sh
+./scripts/vm-live-smoke.sh
 ```
+
+Launching through an interactive scheduled task is intentional: starting the GUI directly from the SSH service session can exit before the socket stays available.
 
 ## Run Python MCP Server
 

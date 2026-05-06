@@ -17,24 +17,37 @@
     <EwECoreAssemblyDir>$(EwEAssemblyDir)/EwECore/bin/$(EwEAssemblyPlatform)/$(EwEAssemblyConfiguration)</EwECoreAssemblyDir>
     <EwEUtilsAssemblyDir>$(EwEAssemblyDir)/EwEUtils/bin/$(EwEAssemblyPlatform)/$(EwEAssemblyConfiguration)</EwEUtilsAssemblyDir>
     <ScientificInterfaceSharedAssemblyDir>$(EwEAssemblyDir)/ScientificInterfaceShared/bin/$(EwEAssemblyPlatform)/$(EwEAssemblyConfiguration)</ScientificInterfaceSharedAssemblyDir>
+    <EwECoreAssemblyPath Condition="Exists('$(EwEAssemblyDir)/EwECore.dll')">$(EwEAssemblyDir)/EwECore.dll</EwECoreAssemblyPath>
+    <EwECoreAssemblyPath Condition="'$(EwECoreAssemblyPath)' == ''">$(EwECoreAssemblyDir)/EwECore.dll</EwECoreAssemblyPath>
+    <EwEPluginAssemblyPath Condition="Exists('$(EwEAssemblyDir)/EwEPlugin.dll')">$(EwEAssemblyDir)/EwEPlugin.dll</EwEPluginAssemblyPath>
+    <EwEPluginAssemblyPath Condition="'$(EwEPluginAssemblyPath)' == ''">$(EwECoreAssemblyDir)/EwEPlugin.dll</EwEPluginAssemblyPath>
+    <EwEUtilsAssemblyPath Condition="Exists('$(EwEAssemblyDir)/EwEUtils.dll')">$(EwEAssemblyDir)/EwEUtils.dll</EwEUtilsAssemblyPath>
+    <EwEUtilsAssemblyPath Condition="'$(EwEUtilsAssemblyPath)' == ''">$(EwEUtilsAssemblyDir)/EwEUtils.dll</EwEUtilsAssemblyPath>
+    <ScientificInterfaceSharedAssemblyPath Condition="Exists('$(EwEAssemblyDir)/ScientificInterfaceShared.dll')">$(EwEAssemblyDir)/ScientificInterfaceShared.dll</ScientificInterfaceSharedAssemblyPath>
+    <ScientificInterfaceSharedAssemblyPath Condition="'$(ScientificInterfaceSharedAssemblyPath)' == ''">$(ScientificInterfaceSharedAssemblyDir)/ScientificInterfaceShared.dll</ScientificInterfaceSharedAssemblyPath>
   </PropertyGroup>
 
   <ItemGroup>
+    <Compile Remove="._*.cs" />
     <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="All" />
     <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
   </ItemGroup>
 
   <ItemGroup>
     <Reference Include="EwECore">
-      <HintPath>$(EwECoreAssemblyDir)/EwECore.dll</HintPath>
+      <HintPath>$(EwECoreAssemblyPath)</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="EwEPlugin">
+      <HintPath>$(EwEPluginAssemblyPath)</HintPath>
       <Private>False</Private>
     </Reference>
     <Reference Include="EwEUtils">
-      <HintPath>$(EwEUtilsAssemblyDir)/EwEUtils.dll</HintPath>
+      <HintPath>$(EwEUtilsAssemblyPath)</HintPath>
       <Private>False</Private>
     </Reference>
     <Reference Include="ScientificInterfaceShared">
-      <HintPath>$(ScientificInterfaceSharedAssemblyDir)/ScientificInterfaceShared.dll</HintPath>
+      <HintPath>$(ScientificInterfaceSharedAssemblyPath)</HintPath>
       <Private>False</Private>
     </Reference>
     <Reference Include="System" />

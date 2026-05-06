@@ -1,10 +1,10 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Reflection;
 using System.Threading;
 using EwECore;
-using EwECore.Plugins;
-using EwECore.Plugins.UI;
+using EwEPlugin;
 using Newtonsoft.Json.Linq;
 using ScientificInterfaceShared.Commands;
 using ScientificInterfaceShared.Controls;
@@ -27,10 +27,16 @@ namespace EwE_MCP_Plugin
         public string Author => "Dexter Fichuk / Codex";
         public string Contact => "";
 
+        public EwEMcpPlugin()
+        {
+            EwEMcpFileLog.Info("Plugin constructed");
+        }
+
         public void Initialize(object core)
         {
             lock (_gate)
             {
+                EwEMcpFileLog.Info($"Initialize called with core={core?.GetType().FullName ?? "<null>"}");
                 _core = core as cCore;
                 EnsureServer();
             }
@@ -40,6 +46,7 @@ namespace EwE_MCP_Plugin
         {
             lock (_gate)
             {
+                EwEMcpFileLog.Info($"UIContext called with uic={uic?.GetType().FullName ?? "<null>"}");
                 _uiContext = uic as cUIContext;
                 if (_uiContext != null)
                 {
@@ -55,6 +62,7 @@ namespace EwE_MCP_Plugin
         {
             lock (_gate)
             {
+                EwEMcpFileLog.Info("Dispose called");
                 _server?.Stop();
                 _server = null;
             }
@@ -68,15 +76,70 @@ namespace EwE_MCP_Plugin
             }
 
             var config = EwEMcpConfig.FromEnvironment();
-            var router = new EwEMcpCommandRouter(
-                () => _core,
-                () => _uiContext,
-                () => _commandHandler,
-                () => _syncContext,
-                _auditLog,
-                config);
-            _server = new EwEMcpSocketServer(config, router, _auditLog);
-            _server.Start();
+            EwEMcpFileLog.Info($"Starting socket server on {config.Host}:{config.Port}");
+            try
+            {
+                var router = new EwEMcpCommandRouter(
+                    () => _core,
+                    () => _uiContext,
+                    () => _commandHandler,
+                    () => _syncContext,
+                    _auditLog,
+                    config);
+                _server = new EwEMcpSocketServer(config, router, _auditLog);
+                _server.Start();
+                EwEMcpFileLog.Info("Socket server started");
+            }
+            catch (Exception ex)
+            {
+                EwEMcpFileLog.Error("Socket server failed to start", ex);
+                _server = null;
+                throw;
+            }
+        }
+    }
+
+    internal static class EwEMcpFileLog
+    {
+        private static readonly object Gate = new object();
+
+        public static void Info(string message)
+        {
+            Write("INFO", message, null);
+        }
+
+        public static void Error(string message, Exception exception)
+        {
+            Write("ERROR", message, exception);
+        }
+
+        private static void Write(string level, string message, Exception exception)
+        {
+            try
+            {
+                lock (Gate)
+                {
+                    File.AppendAllText(GetPath(),
+                        $"{DateTime.UtcNow:o} [{level}] {message}{Environment.NewLine}{exception}{Environment.NewLine}");
+                }
+            }
+            catch
+            {
+                // Logging must never affect EwE plugin loading.
+            }
+        }
+
+        private static string GetPath()
+        {
+            var root = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+            if (string.IsNullOrWhiteSpace(root))
+            {
+                root = Path.GetTempPath();
+            }
+
+            var dir = Path.Combine(root, "Ecopath with Ecosim");
+            Directory.CreateDirectory(dir);
+            return Path.Combine(dir, "EwE_MCP_Plugin.log");
         }
     }
 
@@ -110,7 +173,11 @@ namespace EwE_MCP_Plugin
             switch ((request.Type ?? string.Empty).Trim().ToLowerInvariant())
             {
                 case "ping":
-                    return Result("pong", true, "plugin", "EwE MCP Bridge");
+                    return new JObject
+                    {
+                        ["pong"] = true,
+                        ["plugin"] = "EwE MCP Bridge"
+                    };
                 case "diagnose":
                     return Diagnose();
                 case "get_ewe_info":
@@ -269,7 +336,7 @@ namespace EwE_MCP_Plugin
                         continue;
                     }
                     var count = method.Invoke(core, new[] { value });
-                    result[value.ToString()] = count;
+                    result[value.ToString()] = count == null ? JValue.CreateNull() : JToken.FromObject(count);
                 }
                 catch
                 {
