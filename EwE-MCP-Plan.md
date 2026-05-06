@@ -47,9 +47,12 @@ Build EwE MCP as a separate plugin-first project in `/Users/dexterfichuk/Project
   - `run_ecosim`
   - `stop_ecosim`
   - `batch`
-  - `batch_commands`
-  - gated placeholder `execute_ewe_code`
-- Implemented Python package in `src/ewe_mcp`.
+  - Implemented `batch_commands`
+  - Implemented `refresh_ui` (FormMain.Refresh and ~navigate)
+  - Implemented `set_values` (ecopath_group, ecopath_fleet) with automatic UI refresh
+  - Implemented `execute_ewe_code` with nested property and method support (gated by EWE_MCP_ENABLE_EVAL=1)
+  - Implemented Python package in `src/ewe_mcp`.
+
 - Implemented Python socket client and FastMCP server skeleton.
 - Exposed initial Python tools and resources, including `ewe://state` and `ewe://commands`.
 - Added Python protocol/helper tests.
