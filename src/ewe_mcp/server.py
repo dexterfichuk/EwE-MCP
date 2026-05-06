@@ -300,7 +300,7 @@ async def refresh_ui() -> dict[str, Any]:
     return await _send("refresh_ui")
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
 async def set_values(domain: str, index: int, values: dict[str, Any]) -> dict[str, Any]:
     """Set values for an EwE entity and refresh the UI. Supported domains: ecopath_group, ecopath_fleet."""
     result = await _send("set_values", {"domain": domain, "index": index, "values": values}, timeout=TIMEOUT_LONG)
@@ -309,7 +309,7 @@ async def set_values(domain: str, index: int, values: dict[str, Any]) -> dict[st
     return result
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
 async def set_indexed_value(
     domain: str,
     variable: str,

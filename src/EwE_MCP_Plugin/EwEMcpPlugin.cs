@@ -671,6 +671,7 @@ namespace EwE_MCP_Plugin
             {
                 throw new EwEMcpException("unknown_indexed_variable", $"Indexed variable not found: {variable} with {indices.Length} index value(s)");
             }
+            ValidateIndexedBounds(target, property, indices);
 
             var value = ReadIndexedPropertyValue(target.Entity, property, indices);
             return new JObject
@@ -694,6 +695,11 @@ namespace EwE_MCP_Plugin
             if (property == null)
             {
                 return IndexedValidationResult(target, variable, indices, false, "unknown_or_readonly_indexed_variable", null);
+            }
+            var boundsError = GetIndexedBoundsError(target, property, indices);
+            if (!string.IsNullOrWhiteSpace(boundsError))
+            {
+                return IndexedValidationResult(target, property.Name, indices, false, boundsError, property);
             }
 
             var valid = TryConvertValue(value, property.PropertyType, out _);
@@ -1034,6 +1040,7 @@ namespace EwE_MCP_Plugin
             {
                 throw new EwEMcpException("unknown_or_readonly_indexed_variable", $"Indexed variable is not writable or not found: {variable}");
             }
+            ValidateIndexedBounds(target, property, indices);
             if (!TryConvertValue(value, property.PropertyType, out var convertedValue))
             {
                 throw new EwEMcpException("conversion_failed", $"Could not convert value to {FriendlyTypeName(property.PropertyType)}");
@@ -1390,11 +1397,7 @@ namespace EwE_MCP_Plugin
             }
             catch (Exception ex)
             {
-                return new JObject
-                {
-                    ["error"] = "read_failed",
-                    ["message"] = ex.Message
-                };
+                throw new EwEMcpException("indexed_read_failed", ex.InnerException?.Message ?? ex.Message);
             }
         }
 
@@ -1489,6 +1492,43 @@ namespace EwE_MCP_Plugin
                 result["reason"] = reason;
             }
             return result;
+        }
+
+        private void ValidateIndexedBounds(EntityTarget target, PropertyInfo property, int[] indices)
+        {
+            var reason = GetIndexedBoundsError(target, property, indices);
+            if (!string.IsNullOrWhiteSpace(reason))
+            {
+                throw new EwEMcpException("indexed_index_out_of_range", reason);
+            }
+        }
+
+        private string GetIndexedBoundsError(EntityTarget target, PropertyInfo property, int[] indices)
+        {
+            if (target == null || property == null || indices == null || indices.Length != 1)
+            {
+                return string.Empty;
+            }
+
+            var propertyName = property.Name ?? string.Empty;
+            var boundedByGroups =
+                (target.NormalizedDomain == "ecopath_groups" && string.Equals(propertyName, "DietComp", StringComparison.OrdinalIgnoreCase)) ||
+                (target.NormalizedDomain == "ecopath_fleets" &&
+                    (string.Equals(propertyName, "Landings", StringComparison.OrdinalIgnoreCase) ||
+                     string.Equals(propertyName, "Discards", StringComparison.OrdinalIgnoreCase)));
+
+            if (!boundedByGroups)
+            {
+                return string.Empty;
+            }
+
+            var groupCount = SafeIntProperty(RequireCore(), "nGroups");
+            if (indices[0] < 1 || indices[0] > groupCount)
+            {
+                return $"Index {indices[0]} is outside valid group range 1..{groupCount} for {propertyName}";
+            }
+
+            return string.Empty;
         }
 
         private static string AliasPropertyName(string variable, string domain)

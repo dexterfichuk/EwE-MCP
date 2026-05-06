@@ -8,6 +8,7 @@ VM_HOST="${EWE_VM_HOST:-192.168.64.2}"
 EWE_DIR="${EWE_VM_EWE_DIR:-C:\\Program Files (x86)\\Ecopath with Ecosim 40 years 6.7.0.18865_32-bit}"
 CONFIGURATION="${EWE_BUILD_CONFIGURATION:-Release}"
 PLATFORM="${EWE_BUILD_PLATFORM:-x86}"
+SSH_OPTS=(-o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no)
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ROOT_NAME="$(basename "$ROOT_DIR")"
@@ -26,6 +27,6 @@ COPYFILE_DISABLE=1 tar \
   -C "$(dirname "$ROOT_DIR")" \
   "$(basename "$ROOT_DIR")"
 
-sshpass -e scp -o StrictHostKeyChecking=no "$ARCHIVE" "${VM_USER}@${VM_HOST}:C:/Users/dexter/ewe-mcp-src.tgz"
-sshpass -e ssh -o StrictHostKeyChecking=no "${VM_USER}@${VM_HOST}" \
+sshpass -e scp "${SSH_OPTS[@]}" "$ARCHIVE" "${VM_USER}@${VM_HOST}:C:/Users/dexter/ewe-mcp-src.tgz"
+sshpass -e ssh "${SSH_OPTS[@]}" "${VM_USER}@${VM_HOST}" \
   "powershell -NoProfile -Command \"Remove-Item -Recurse -Force '$REMOTE_ROOT' -ErrorAction SilentlyContinue; tar -xzf C:\\Users\\dexter\\ewe-mcp-src.tgz -C C:\\Users\\dexter; Set-Location '$REMOTE_ROOT'; dotnet build .\\src\\EwE_MCP_Plugin\\EwE_MCP_Plugin.csproj -c $CONFIGURATION -p:PlatformTarget=$PLATFORM -p:EwEAssemblyDir='$EWE_DIR'\""
