@@ -1187,7 +1187,18 @@ namespace EwE_MCP_Plugin
         private JObject ExportEcosimResults(JObject parameters)
         {
             var path = RequiredString(parameters, "path");
-            var ok = RequireCore().dumpEcosimModelResults(path);
+            var core = RequireCore();
+            var method = core.GetType().GetMethods(BindingFlags.Instance | BindingFlags.Public)
+                .FirstOrDefault(m =>
+                    string.Equals(m.Name, "dumpEcosimModelResults", StringComparison.OrdinalIgnoreCase) &&
+                    m.GetParameters().Length == 1 &&
+                    m.GetParameters()[0].ParameterType == typeof(string));
+            if (method == null)
+            {
+                throw new EwEMcpException("export_unavailable", "This EwE build does not expose dumpEcosimModelResults.");
+            }
+
+            var ok = Convert.ToBoolean(method.Invoke(core, new object[] { path }));
             return new JObject { ["exported"] = ok, ["path"] = path };
         }
 

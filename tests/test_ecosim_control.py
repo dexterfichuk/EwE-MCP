@@ -1,4 +1,5 @@
 import os
+import asyncio
 
 import pytest
 
@@ -40,6 +41,17 @@ async def _ensure_ecosim_loaded():
     loaded = await load_ecosim_scenario(active)
     assert loaded["loaded"] is True
     return active
+
+
+async def _wait_for_ecosim_completed(timeout_seconds=60):
+    deadline = asyncio.get_running_loop().time() + timeout_seconds
+    last_state = {}
+    while asyncio.get_running_loop().time() < deadline:
+        last_state = await get_ecosim_run_state()
+        if last_state.get("has_ecosim_ran"):
+            return last_state
+        await asyncio.sleep(1)
+    pytest.fail(f"Ecosim did not complete within {timeout_seconds}s; last state: {last_state}")
 
 
 @pytest.mark.asyncio
@@ -91,7 +103,7 @@ async def test_ecosim_run_and_fetch_results():
     run = await run_ecosim()
     assert run["started"] is True
 
-    state = await get_ecosim_run_state()
+    state = await _wait_for_ecosim_completed()
     assert state["has_ecosim_ran"] is True
 
     group_results = await get_ecosim_group_results(
@@ -117,6 +129,7 @@ async def test_ecosim_run_and_fetch_results():
 async def test_ecosim_result_bounds_error():
     await _ensure_ecosim_loaded()
     await run_ecosim()
+    await _wait_for_ecosim_completed()
 
     with pytest.raises(EwEMCPError) as excinfo:
         await get_ecosim_group_results(index=1, start_time=0, end_time=1)
