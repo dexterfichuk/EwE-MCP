@@ -153,6 +153,13 @@ Build EwE MCP as a separate plugin-first project in `/Users/dexterfichuk/Project
   - `ping`
   - `diagnose`
   - `get_ewe_info`
+- Confirmed focused live Ecosim control test suite through an SSH tunnel:
+  - `tests/test_ecosim_control.py` passed with 5 live tests
+  - loads `Tampa_Bay.EwEmdb`
+  - loads an Ecosim scenario
+  - inspects group/fleet inputs
+  - runs Ecosim asynchronously and waits for completion
+  - reads short group/fleet result time-series windows
 - Confirmed live Ecopath read-only inspection against `C:\Users\dexter\Eii.Ecopath\Database\Tampa_Bay.EwEmdb`:
   - counters: 52 groups, 51 living groups, 7 fleets, 1 detritus group
   - group summaries with biomass/PB/QB/EE input values
@@ -212,7 +219,7 @@ uv run pytest tests/test_indexed_values.py
 Current focused live Ecosim-control expectation:
 
 ```text
-1 local batch-safety test plus live scenario/input/run/result tests when `EWE_LIVE_TESTS=1`
+5 passed
 ```
 
 Run it from the repo or active worktree after build/deploy/launch with:
@@ -454,7 +461,7 @@ PY
   - run/stop Ecosim: done
   - subscribe to progress/completion events where available
   - fetch time-series outputs: initial group/fleet result series done
-  - export results: initial `dumpEcosimModelResults` wrapper done
+  - export results: initial reflected `dumpEcosimModelResults` wrapper done for installed-build compatibility
 
 ### Phase 5: Full EwE Suite Coverage
 - Add Ecospace tools:

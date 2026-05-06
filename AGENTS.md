@@ -160,7 +160,7 @@ EWE_MODEL_PATH='C:\Users\dexter\Eii.Ecopath\Database\Tampa_Bay.EwEmdb' \
 uv run pytest tests/test_ecosim_control.py
 ```
 
-The suite loads the sample model, loads an Ecosim scenario, inspects group/fleet inputs, runs Ecosim, and reads short result time-series windows.
+Expected focused Ecosim live result is `5 passed`. The suite loads the sample model, loads an Ecosim scenario, inspects group/fleet inputs, runs Ecosim asynchronously, waits for completion, and reads short result time-series windows.
 
 Prefer testing mutations against copied models. If you mutate the shared sample model, restore the original value in a `finally` block or reload the model before handing off.
 
