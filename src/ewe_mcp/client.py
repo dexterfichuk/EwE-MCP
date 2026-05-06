@@ -18,6 +18,13 @@ from ewe_mcp.helpers import (
 )
 
 
+class EwEMCPError(RuntimeError):
+    def __init__(self, code: str, message: str):
+        super().__init__(message)
+        self.code = code
+        self.message = message
+
+
 class EwEMCPClient:
     def __init__(self, host: str | None = None, port: int | None = None, token: str | None = None):
         self.host = host or get_host()
@@ -101,5 +108,8 @@ class EwEMCPClient:
         response = self.send_command(command_type, params, timeout=timeout)
         if response.get("status") == "error":
             error = response.get("error") or {}
-            raise RuntimeError(error.get("message") or "EwE MCP command failed")
+            raise EwEMCPError(
+                error.get("code") or "unknown_error",
+                error.get("message") or "EwE MCP command failed",
+            )
         return response.get("result") or {}

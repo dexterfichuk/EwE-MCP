@@ -4,7 +4,7 @@ import json
 import socket
 import threading
 
-from ewe_mcp.client import EwEMCPClient
+from ewe_mcp.client import EwEMCPClient, EwEMCPError
 from ewe_mcp.helpers import HEADER_STRUCT
 
 
@@ -47,6 +47,8 @@ def test_client_sends_token_and_unwraps_success():
     thread.join(timeout=2)
 
 
+import pytest
+
 def test_client_raises_on_error_response():
     def handler(request):
         return {
@@ -58,12 +60,9 @@ def test_client_raises_on_error_response():
     port, thread = _serve_once(handler)
     client = EwEMCPClient(host="127.0.0.1", port=port, token="bad")
     assert client.connect()
-    try:
+    with pytest.raises(EwEMCPError) as excinfo:
         client.command_result("ping")
-    except RuntimeError as exc:
-        assert "Invalid token" in str(exc)
-    else:
-        raise AssertionError("Expected RuntimeError")
-    finally:
-        client.disconnect()
+    assert excinfo.value.code == "unauthorized"
+    assert excinfo.value.message == "Invalid token"
+    client.disconnect()
     thread.join(timeout=2)
