@@ -3,6 +3,7 @@ import os
 import pytest
 
 from ewe_mcp.server import (
+    discard_changes,
     get_active_view,
     get_indexed_value,
     get_values,
@@ -54,6 +55,7 @@ async def test_set_values_can_navigate_to_edit_screen():
     result = await set_values(domain="ecopath_group", index=1, values={"name": "0-12 Snook"})
     assert result["results"]["name"] == "updated"
     assert result["navigation"]["suggested_node_id"] == "ndBasicInput"
+    await discard_changes()
 
 
 @live

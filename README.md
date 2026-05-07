@@ -16,7 +16,7 @@ Implemented now:
 - Authenticated length-prefixed JSON socket protocol on `127.0.0.1:9877`.
 - EwE plugin lifecycle: `IPlugin`, `IUIContextPlugin`, `IDisposedPlugin`.
 - Core tools: `ping`, `diagnose`, `get_ewe_info`, `get_runtime_state`, `get_message_log`.
-- Model/run tools: `load_model`, `save_model`, `save_model_as`, `close_model`, `get_model_info`, `get_core_counters`, `run_ecopath`, `run_ecosim`, `stop_ecosim`.
+- Model/run tools: `load_model`, `save_model`, `save_model_as`, `close_model`, `get_model_info`, `has_changes`, `discard_changes`, `get_core_counters`, `run_ecopath`, `run_ecosim`, `stop_ecosim`.
 - Read-only Ecopath tools: `list_domains`, `list_entities`, `list_ecopath_groups`, `get_ecopath_group`, `list_ecopath_fleets`, `get_ecopath_fleet`.
 - Ecosim control tools: scenario list/get/load/create/copy/delete/save, `get_ecosim_run_state`, group/fleet input inspection, group/fleet result time-series, and reflected `export_ecosim_results` for installed-build compatibility.
 - Generic entity/value tools: `get_entity`, `list_variables`, `get_variable_metadata`, `get_values`, `validate_values`.

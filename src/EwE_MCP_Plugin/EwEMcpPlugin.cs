@@ -211,6 +211,10 @@ namespace EwE_MCP_Plugin
                     return OnUiThread(CloseModel);
                 case "get_model_info":
                     return GetModelInfo();
+                case "has_changes":
+                    return HasChanges();
+                case "discard_changes":
+                    return OnUiThread(DiscardChanges);
                 case "get_core_counters":
                     return GetCoreCounters();
                 case "list_domains":
@@ -1669,6 +1673,25 @@ namespace EwE_MCP_Plugin
         {
             bool ok = RequireCore().CloseModel();
             return new JObject { ["closed"] = ok };
+        }
+
+        private JObject HasChanges()
+        {
+            var core = RequireCore();
+            return new JObject { ["has_changes"] = core.HasChanges() };
+        }
+
+        private JObject DiscardChanges()
+        {
+            var core = RequireCore();
+            var hadChanges = core.HasChanges();
+            var ok = core.DiscardChanges();
+            return new JObject
+            {
+                ["discarded"] = ok,
+                ["had_changes"] = hadChanges,
+                ["has_changes"] = core.HasChanges()
+            };
         }
 
         private JObject RunEcopath()

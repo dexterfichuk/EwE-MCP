@@ -36,6 +36,8 @@ Build EwE MCP as a separate plugin-first project in `/Users/dexterfichuk/Project
   - `save_model`
   - `save_model_as`
   - `close_model`
+  - `has_changes`
+  - `discard_changes`
   - `get_model_info`
   - `get_core_counters`
   - `list_domains`
@@ -82,6 +84,7 @@ Build EwE MCP as a separate plugin-first project in `/Users/dexterfichuk/Project
 - Implemented first-class UI navigation over EwE's navigation tree, including node listing, direct navigation by node id/text/path/query, and active view reporting.
 - Implemented `set_values` for `ecopath_group`, `ecopath_fleet`, `ecosim_group_input`, and `ecosim_fleet_input`.
 - Implemented Python-side automatic UI refresh after `set_values`, plus default value-tool navigation on `get_values`, `get_indexed_value`, `set_values`, and `set_indexed_value`; callers can pass `navigate=False` for quiet/background access.
+- Implemented explicit test-cleanup utilities `has_changes` and `discard_changes`; live mutation tests restore values and call `discard_changes` to avoid EwE save prompts without saving over the shared sample model.
 - Implemented the first explicit Ecosim control loop:
   - list/get scenarios
   - load a scenario

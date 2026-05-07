@@ -170,6 +170,18 @@ async def get_model_info() -> dict[str, Any]:
     return await _send("get_model_info")
 
 
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+async def has_changes() -> dict[str, Any]:
+    """Return whether EwE currently has unsaved model changes."""
+    return await _send("has_changes")
+
+
+@mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
+async def discard_changes() -> dict[str, Any]:
+    """Clear EwE unsaved-change flags without saving. Intended for live test cleanup."""
+    return await _send("discard_changes")
+
+
 @mcp.tool()
 async def save_model(path: str | None = None) -> dict[str, Any]:
     """Save the current model, optionally to a new path."""
