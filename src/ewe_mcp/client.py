@@ -80,7 +80,8 @@ class EwEMCPClient:
         timeout: int = TIMEOUT_DEFAULT,
     ) -> dict[str, Any]:
         if self.socket is None:
-            raise ConnectionError("Not connected to EwE MCP plugin")
+            if not self.connect():
+                raise ConnectionError("Failed to connect to EwE MCP plugin")
 
         request = {
             "id": uuid.uuid4().hex,
@@ -90,17 +91,19 @@ class EwEMCPClient:
             "timeout": timeout,
         }
         payload = json.dumps(request, separators=(",", ":")).encode("utf-8")
-        try:
-            self.socket.sendall(HEADER_STRUCT.pack(len(payload)))
-            self.socket.sendall(payload)
+        self.socket.sendall(HEADER_STRUCT.pack(len(payload)))
+        self.socket.sendall(payload)
 
-            self._set_timeout(timeout)
+        self._set_timeout(timeout)
+        try:
             header = self._recv_exact(4)
             length = HEADER_STRUCT.unpack(header)[0]
             data = self._recv_exact(length)
             self._set_timeout(None)
             return json.loads(data.decode("utf-8"))
-        except Exception:
+        except socket.timeout:
+            # If the socket times out, it is poisoned with an unread response.
+            # We must disconnect to force a fresh connection on the next call.
             self.disconnect()
             raise
 
