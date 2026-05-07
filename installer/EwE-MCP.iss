@@ -47,6 +47,8 @@ begin
     'Select the folder in which Ecopath with Ecosim is installed (it must contain ewe6.exe).',
     False, '');
   EwEDirPage.Add('');
+
+  // Try to find a default installation path
   if DirExists(ExpandConstant('{pf32}\Ecopath with Ecosim 40 years 6.7.0.18865_32-bit')) then
     EwEDirPage.Values[0] := ExpandConstant('{pf32}\Ecopath with Ecosim 40 years 6.7.0.18865_32-bit')
   else if DirExists(ExpandConstant('{pf32}\Ecopath with Ecosim')) then
