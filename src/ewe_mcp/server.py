@@ -8,8 +8,11 @@ import logging
 import time
 from typing import Any
 
+import base64
+import pathlib
+
 from mcp.server.fastmcp import FastMCP
-from mcp.types import ToolAnnotations
+from mcp.types import ImageContent, TextContent, ToolAnnotations
 
 from ewe_mcp.client import EwEMCPClient
 from ewe_mcp.helpers import (
@@ -473,6 +476,105 @@ async def stop_ecosim() -> dict[str, Any]:
 async def refresh_ui() -> dict[str, Any]:
     """Try to trigger a refresh of the EwE GUI to show updated values."""
     return await _send("refresh_ui")
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+async def capture_view(
+    target: str = "auto",
+    max_width: int | None = None,
+    max_height: int | None = None,
+) -> list[TextContent | ImageContent]:
+    """Capture a screenshot of the current EwE view.
+    
+    NOTE: Prefer using data-reading tools (e.g., get_values, get_indexed_value) to extract tabular data. 
+    Only use this tool for capturing graphs, charts, and spatial visualizations.
+
+    Args:
+        target: What to capture — "auto" (content panel preferred), "main" (full window),
+                "active" (active form), or "content" (content panel only).
+        max_width: Optional max pixel width to downscale to (preserves aspect ratio).
+        max_height: Optional max pixel height to downscale to (preserves aspect ratio).
+
+    Returns:
+        A 2-element list containing TextContent with metadata and ImageContent with the PNG.
+    """
+    params: dict[str, Any] = {"target": target}
+    if max_width is not None:
+        params["max_width"] = max_width
+    if max_height is not None:
+        params["max_height"] = max_height
+
+    result = await _send("capture_view", params, timeout=TIMEOUT_LONG)
+
+    image_data = base64.b64decode(result["data"])
+
+    # Build metadata summary (everything except the raw data).
+    meta = {
+        key: value
+        for key, value in result.items()
+        if key != "data"
+    }
+
+    return [
+        TextContent(type="text", text=str(meta)),
+        ImageContent(
+            type="image",
+            data=result["data"],
+            mimeType="image/png",
+        ),
+    ]
+
+
+@mcp.tool()
+async def save_screenshot(
+    path: str,
+    target: str = "auto",
+    max_width: int | None = None,
+    max_height: int | None = None,
+) -> dict[str, Any]:
+    """Capture a screenshot and save it to a local file on the machine running the MCP server.
+
+    NOTE: Prefer using data-reading tools (e.g., get_values, get_indexed_value) to extract tabular data.
+    Only use this tool for capturing graphs, charts, and spatial visualizations.
+
+    Args:
+        path: File path where the PNG will be saved (local to the Python MCP process).
+        target: What to capture — "auto", "main", "active", or "content".
+        max_width: Optional max pixel width to downscale to.
+        max_height: Optional max pixel height to downscale to.
+    """
+    if ".." in pathlib.Path(path).parts:
+        raise ValueError("Path cannot contain '..' components for security.")
+
+    params: dict[str, Any] = {"target": target}
+    if max_width is not None:
+        params["max_width"] = max_width
+    if max_height is not None:
+        params["max_height"] = max_height
+
+    result = await _send("capture_view", params, timeout=TIMEOUT_LONG)
+
+    # Decode base64 data and save it locally on the machine running the MCP server.
+    # This allows the MCP client to easily access the file, regardless of where the EwE plugin is hosted.
+    image_bytes = base64.b64decode(result["data"])
+    await asyncio.to_thread(_save_screenshot_to_host, path, image_bytes)
+
+    return {
+        "saved": True,
+        "path": path,
+        "target": result.get("target", target),
+        "width": result.get("width"),
+        "height": result.get("height"),
+        "bytes": len(image_bytes),
+        "active_view": result.get("active_view"),
+    }
+
+
+def _save_screenshot_to_host(path: str, data: bytes) -> None:
+    """Write screenshot bytes to a local file. Runs in a thread."""
+    out = pathlib.Path(path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_bytes(data)
 
 
 @mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
