@@ -19,11 +19,20 @@ BATCH_BLOCKED_COMMANDS = frozenset(
     {
         "execute_ewe_code",
         "close_model",
+        "load_model",
+        "save_model",
+        "save_model_as",
+        "run_ecopath",
+        "run_ecosim",
+        "stop_ecosim",
         "capture_view",
         "save_screenshot",
         "create_ecosim_scenario",
         "copy_ecosim_scenario",
         "delete_ecosim_scenario",
+        "load_ecosim_scenario",
+        "load_ecospace_scenario",
+        "load_ecotracer_scenario",
     }
 )
 

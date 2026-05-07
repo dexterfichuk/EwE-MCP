@@ -278,6 +278,10 @@ namespace EwE_MCP_Plugin
                     return GetEcosimScenario(request.Params);
                 case "load_ecosim_scenario":
                     return OnUiThread(() => LoadEcosimScenario(request.Params));
+                case "load_ecospace_scenario":
+                    return OnUiThread(() => LoadEcospaceScenario(request.Params));
+                case "load_ecotracer_scenario":
+                    return OnUiThread(() => LoadEcotracerScenario(request.Params));
                 case "create_ecosim_scenario":
                     return OnUiThread(() => CreateEcosimScenario(request.Params));
                 case "copy_ecosim_scenario":
@@ -1005,6 +1009,20 @@ namespace EwE_MCP_Plugin
                 ["index"] = index,
                 ["scenario"] = ok ? BuildEcosimScenario(core, index, SafeIntProperty(core, "ActiveEcosimScenarioIndex")) : null
             };
+        }
+
+        private JObject LoadEcospaceScenario(JObject parameters)
+        {
+            var index = RequiredInt(parameters, "index");
+            bool ok = RequireCore().LoadEcospaceScenario(index);
+            return new JObject { ["loaded"] = ok, ["index"] = index };
+        }
+
+        private JObject LoadEcotracerScenario(JObject parameters)
+        {
+            var index = RequiredInt(parameters, "index");
+            bool ok = RequireCore().LoadEcotracerScenario(index);
+            return new JObject { ["loaded"] = ok, ["index"] = index };
         }
 
         private JObject CreateEcosimScenario(JObject parameters)
@@ -2080,37 +2098,19 @@ namespace EwE_MCP_Plugin
 
         private JObject SetValues(JObject parameters)
         {
-            var domain = RequiredString(parameters, "domain").Trim().ToLowerInvariant();
-            var index = RequiredInt(parameters, "index");
+            var target = ResolveEntity(RequiredString(parameters, "domain"), OptionalInt(parameters, "index"));
             var values = parameters["values"] as JObject ?? throw new EwEMcpException("missing_parameter", "Missing 'values' object");
             var navigate = OptionalBool(parameters, "navigate");
-            var core = RequireCore();
-            var navigation = navigate ? NavigateToSuggestedEditNode(domain, values.Properties().Select(p => p.Name)) : null;
 
-            JObject result;
-            switch (domain)
-            {
-                case "ecopath_group":
-                    result = SetEcopathGroupValues(core, index, values);
-                    break;
-                case "ecopath_fleet":
-                    result = SetEcopathFleetValues(core, index, values);
-                    break;
-                case "ecosim_group_input":
-                case "ecosim_group_inputs":
-                    result = SetGenericValues("ecosim_group_inputs", SafeGetIndexedProperty(core, "EcosimGroupInputs", index), index, values);
-                    break;
-                case "ecosim_fleet_input":
-                case "ecosim_fleet_inputs":
-                    result = SetGenericValues("ecosim_fleet_inputs", SafeGetIndexedProperty(core, "EcosimFleetInputs", index), index, values);
-                    break;
-                default:
-                    throw new EwEMcpException("unsupported_domain", $"Setting values for domain '{domain}' is not supported yet.");
-            }
+            var result = SetGenericValues(target.NormalizedDomain, target.Entity, target.Index ?? 1, values);
 
-            if (navigation != null)
+            if (navigate)
             {
-                result["navigation"] = navigation;
+                var navigation = NavigateToSuggestedEditNode(target.NormalizedDomain, values.Properties().Select(p => p.Name));
+                if (navigation != null)
+                {
+                    result["navigation"] = navigation;
+                }
             }
             return result;
         }
@@ -2159,92 +2159,7 @@ namespace EwE_MCP_Plugin
             return result;
         }
 
-        private JObject SetEcopathGroupValues(cCore core, int index, JObject values)
-        {
-            var input = SafeGetIndexedProperty(core, "EcopathGroupInputs", index);
-            if (input == null) throw new EwEMcpException("index_out_of_range", $"Group index {index} not found.");
 
-            var results = new JObject();
-            foreach (var pair in values)
-            {
-                var key = pair.Key;
-                var value = pair.Value;
-
-                // Map common keys to EwE property names
-                string propertyName = null;
-                switch (key.ToLowerInvariant())
-                {
-                    case "name": propertyName = "Name"; break;
-                    case "biomass_area": propertyName = "BiomassAreaInput"; break;
-                    case "pb": propertyName = "PBInput"; break;
-                    case "qb": propertyName = "QBInput"; break;
-                    case "ee": propertyName = "EEInput"; break;
-                }
-
-                if (propertyName != null)
-                {
-                    if (SafeSetProperty(input, propertyName, value))
-                    {
-                        results[key] = "updated";
-                    }
-                    else
-                    {
-                        results[key] = "failed_to_set";
-                    }
-                }
-                else
-                {
-                    results[key] = "unknown_property";
-                }
-            }
-
-            return new JObject
-            {
-                ["index"] = index,
-                ["results"] = results
-            };
-        }
-
-        private JObject SetEcopathFleetValues(cCore core, int index, JObject values)
-        {
-            var fleet = SafeGetIndexedProperty(core, "EcopathFleetInputs", index);
-            if (fleet == null) throw new EwEMcpException("index_out_of_range", $"Fleet index {index} not found.");
-
-            var results = new JObject();
-            foreach (var pair in values)
-            {
-                var key = pair.Key;
-                var value = pair.Value;
-
-                string propertyName = null;
-                switch (key.ToLowerInvariant())
-                {
-                    case "name": propertyName = "Name"; break;
-                }
-
-                if (propertyName != null)
-                {
-                    if (SafeSetProperty(fleet, propertyName, value))
-                    {
-                        results[key] = "updated";
-                    }
-                    else
-                    {
-                        results[key] = "failed_to_set";
-                    }
-                }
-                else
-                {
-                    results[key] = "unknown_property";
-                }
-            }
-
-            return new JObject
-            {
-                ["index"] = index,
-                ["results"] = results
-            };
-        }
 
         private JObject SetGenericValues(string domain, object entity, int index, JObject values)
         {

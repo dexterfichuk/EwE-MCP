@@ -408,6 +408,18 @@ async def load_ecosim_scenario(index: int) -> dict[str, Any]:
     return await _send("load_ecosim_scenario", {"index": index}, timeout=TIMEOUT_LONG)
 
 
+@mcp.tool()
+async def load_ecospace_scenario(index: int) -> dict[str, Any]:
+    """Load an Ecospace scenario by one-based index."""
+    return await _send("load_ecospace_scenario", {"index": index}, timeout=TIMEOUT_LONG)
+
+
+@mcp.tool()
+async def load_ecotracer_scenario(index: int) -> dict[str, Any]:
+    """Load an Ecotracer scenario by one-based index."""
+    return await _send("load_ecotracer_scenario", {"index": index}, timeout=TIMEOUT_LONG)
+
+
 @mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
 async def create_ecosim_scenario(
     name: str,

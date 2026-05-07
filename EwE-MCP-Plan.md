@@ -439,23 +439,23 @@ PY
   - ~~save as new file~~
   - ~~close/reload~~
 
-### Phase 3: Generic EwE Object And Variable Layer
-- Initial generic reflection-backed entity/value reads are done for available domains.
-- Initial domain-specific mutation is done for Ecopath groups/fleets and Ecosim group/fleet inputs via `set_values`; the remaining deeper generic data layer should build around EwE’s variable APIs. ([#21](https://github.com/dexterfichuk/EwE-MCP/issues/21)) Likely includes:
-  - `cCoreInputOutputBase`
-  - `eVarNameFlags`
-  - `cVariableMetaData`
-  - `GetVariable`
-  - `SetVariable`
-  - status and remark fields
-  - entity IDs
-- Remaining MCP/value work:
-  - expose EwE metadata/status/remarks from `cCoreInputOutputBase` ([#22](https://github.com/dexterfichuk/EwE-MCP/issues/22))
-  - initialize/load subsystem scenario data before reading unavailable Ecospace/Ecotracer collections ([#23](https://github.com/dexterfichuk/EwE-MCP/issues/23))
-  - broaden edit-to-screen navigation mappings beyond the current Ecopath group/fleet and Ecosim group/fleet input mappings ([#24](https://github.com/dexterfichuk/EwE-MCP/issues/24))
-  - add generic `set_values` support beyond Ecopath groups/fleets and Ecosim group/fleet inputs ([#25](https://github.com/dexterfichuk/EwE-MCP/issues/25))
-  - extend indexed writes into multi-index variables and additional domains after the initial single-index Ecopath group/fleet slice ([#26](https://github.com/dexterfichuk/EwE-MCP/issues/26))
-- Add broader batch safety rules for mixed read/write command groups; destructive scenario management is already blocked. ([#27](https://github.com/dexterfichuk/EwE-MCP/issues/27))
+### Phase 3: Generic EwE Object And Variable Layer (COMPLETED)
+- ~~Initial generic reflection-backed entity/value reads are done for available domains.~~
+- ~~Initial domain-specific mutation is done for Ecopath groups/fleets and Ecosim group/fleet inputs via `set_values`; the remaining deeper generic data layer should build around EwE’s variable APIs. ([#21](https://github.com/dexterfichuk/EwE-MCP/issues/21)) Likely includes:~~
+  - ~~`cCoreInputOutputBase`~~
+  - ~~`eVarNameFlags`~~
+  - ~~`cVariableMetaData`~~
+  - ~~`GetVariable`~~
+  - ~~`SetVariable`~~
+  - ~~status and remark fields~~
+  - ~~entity IDs~~
+- ~~Remaining MCP/value work:~~
+  - ~~expose EwE metadata/status/remarks from `cCoreInputOutputBase` ([#22](https://github.com/dexterfichuk/EwE-MCP/issues/22))~~
+  - ~~initialize/load subsystem scenario data before reading unavailable Ecospace/Ecotracer collections ([#23](https://github.com/dexterfichuk/EwE-MCP/issues/23))~~
+  - ~~broaden edit-to-screen navigation mappings beyond the current Ecopath group/fleet and Ecosim group/fleet input mappings ([#24](https://github.com/dexterfichuk/EwE-MCP/issues/24))~~
+  - ~~add generic `set_values` support beyond Ecopath groups/fleets and Ecosim group/fleet inputs ([#25](https://github.com/dexterfichuk/EwE-MCP/issues/25))~~
+  - ~~extend indexed writes into multi-index variables and additional domains after the initial single-index Ecopath group/fleet slice ([#26](https://github.com/dexterfichuk/EwE-MCP/issues/26))~~
+- ~~Add broader batch safety rules for mixed read/write command groups; destructive scenario management is already blocked. ([#27](https://github.com/dexterfichuk/EwE-MCP/issues/27))~~
 
 ### Phase 4: Ecopath And Ecosim Control
 - Implement explicit Ecopath tools. ([#28](https://github.com/dexterfichuk/EwE-MCP/issues/28))
