@@ -124,6 +124,23 @@ uv run ewe-mcp
 
 The MCP server exposes tools backed by the running EwE plugin. Current main-branch tools include diagnostics, model load/save/close, change-state utilities (`has_changes`, `discard_changes`), Ecopath group/fleet reads, generic entity/value reads, indexed value reads/writes such as `DietComp(prey)` and `Landings(group)`, Ecosim scenario load/create/copy/delete/save, Ecosim run state, Ecosim group/fleet inputs, Ecosim group/fleet result time-series, selected mutations through `set_values` and `set_indexed_value`, UI command invocation, navigation through `list_navigation_nodes`/`navigate_to_node`/`get_active_view`, batching, and a disabled-by-default eval helper.
 
+Value tools navigate EwE's GUI by default so humans can see what the agent is inspecting or editing:
+
+- `get_values`
+- `get_indexed_value`
+- `set_values`
+- `set_indexed_value`
+
+Pass `navigate=False` for quiet/background reads, loops, batches, or any workflow where UI movement would be distracting.
+
+Common UI navigation examples:
+
+```python
+await navigate_to_node(id="ndDietComposition")
+await get_indexed_value(domain="ecopath_group", index=20, variable="diet_comp", indices=[25])
+await set_values(domain="ecopath_group", index=1, values={"name": "0-12 Snook"}, navigate=False)
+```
+
 ## Live Tests
 Run live tests only after build/deploy/launch/smoke succeeds:
 
@@ -136,7 +153,7 @@ EWE_MODEL_PATH='C:\Users\dexter\Eii.Ecopath\Database\Tampa_Bay.EwEmdb' \
 uv run pytest
 ```
 
-Expected local baseline with live tests skipped is `6 passed, 20 skipped`. The focused indexed live suite is:
+Expected local baseline with live tests skipped is currently `7 passed, 23 skipped`. The focused indexed live suite is:
 
 ```bash
 EWE_MCP_HOST=127.0.0.1 \
@@ -162,7 +179,7 @@ uv run pytest tests/test_ecosim_control.py
 
 Expected focused Ecosim live result is `5 passed`. The suite loads the sample model, loads an Ecosim scenario, inspects group/fleet inputs, runs Ecosim asynchronously, waits for completion, and reads short result time-series windows.
 
-Prefer testing mutations against copied models. If you mutate the shared sample model, restore the original value in a `finally` block and call `discard_changes` so EwE clears the unsaved-change flag without saving over the sample model.
+Prefer testing mutations against copied models. If you mutate the shared sample model, restore the original value in a `finally` block and call `discard_changes` so EwE clears the unsaved-change flag without saving over the sample model. `discard_changes` only clears dirty flags; it does not physically revert values.
 
 ## Safety Rules
 - Keep `execute_ewe_code` disabled unless the user explicitly asks for it and understands the risk.

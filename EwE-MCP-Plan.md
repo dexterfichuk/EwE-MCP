@@ -201,7 +201,7 @@ SSHPASS=... ./scripts/vm-live-smoke.sh
 Current local test expectation:
 
 ```text
-6 passed, 20 skipped
+7 passed, 23 skipped
 ```
 
 The skipped tests are live EwE integration tests. Run them only when the VM plugin is deployed, EwE is launched, and a tunnel or direct connection is configured.
@@ -270,7 +270,7 @@ uv run pytest
 Expected baseline at the time of this update:
 
 ```text
-6 passed, 20 skipped
+7 passed, 23 skipped
 ```
 
 ### 3. VM Environment Variables
@@ -368,7 +368,7 @@ PY
 - If the port is closed after launch, check `%APPDATA%\Ecopath with Ecosim\EwE_MCP_Plugin.log` on the VM.
 - If EwE starts then exits, make sure it was launched with `./scripts/launch-ewe-vm.sh`, not direct SSH `Start-Process`.
 - If Python cannot connect, confirm the SSH tunnel and `EWE_MCP_HOST/EWE_MCP_PORT`.
-- If live tests mutate names, restore values or reload the sample model before leaving the VM for the next agent.
+- If live mutation tests trigger EwE save prompts, restore the original values and call `discard_changes`; this clears dirty flags but does not physically revert values.
 
 ## Architecture
 
@@ -493,10 +493,18 @@ PY
 - Add plugin manager/control diagnostics where safe.
 
 ### Phase 6: UI-Equivalent Ergonomics
-- Implement navigation tools:
+- Navigation tools are implemented:
   - `list_navigation_nodes`
   - `navigate_to_node`
   - `get_active_view`
+- Value tools navigate by default unless callers pass `navigate=False`:
+  - `get_values`
+  - `get_indexed_value`
+  - `set_values`
+  - `set_indexed_value`
+- Test cleanup utilities are implemented:
+  - `has_changes`
+  - `discard_changes`
 - Implement view capture:
   - `capture_view`
   - `export_active_plot`

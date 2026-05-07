@@ -97,8 +97,58 @@ Or directly:
 uv run python -m ewe_mcp.server
 ```
 
+## Navigation And Value Tools
+
+The MCP is designed to make EwE's GUI show what an agent is doing. These tools navigate EwE by default:
+
+- `get_values`
+- `get_indexed_value`
+- `set_values`
+- `set_indexed_value`
+
+Pass `navigate=False` for quiet/background reads, loops, or batches where UI flicker would be distracting.
+
+Useful navigation calls:
+
+```python
+await list_navigation_nodes()
+await navigate_to_node(id="ndDietComposition")
+await get_active_view()
+```
+
+Example value reads/writes:
+
+```python
+await get_indexed_value(
+    domain="ecopath_group",
+    index=20,
+    variable="diet_comp",
+    indices=[25],
+)
+
+await set_values(
+    domain="ecopath_group",
+    index=1,
+    values={"name": "0-12 Snook"},
+    navigate=False,
+)
+```
+
+`discard_changes` is available for test cleanup after restored mutations. It clears EwE's unsaved-change flag; it does not physically revert values.
+
 ## Tests
 
 ```bash
+uv run pytest
+```
+
+Live VM tests require a built/deployed/launched EwE process and tunnel:
+
+```bash
+EWE_MCP_HOST=127.0.0.1 \
+EWE_MCP_PORT=19877 \
+EWE_MCP_TOKEN=ewe-mcp-local-dev \
+EWE_LIVE_TESTS=1 \
+EWE_MODEL_PATH='C:\Users\dexter\Eii.Ecopath\Database\Tampa_Bay.EwEmdb' \
 uv run pytest
 ```
