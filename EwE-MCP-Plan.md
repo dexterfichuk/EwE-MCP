@@ -585,6 +585,17 @@ PY
 - Verified sample model:
   `C:\Users\dexter\Eii.Ecopath\Database\Tampa_Bay.EwEmdb`
 
+## Packaging and Distribution
+
+### C# Plugin (.dll)
+- **Versioning Strategy:** The EwE core libraries update frequently. To maximize compatibility across minor EwE versions, the plugin references EwE DLLs with `<SpecificVersion>False</SpecificVersion>` and `<Private>False</Private>`. This ensures the plugin uses the user's installed EwE binaries at runtime. Breaking ABI changes will still require distributing version-specific builds (e.g., separate installers for EwE 6.6 vs 6.7).
+- **Distribution:** Wrap the plugin in a standard Windows installer (e.g., **Inno Setup**) rather than requiring users to manually copy files into `Program Files (x86)`. The installer should request Administrator privileges, auto-detect or ask for the EwE `Plugins` directory, copy `EwE_MCP_Plugin.dll` and `Newtonsoft.Json.dll`, and provide a clean uninstaller.
+
+### Python Server (ewe-mcp)
+- The Python server is packaged via standard `pyproject.toml` tools (`hatchling`).
+- Build the distribution wheel using `uv build`.
+- Users install the wheel via `pip install ewe_mcp-*.whl` and run it via the `ewe-mcp` CLI command, ensuring they configure their connection environment variables (`EWE_MCP_TOKEN`, `EWE_MCP_HOST`, `EWE_MCP_PORT`) first.
+
 ## Rollback
 The integration is optional and external. To disable it, close EwE and remove these files from the installed EwE `Plugins` folder:
 
