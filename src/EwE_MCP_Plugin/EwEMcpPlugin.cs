@@ -149,6 +149,15 @@ namespace EwE_MCP_Plugin
 
     internal sealed class EwEMcpCommandRouter
     {
+        private const string NavigationTreeName = "m_tvNavigation";
+        private const string NodeBasicInput = "ndBasicInput";
+        private const string NodeDietComposition = "ndDietComposition";
+        private const string NodeFleetDefinition = "ndDefFleets";
+        private const string NodeLandings = "ndLandings";
+        private const string NodeDiscards = "ndDiscards";
+        private const string NodeEcosimGroupInfo = "ndGroupInfo";
+        private const string NodeEcosimFleetSizeDynamics = "ndFleetSizeDynamics";
+
         private readonly Func<cCore> _core;
         private readonly Func<cUIContext> _uiContext;
         private readonly Func<cCommandHandler> _commandHandler;
@@ -1412,12 +1421,15 @@ namespace EwE_MCP_Plugin
         {
             var tree = FindNavigationTreeView();
             TreeNode selected = tree?.SelectedNode;
+            var formMain = SafeGetProperty(_uiContext(), "FormMain");
+            var activeForm = Form.ActiveForm ?? formMain as Form;
             return new JObject
             {
                 ["has_navigation_tree"] = tree != null,
                 ["selected"] = selected == null ? null : BuildNavigationNode(selected, null, -1, -1, selected),
-                ["form_main_type"] = SafeGetProperty(_uiContext(), "FormMain")?.GetType().FullName ?? string.Empty,
-                ["active_form"] = Form.ActiveForm?.GetType().FullName ?? string.Empty
+                ["form_main_type"] = formMain?.GetType().FullName ?? string.Empty,
+                ["active_form"] = activeForm?.GetType().FullName ?? string.Empty,
+                ["active_form_source"] = Form.ActiveForm == null && activeForm != null ? "form_main_fallback" : "active_form"
             };
         }
 
@@ -1431,7 +1443,7 @@ namespace EwE_MCP_Plugin
         {
             foreach (Form form in Application.OpenForms)
             {
-                var tree = FindTreeViewByName(form, "m_tvNavigation");
+                var tree = FindTreeViewByName(form, NavigationTreeName);
                 if (tree != null)
                 {
                     return tree;
@@ -1439,7 +1451,7 @@ namespace EwE_MCP_Plugin
             }
 
             var formMain = SafeGetProperty(_uiContext(), "FormMain") as Control;
-            return FindTreeViewByName(formMain, "m_tvNavigation");
+            return FindTreeViewByName(formMain, NavigationTreeName);
         }
 
         private static TreeView FindTreeViewByName(Control root, string name)
@@ -1529,6 +1541,15 @@ namespace EwE_MCP_Plugin
                 string.IsNullOrWhiteSpace(path) && string.IsNullOrWhiteSpace(query))
             {
                 throw new EwEMcpException("missing_parameter", "Provide one of id, name, text, path, or query.");
+            }
+
+            if (!string.IsNullOrWhiteSpace(id))
+            {
+                var matches = tree.Nodes.Find(id, true);
+                if (matches.Length > 0)
+                {
+                    return matches[0];
+                }
             }
 
             var all = FlattenNavigationNodes(tree);
@@ -1623,32 +1644,32 @@ namespace EwE_MCP_Plugin
             {
                 if (vars.Any(v => v == "dietcomp" || v == "diet_comp" || v == "dietcomposition" || v == "diet_composition"))
                 {
-                    return "ndDietComposition";
+                    return NodeDietComposition;
                 }
-                return "ndBasicInput";
+                return NodeBasicInput;
             }
 
             if (normalized == "ecopath_fleets")
             {
                 if (vars.Any(v => v == "landings" || v == "landing"))
                 {
-                    return "ndLandings";
+                    return NodeLandings;
                 }
                 if (vars.Any(v => v == "discards" || v == "discard"))
                 {
-                    return "ndDiscards";
+                    return NodeDiscards;
                 }
-                return "ndDefFleets";
+                return NodeFleetDefinition;
             }
 
             if (normalized == "ecosim_group_inputs")
             {
-                return "ndGroupInfo";
+                return NodeEcosimGroupInfo;
             }
 
             if (normalized == "ecosim_fleet_inputs")
             {
-                return "ndFleetSizeDynamics";
+                return NodeEcosimFleetSizeDynamics;
             }
 
             return string.Empty;
