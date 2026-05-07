@@ -402,12 +402,28 @@ namespace EwE_MCP_Plugin
         private JObject GetModelInfo()
         {
             var core = RequireCore();
+            var eweModel = SafeGetProperty(core, "EwEModel");
             var info = new JObject
             {
                 ["loaded"] = SafeGetProperty(core, "DataSource") != null,
                 ["data_source"] = SafeGetProperty(core, "DataSource")?.ToString(),
-                ["model_name"] = SafeGetProperty(SafeGetProperty(core, "EwEModel"), "Name")?.ToString()
+                ["model_name"] = eweModel?.GetType().GetProperty("Name")?.GetValue(eweModel)?.ToString()
             };
+
+            if (eweModel != null)
+            {
+                var metadata = new JObject();
+                foreach (var prop in eweModel.GetType().GetProperties())
+                {
+                    try 
+                    { 
+                        var val = prop.GetValue(eweModel);
+                        if (val != null) metadata[prop.Name] = val.ToString();
+                    } 
+                    catch { }
+                }
+                info["metadata"] = metadata;
+            }
             return info;
         }
 

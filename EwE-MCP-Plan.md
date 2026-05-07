@@ -424,19 +424,19 @@ PY
 - Add command timeout handling in the plugin and Python client.
 - Add a `shutdown_server` or `restart_server` development-only command if useful.
 
-### Phase 2: Model Inspection And Safe Model Workflow
-- Locate sample model files on the VM or in EwE install/source directories. Initial sample located and verified:
-  `C:\Users\dexter\Eii.Ecopath\Database\Tampa_Bay.EwEmdb`
-- Implement `list_open_model_metadata`.
-- Implement robust `load_model`, `save_model_as`, `close_model`, and reload smoke tests against a copy of a sample model.
-- Expand read-only inspection tools beyond the completed group/fleet/diet/landings slice:
-  stanzas, vulnerabilities, detritus fate, full diet matrix, remarks/statuses, and Ecopath balancing diagnostics.
-- Harden the safe mutation workflow:
-  - copy sample model
-  - edit harmless value through `set_values`
-  - validate
-  - save as new file
-  - close/reload
+### Phase 2: Model Inspection And Safe Model Workflow (COMPLETED)
+- ~~Locate sample model files on the VM or in EwE install/source directories. Initial sample located and verified:~~
+  ~~`C:\Users\dexter\Eii.Ecopath\Database\Tampa_Bay.EwEmdb`~~
+- ~~Implement `list_open_model_metadata`.~~
+- ~~Implement robust `load_model`, `save_model_as`, `close_model`, and reload smoke tests against a copy of a sample model.~~
+- ~~Expand read-only inspection tools beyond the completed group/fleet/diet/landings slice:~~
+  ~~stanzas, vulnerabilities, detritus fate, full diet matrix, remarks/statuses, and Ecopath balancing diagnostics.~~
+- ~~Harden the safe mutation workflow:~~
+  - ~~copy sample model~~
+  - ~~edit harmless value through `set_values`~~
+  - ~~validate~~
+  - ~~save as new file~~
+  - ~~close/reload~~
 
 ### Phase 3: Generic EwE Object And Variable Layer
 - Initial generic reflection-backed entity/value reads are done for available domains.
