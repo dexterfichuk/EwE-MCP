@@ -132,6 +132,32 @@ async def invoke_ui_command(name: str, tag: str | None = None) -> dict[str, Any]
     return await _send("invoke_ui_command", params)
 
 
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+async def list_navigation_nodes() -> dict[str, Any]:
+    """List EwE navigation tree nodes that can be selected with navigate_to_node."""
+    return await _send("list_navigation_nodes")
+
+
+@mcp.tool()
+async def navigate_to_node(
+    id: str | None = None,
+    text: str | None = None,
+    path: str | None = None,
+    query: str | None = None,
+) -> dict[str, Any]:
+    """Navigate EwE to a UI screen by navigation node id/name, visible text, path, or search query."""
+    params = {key: value for key, value in {"id": id, "text": text, "path": path, "query": query}.items() if value}
+    if not params:
+        raise ValueError("Provide one of id, text, path, or query.")
+    return await _send("navigate_to_node", params)
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+async def get_active_view() -> dict[str, Any]:
+    """Return the currently selected EwE navigation node and active form details where available."""
+    return await _send("get_active_view")
+
+
 @mcp.tool()
 async def load_model(path: str) -> dict[str, Any]:
     """Load an EwE model file inside the running EwE instance."""
@@ -142,6 +168,18 @@ async def load_model(path: str) -> dict[str, Any]:
 async def get_model_info() -> dict[str, Any]:
     """Get the currently loaded model summary."""
     return await _send("get_model_info")
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+async def has_changes() -> dict[str, Any]:
+    """Return whether EwE currently has unsaved model changes."""
+    return await _send("has_changes")
+
+
+@mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
+async def discard_changes() -> dict[str, Any]:
+    """Clear EwE unsaved-change flags without saving. Intended for live test cleanup."""
+    return await _send("discard_changes")
 
 
 @mcp.tool()
@@ -209,9 +247,14 @@ async def get_variable_metadata(domain: str, variable: str, index: int | None = 
 
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
-async def get_values(domain: str, index: int | None = None, variables: list[str] | None = None) -> dict[str, Any]:
-    """Read values from an EwE entity. Omit variables to read all scalar/simple array values."""
-    params: dict[str, Any] = {"domain": domain}
+async def get_values(
+    domain: str,
+    index: int | None = None,
+    variables: list[str] | None = None,
+    navigate: bool = True,
+) -> dict[str, Any]:
+    """Read values from an EwE entity. Pass navigate=False to avoid changing the visible EwE screen."""
+    params: dict[str, Any] = {"domain": domain, "navigate": navigate}
     if index is not None:
         params["index"] = index
     if variables is not None:
@@ -229,9 +272,15 @@ async def validate_values(domain: str, values: dict[str, Any], index: int | None
 
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
-async def get_indexed_value(domain: str, variable: str, indices: list[int], index: int | None = None) -> dict[str, Any]:
-    """Read one indexed EwE value, such as DietComp(prey) or Landings(group)."""
-    params: dict[str, Any] = {"domain": domain, "variable": variable, "indices": indices}
+async def get_indexed_value(
+    domain: str,
+    variable: str,
+    indices: list[int],
+    index: int | None = None,
+    navigate: bool = True,
+) -> dict[str, Any]:
+    """Read one indexed EwE value. Pass navigate=False to avoid changing the visible EwE screen."""
+    params: dict[str, Any] = {"domain": domain, "variable": variable, "indices": indices, "navigate": navigate}
     if index is not None:
         params["index"] = index
     return await _send("get_indexed_value", params)
@@ -427,9 +476,13 @@ async def refresh_ui() -> dict[str, Any]:
 
 
 @mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
-async def set_values(domain: str, index: int, values: dict[str, Any]) -> dict[str, Any]:
-    """Set values for an EwE entity and refresh the UI. Supported domains include Ecopath groups/fleets and Ecosim group/fleet inputs."""
-    result = await _send("set_values", {"domain": domain, "index": index, "values": values}, timeout=TIMEOUT_LONG)
+async def set_values(domain: str, index: int, values: dict[str, Any], navigate: bool = True) -> dict[str, Any]:
+    """Set values for an EwE entity and refresh the UI. Pass navigate=False to avoid changing the visible EwE screen."""
+    result = await _send(
+        "set_values",
+        {"domain": domain, "index": index, "values": values, "navigate": navigate},
+        timeout=TIMEOUT_LONG,
+    )
     # Automatically refresh UI after setting values
     await refresh_ui()
     return result
@@ -442,9 +495,16 @@ async def set_indexed_value(
     indices: list[int],
     value: Any,
     index: int | None = None,
+    navigate: bool = True,
 ) -> dict[str, Any]:
-    """Set one indexed EwE value and refresh the UI, such as DietComp(prey) or Landings(group)."""
-    params: dict[str, Any] = {"domain": domain, "variable": variable, "indices": indices, "value": value}
+    """Set one indexed EwE value and refresh the UI. Pass navigate=False to avoid changing the visible EwE screen."""
+    params: dict[str, Any] = {
+        "domain": domain,
+        "variable": variable,
+        "indices": indices,
+        "value": value,
+        "navigate": navigate,
+    }
     if index is not None:
         params["index"] = index
     result = await _send("set_indexed_value", params, timeout=TIMEOUT_LONG)

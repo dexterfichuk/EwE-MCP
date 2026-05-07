@@ -4,6 +4,7 @@ import pytest
 
 from ewe_mcp.client import EwEMCPError
 from ewe_mcp.server import (
+    discard_changes,
     get_indexed_value,
     load_model,
     set_indexed_value,
@@ -44,6 +45,7 @@ async def test_indexed_diet_comp_round_trip():
         assert (await get_indexed_value(**params))["value"] == pytest.approx(updated)
     finally:
         await set_indexed_value(**params, value=original)
+        await discard_changes()
 
 
 @live
@@ -64,6 +66,7 @@ async def test_indexed_fleet_landings_round_trip():
         assert (await get_indexed_value(**params))["value"] == pytest.approx(updated)
     finally:
         await set_indexed_value(**params, value=original)
+        await discard_changes()
 
 
 @live

@@ -36,6 +36,8 @@ Build EwE MCP as a separate plugin-first project in `/Users/dexterfichuk/Project
   - `save_model`
   - `save_model_as`
   - `close_model`
+  - `has_changes`
+  - `discard_changes`
   - `get_model_info`
   - `get_core_counters`
   - `list_domains`
@@ -70,14 +72,19 @@ Build EwE MCP as a separate plugin-first project in `/Users/dexterfichuk/Project
   - `run_ecosim`
   - `stop_ecosim`
   - `refresh_ui`
+  - `list_navigation_nodes`
+  - `navigate_to_node`
+  - `get_active_view`
   - `set_values`
   - `set_indexed_value`
   - `batch`
   - `batch_commands`
   - gated limited `execute_ewe_code`
 - Implemented `refresh_ui` using `FormMain.Refresh` and a best-effort `~navigate` invoke.
+- Implemented first-class UI navigation over EwE's navigation tree, including node listing, direct navigation by node id/text/path/query, and active view reporting.
 - Implemented `set_values` for `ecopath_group`, `ecopath_fleet`, `ecosim_group_input`, and `ecosim_fleet_input`.
-- Implemented Python-side automatic UI refresh after `set_values`.
+- Implemented Python-side automatic UI refresh after `set_values`, plus default value-tool navigation on `get_values`, `get_indexed_value`, `set_values`, and `set_indexed_value`; callers can pass `navigate=False` for quiet/background access.
+- Implemented explicit test-cleanup utilities `has_changes` and `discard_changes`; live mutation tests restore values and call `discard_changes` to avoid EwE save prompts without saving over the shared sample model.
 - Implemented the first explicit Ecosim control loop:
   - list/get scenarios
   - load a scenario
@@ -443,6 +450,7 @@ PY
 - Remaining MCP/value work:
   - expose EwE metadata/status/remarks from `cCoreInputOutputBase`
   - initialize/load subsystem scenario data before reading unavailable Ecospace/Ecotracer collections
+  - broaden edit-to-screen navigation mappings beyond the current Ecopath group/fleet and Ecosim group/fleet input mappings
   - add generic `set_values` support beyond Ecopath groups/fleets and Ecosim group/fleet inputs
   - extend indexed writes into multi-index variables and additional domains after the initial single-index Ecopath group/fleet slice
 - Add broader batch safety rules for mixed read/write command groups; destructive scenario management is already blocked.
