@@ -528,10 +528,10 @@ async def save_screenshot(
     max_width: int | None = None,
     max_height: int | None = None,
 ) -> dict[str, Any]:
-    """Capture a screenshot and save it to a file on the EwE host.
+    """Capture a screenshot and save it to a local file on the machine running the MCP server.
 
     Args:
-        path: File path on the EwE host where the PNG will be saved.
+        path: File path where the PNG will be saved (local to the Python MCP process).
         target: What to capture — "auto", "main", "active", or "content".
         max_width: Optional max pixel width to downscale to.
         max_height: Optional max pixel height to downscale to.
@@ -544,8 +544,8 @@ async def save_screenshot(
 
     result = await _send("capture_view", params, timeout=TIMEOUT_LONG)
 
-    # Decode base64 data and save locally via a batch command that writes on the host.
-    # Since the plugin runs on the Windows VM, we send the data back for file-writing.
+    # Decode base64 data and save it locally on the machine running the MCP server.
+    # This allows the MCP client to easily access the file, regardless of where the EwE plugin is hosted.
     image_bytes = base64.b64decode(result["data"])
     await asyncio.to_thread(_save_screenshot_to_host, path, image_bytes)
 
