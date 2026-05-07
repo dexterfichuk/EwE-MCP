@@ -75,6 +75,7 @@ Build EwE MCP as a separate plugin-first project in `/Users/dexterfichuk/Project
   - `list_navigation_nodes`
   - `navigate_to_node`
   - `get_active_view`
+  - `capture_view`
   - `set_values`
   - `set_indexed_value`
   - `batch`
@@ -505,10 +506,10 @@ PY
 - Test cleanup utilities are implemented:
   - `has_changes`
   - `discard_changes`
-- Implement view capture:
-  - `capture_view`
-  - `export_active_plot`
-  - plot/image MCP content
+- Implemented view capture:
+  - `capture_view` (returns inline image)
+  - `save_screenshot` (saves to host)
+  - `export_active_plot` (pending)
 - Improve command catalog with command grouping, enabled state, checked state, and descriptions.
 - Add prompt templates for common workflows:
   - balance a model

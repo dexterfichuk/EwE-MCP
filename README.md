@@ -24,6 +24,7 @@ Implemented now:
 - Value tools: `get_values`, `get_indexed_value`, `set_values`, and `set_indexed_value` navigate EwE to the relevant screen by default; pass `navigate=False` for quiet/background access, especially in batches to avoid UI flicker. `set_values` supports Ecopath groups/fleets and Ecosim group/fleet inputs; `set_indexed_value` supports targeted indexed cells.
 - Expanded generic domains now include Ecopath, Ecosim, Ecospace, Ecotracer, taxa, `core`, and UI commands. Some subsystem entity collections remain unavailable until EwE initializes or loads the relevant scenario.
 - UI command/navigation tools: `list_ui_commands`, `invoke_ui_command`, `list_navigation_nodes`, `navigate_to_node`, `get_active_view`.
+- View capture tools: `capture_view` and `save_screenshot` (primarily for graphs and spatial visualizations; prefer data-reading tools for tables).
 - Python MCP server, socket client, batch command guard, and protocol tests.
 
 The broad Ecospace/Ecotracer/MSE/Monte Carlo object model is intentionally not fully filled in yet; the bridge spine and first Ecosim scenario/run/results loop are ready for expansion.

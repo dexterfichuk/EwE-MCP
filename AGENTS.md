@@ -122,7 +122,9 @@ EWE_MCP_TOKEN=ewe-mcp-local-dev \
 uv run ewe-mcp
 ```
 
-The MCP server exposes tools backed by the running EwE plugin. Current main-branch tools include diagnostics, model load/save/close, change-state utilities (`has_changes`, `discard_changes`), Ecopath group/fleet reads, generic entity/value reads, indexed value reads/writes such as `DietComp(prey)` and `Landings(group)`, Ecosim scenario load/create/copy/delete/save, Ecosim run state, Ecosim group/fleet inputs, Ecosim group/fleet result time-series, selected mutations through `set_values` and `set_indexed_value`, UI command invocation, navigation through `list_navigation_nodes`/`navigate_to_node`/`get_active_view`, batching, and a disabled-by-default eval helper.
+The MCP server exposes tools backed by the running EwE plugin. Current main-branch tools include diagnostics, model load/save/close, change-state utilities (`has_changes`, `discard_changes`), Ecopath group/fleet reads, generic entity/value reads, indexed value reads/writes such as `DietComp(prey)` and `Landings(group)`, Ecosim scenario load/create/copy/delete/save, Ecosim run state, Ecosim group/fleet inputs, Ecosim group/fleet result time-series, selected mutations through `set_values` and `set_indexed_value`, UI command invocation, navigation through `list_navigation_nodes`/`navigate_to_node`/`get_active_view`, view capture through `capture_view`/`save_screenshot`, batching, and a disabled-by-default eval helper.
+
+For view capture tools (`capture_view` and `save_screenshot`), prefer using data-reading tools to extract tabular data, and reserve view capture for graphs, charts, and spatial visualizations.
 
 Value tools navigate EwE's GUI by default so humans can see what the agent is inspecting or editing:
 
