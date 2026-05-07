@@ -1,8 +1,11 @@
 using System;
 using System.Collections.Generic;
+using System.Drawing;
+using System.Drawing.Imaging;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Runtime.InteropServices;
 using System.Threading;
 using System.Windows.Forms;
 using EwECore;
@@ -290,6 +293,8 @@ namespace EwE_MCP_Plugin
                     return OnUiThread(StopEcosim);
                 case "refresh_ui":
                     return OnUiThread(RefreshUI);
+                case "capture_view":
+                    return OnUiThread(() => CaptureView(request.Params));
                 case "set_values":
                     return OnUiThread(() => SetValues(request.Params));
                 case "set_indexed_value":
@@ -1742,6 +1747,7 @@ namespace EwE_MCP_Plugin
                 var type = item?["type"]?.ToString();
                 if (string.Equals(type, "execute_ewe_code", StringComparison.OrdinalIgnoreCase) ||
                     string.Equals(type, "close_model", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(type, "capture_view", StringComparison.OrdinalIgnoreCase) ||
                     string.Equals(type, "create_ecosim_scenario", StringComparison.OrdinalIgnoreCase) ||
                     string.Equals(type, "copy_ecosim_scenario", StringComparison.OrdinalIgnoreCase) ||
                     string.Equals(type, "delete_ecosim_scenario", StringComparison.OrdinalIgnoreCase))
@@ -1759,6 +1765,234 @@ namespace EwE_MCP_Plugin
             }
             return new JObject { ["results"] = results };
         }
+
+        // ── View Capture ──────────────────────────────────────────────
+
+        [DllImport("user32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool PrintWindow(IntPtr hwnd, IntPtr hdcBlt, uint nFlags);
+
+        private JObject CaptureView(JObject parameters)
+        {
+            var target = OptionalString(parameters, "target") ?? "auto";
+            var maxWidth = OptionalInt(parameters, "max_width") ?? 0;
+            var maxHeight = OptionalInt(parameters, "max_height") ?? 0;
+
+            Control captureTarget = ResolveCaptureTarget(target);
+            if (captureTarget == null)
+            {
+                throw new EwEMcpException("capture_unavailable", "No EwE window is available for capture. Ensure EwE is running with a model loaded.");
+            }
+
+            string resolvedTarget = DescribeCaptureTarget(captureTarget);
+            var size = captureTarget.Size;
+            if (size.Width <= 0 || size.Height <= 0)
+            {
+                throw new EwEMcpException("capture_empty", $"Capture target has zero size ({size.Width}x{size.Height}).");
+            }
+
+            string base64;
+            string captureMethod;
+            using (var bitmap = new Bitmap(size.Width, size.Height))
+            {
+                // Prefer PrintWindow for top-level forms — it captures even when obscured.
+                // Fall back to DrawToBitmap for child controls or when PrintWindow fails.
+                if (captureTarget is Form form && form.Handle != IntPtr.Zero && TryPrintWindow(form.Handle, bitmap))
+                {
+                    captureMethod = "PrintWindow";
+                }
+                else
+                {
+                    captureTarget.DrawToBitmap(bitmap, new Rectangle(Point.Empty, size));
+                    captureMethod = "DrawToBitmap";
+                }
+
+                // Optional downscale to limit payload size.
+                using (var finalBitmap = MaybeResize(bitmap, maxWidth, maxHeight))
+                {
+                    base64 = BitmapToBase64Png(finalBitmap ?? bitmap);
+                }
+            }
+
+            var active = GetActiveView();
+            var result = new JObject
+            {
+                ["captured"] = true,
+                ["target"] = resolvedTarget,
+                ["capture_method"] = captureMethod,
+                ["width"] = size.Width,
+                ["height"] = size.Height,
+                ["format"] = "png",
+                ["encoding"] = "base64",
+                ["data"] = base64,
+                ["active_view"] = active
+            };
+
+            // Add final dimensions if resized.
+            if (maxWidth > 0 || maxHeight > 0)
+            {
+                result["resized"] = base64.Length < EstimateRawBase64Length(size.Width, size.Height);
+            }
+
+            return result;
+        }
+
+        private Control ResolveCaptureTarget(string target)
+        {
+            var formMain = SafeGetProperty(_uiContext(), "FormMain") as Control;
+            var activeForm = Form.ActiveForm;
+
+            switch ((target ?? "auto").Trim().ToLowerInvariant())
+            {
+                case "main":
+                    return formMain;
+
+                case "active":
+                    return activeForm ?? formMain;
+
+                case "content":
+                    // Try to find the content panel inside the main form.
+                    // EwE's FormMain typically uses a split container with a content area.
+                    var content = FindContentPanel(formMain);
+                    if (content != null && content.Width > 0 && content.Height > 0)
+                    {
+                        return content;
+                    }
+                    return formMain;
+
+                case "auto":
+                default:
+                    // Default strategy: prefer a visible content panel, then active form, then main form.
+                    var autoContent = FindContentPanel(formMain);
+                    if (autoContent != null && autoContent.Width > 100 && autoContent.Height > 100)
+                    {
+                        return autoContent;
+                    }
+                    return activeForm ?? formMain;
+            }
+        }
+
+        private static Control FindContentPanel(Control root)
+        {
+            if (root == null) return null;
+
+            // Look for common content panel names and split containers.
+            // EwE's main form uses SplitContainer layouts. The right panel (Panel2) typically
+            // holds the content view.
+            foreach (Control child in root.Controls)
+            {
+                if (child is SplitContainer split)
+                {
+                    // The right/bottom panel is usually the content area.
+                    var panel2 = split.Panel2;
+                    if (panel2 != null && panel2.Controls.Count > 0 && panel2.Width > 0 && panel2.Height > 0)
+                    {
+                        return panel2;
+                    }
+                }
+            }
+
+            // Recursive search for the first SplitContainer.
+            foreach (Control child in root.Controls)
+            {
+                var found = FindContentPanel(child);
+                if (found != null) return found;
+            }
+
+            return null;
+        }
+
+        private static string DescribeCaptureTarget(Control target)
+        {
+            if (target is Form form)
+            {
+                return $"form:{form.GetType().Name}";
+            }
+            if (target is SplitterPanel)
+            {
+                return "content_panel";
+            }
+            return $"control:{target.GetType().Name}";
+        }
+
+        private static bool TryPrintWindow(IntPtr hwnd, Bitmap bitmap)
+        {
+            try
+            {
+                using (var graphics = Graphics.FromImage(bitmap))
+                {
+                    IntPtr hdc = graphics.GetHdc();
+                    try
+                    {
+                        // nFlags=2 means PW_RENDERFULLCONTENT (Windows 8.1+),
+                        // falls back to 0 (PW_CLIENTONLY not set) on older Windows.
+                        bool ok = PrintWindow(hwnd, hdc, 2);
+                        if (!ok)
+                        {
+                            ok = PrintWindow(hwnd, hdc, 0);
+                        }
+                        return ok;
+                    }
+                    finally
+                    {
+                        graphics.ReleaseHdc(hdc);
+                    }
+                }
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static Bitmap MaybeResize(Bitmap source, int maxWidth, int maxHeight)
+        {
+            if (maxWidth <= 0 && maxHeight <= 0) return null;
+
+            int targetWidth = source.Width;
+            int targetHeight = source.Height;
+
+            if (maxWidth > 0 && targetWidth > maxWidth)
+            {
+                double scale = (double)maxWidth / targetWidth;
+                targetWidth = maxWidth;
+                targetHeight = (int)(targetHeight * scale);
+            }
+            if (maxHeight > 0 && targetHeight > maxHeight)
+            {
+                double scale = (double)maxHeight / targetHeight;
+                targetHeight = maxHeight;
+                targetWidth = (int)(targetWidth * scale);
+            }
+
+            if (targetWidth == source.Width && targetHeight == source.Height) return null;
+            if (targetWidth <= 0 || targetHeight <= 0) return null;
+
+            var resized = new Bitmap(targetWidth, targetHeight);
+            using (var g = Graphics.FromImage(resized))
+            {
+                g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
+                g.DrawImage(source, 0, 0, targetWidth, targetHeight);
+            }
+            return resized;
+        }
+
+        private static string BitmapToBase64Png(Bitmap bitmap)
+        {
+            using (var ms = new MemoryStream())
+            {
+                bitmap.Save(ms, ImageFormat.Png);
+                return Convert.ToBase64String(ms.ToArray());
+            }
+        }
+
+        private static int EstimateRawBase64Length(int width, int height)
+        {
+            // Very rough estimate: 4 bytes per pixel * 4/3 for base64.
+            return (int)(width * height * 4 * 1.33);
+        }
+
+        // ── UI Refresh ────────────────────────────────────────────────
 
         private JObject RefreshUI()
         {

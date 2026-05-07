@@ -8,8 +8,10 @@ import logging
 import time
 from typing import Any
 
-from mcp.server.fastmcp import FastMCP
-from mcp.types import ToolAnnotations
+import base64
+
+from mcp.server.fastmcp import FastMCP, Image
+from mcp.types import ImageContent, TextContent, ToolAnnotations
 
 from ewe_mcp.client import EwEMCPClient
 from ewe_mcp.helpers import (
@@ -473,6 +475,98 @@ async def stop_ecosim() -> dict[str, Any]:
 async def refresh_ui() -> dict[str, Any]:
     """Try to trigger a refresh of the EwE GUI to show updated values."""
     return await _send("refresh_ui")
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+async def capture_view(
+    target: str = "auto",
+    max_width: int | None = None,
+    max_height: int | None = None,
+) -> list[TextContent | ImageContent]:
+    """Capture a screenshot of the current EwE view.
+
+    Args:
+        target: What to capture — "auto" (content panel preferred), "main" (full window),
+                "active" (active form), or "content" (content panel only).
+        max_width: Optional max pixel width to downscale to (preserves aspect ratio).
+        max_height: Optional max pixel height to downscale to (preserves aspect ratio).
+
+    Returns:
+        An MCP response containing the screenshot as a PNG image and metadata text.
+    """
+    params: dict[str, Any] = {"target": target}
+    if max_width is not None:
+        params["max_width"] = max_width
+    if max_height is not None:
+        params["max_height"] = max_height
+
+    result = await _send("capture_view", params, timeout=TIMEOUT_LONG)
+
+    image_data = base64.b64decode(result["data"])
+
+    # Build metadata summary (everything except the raw data).
+    meta = {
+        key: value
+        for key, value in result.items()
+        if key not in ("data",)
+    }
+
+    return [
+        TextContent(type="text", text=str(meta)),
+        ImageContent(
+            type="image",
+            data=result["data"],
+            mimeType="image/png",
+        ),
+    ]
+
+
+@mcp.tool()
+async def save_screenshot(
+    path: str,
+    target: str = "auto",
+    max_width: int | None = None,
+    max_height: int | None = None,
+) -> dict[str, Any]:
+    """Capture a screenshot and save it to a file on the EwE host.
+
+    Args:
+        path: File path on the EwE host where the PNG will be saved.
+        target: What to capture — "auto", "main", "active", or "content".
+        max_width: Optional max pixel width to downscale to.
+        max_height: Optional max pixel height to downscale to.
+    """
+    params: dict[str, Any] = {"target": target}
+    if max_width is not None:
+        params["max_width"] = max_width
+    if max_height is not None:
+        params["max_height"] = max_height
+
+    result = await _send("capture_view", params, timeout=TIMEOUT_LONG)
+
+    # Decode base64 data and save locally via a batch command that writes on the host.
+    # Since the plugin runs on the Windows VM, we send the data back for file-writing.
+    image_bytes = base64.b64decode(result["data"])
+    await asyncio.to_thread(_save_screenshot_to_host, path, image_bytes)
+
+    return {
+        "saved": True,
+        "path": path,
+        "target": result.get("target", target),
+        "width": result.get("width"),
+        "height": result.get("height"),
+        "bytes": len(image_bytes),
+        "active_view": result.get("active_view"),
+    }
+
+
+def _save_screenshot_to_host(path: str, data: bytes) -> None:
+    """Write screenshot bytes to a local file. Runs in a thread."""
+    import pathlib
+
+    out = pathlib.Path(path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_bytes(data)
 
 
 @mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
