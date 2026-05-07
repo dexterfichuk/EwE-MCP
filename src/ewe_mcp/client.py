@@ -87,6 +87,7 @@ class EwEMCPClient:
             "type": command_type,
             "params": params or {},
             "token": self.token,
+            "timeout": timeout,
         }
         payload = json.dumps(request, separators=(",", ":")).encode("utf-8")
         self.socket.sendall(HEADER_STRUCT.pack(len(payload)))

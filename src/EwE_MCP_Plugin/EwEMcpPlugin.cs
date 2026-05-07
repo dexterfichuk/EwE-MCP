@@ -81,7 +81,18 @@ namespace EwE_MCP_Plugin
             }
 
             var config = EwEMcpConfig.FromEnvironment();
-            EwEMcpFileLog.Info($"Starting socket server on {config.Host}:{config.Port}");
+
+            var asm = typeof(EwEMcpPlugin).Assembly;
+            var asmVersion = asm.GetName().Version?.ToString();
+            var ewePath = AppDomain.CurrentDomain.BaseDirectory;
+
+            if (!config.Enabled)
+            {
+                EwEMcpFileLog.Info($"EwE MCP server is disabled (EWE_MCP_ENABLED=0). Version: {asmVersion}, Location: {asm.Location}, EwE: {ewePath}");
+                return;
+            }
+
+            EwEMcpFileLog.Info($"Starting socket server on {config.Host}:{config.Port}. Version: {asmVersion}, Location: {asm.Location}, EwE: {ewePath}");
             try
             {
                 var router = new EwEMcpCommandRouter(
@@ -94,6 +105,12 @@ namespace EwE_MCP_Plugin
                 _server = new EwEMcpSocketServer(config, router, _auditLog);
                 _server.Start();
                 EwEMcpFileLog.Info("Socket server started");
+            }
+            catch (System.Net.Sockets.SocketException ex)
+            {
+                EwEMcpFileLog.Error($"Socket server failed to bind to {config.Host}:{config.Port} (Port in use or invalid host)", ex);
+                _server = null;
+                throw;
             }
             catch (Exception ex)
             {
