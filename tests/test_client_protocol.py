@@ -40,6 +40,37 @@ def _serve_once(handler):
     return port, thread
 
 
+def _serve_sequence(handlers):
+    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server.bind(("127.0.0.1", 0))
+    server.listen(len(handlers))
+    port = server.getsockname()[1]
+
+    def run():
+        try:
+            for handler in handlers:
+                conn, _ = server.accept()
+                with conn:
+                    header = conn.recv(4)
+                    if not header or len(header) < 4:
+                        continue
+                    length = HEADER_STRUCT.unpack(header)[0]
+                    request = json.loads(conn.recv(length).decode("utf-8"))
+                    response = handler(request)
+                    payload = json.dumps(response).encode("utf-8")
+                    try:
+                        conn.sendall(HEADER_STRUCT.pack(len(payload)))
+                        conn.sendall(payload)
+                    except (BrokenPipeError, ConnectionResetError):
+                        pass
+        finally:
+            server.close()
+
+    thread = threading.Thread(target=run, daemon=True)
+    thread.start()
+    return port, thread
+
+
 def test_client_sends_token_and_unwraps_success():
     def handler(request):
         assert request["type"] == "ping"
@@ -75,6 +106,7 @@ def test_client_raises_on_error_response():
 
 def test_client_timeout():
     import time
+
     def handler(request):
         time.sleep(0.5)
         return {"id": request["id"], "status": "success", "result": {}}
@@ -85,9 +117,36 @@ def test_client_timeout():
 
     with pytest.raises(socket.timeout):
         client.command_result("ping", timeout=0.1)
+    assert client.socket is None
 
     client.disconnect()
     thread.join(timeout=2)
+
+
+def test_client_timeout_closes_socket_before_reuse():
+    import time
+
+    def slow_handler(request):
+        time.sleep(0.3)
+        return {"id": request["id"], "status": "success", "result": {"command": request["type"]}}
+
+    def fast_handler(request):
+        return {"id": request["id"], "status": "success", "result": {"command": request["type"]}}
+
+    port, thread = _serve_sequence([slow_handler, fast_handler])
+    client = EwEMCPClient(host="127.0.0.1", port=port, token="secret")
+    assert client.connect()
+
+    with pytest.raises(socket.timeout):
+        client.command_result("first", timeout=0.1)
+    assert client.socket is None
+
+    assert client.connect()
+    assert client.command_result("second") == {"command": "second"}
+
+    client.disconnect()
+    thread.join(timeout=2)
+
 
 def test_client_cleanup_on_close():
     def handler(request):

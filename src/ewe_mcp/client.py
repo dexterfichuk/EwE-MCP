@@ -90,15 +90,19 @@ class EwEMCPClient:
             "timeout": timeout,
         }
         payload = json.dumps(request, separators=(",", ":")).encode("utf-8")
-        self.socket.sendall(HEADER_STRUCT.pack(len(payload)))
-        self.socket.sendall(payload)
+        try:
+            self.socket.sendall(HEADER_STRUCT.pack(len(payload)))
+            self.socket.sendall(payload)
 
-        self._set_timeout(timeout)
-        header = self._recv_exact(4)
-        length = HEADER_STRUCT.unpack(header)[0]
-        data = self._recv_exact(length)
-        self._set_timeout(None)
-        return json.loads(data.decode("utf-8"))
+            self._set_timeout(timeout)
+            header = self._recv_exact(4)
+            length = HEADER_STRUCT.unpack(header)[0]
+            data = self._recv_exact(length)
+            self._set_timeout(None)
+            return json.loads(data.decode("utf-8"))
+        except Exception:
+            self.disconnect()
+            raise
 
     def command_result(
         self,
