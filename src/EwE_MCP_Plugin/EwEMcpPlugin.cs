@@ -1793,6 +1793,7 @@ namespace EwE_MCP_Plugin
 
             string base64;
             string captureMethod;
+            bool wasResized;
             using (var bitmap = new Bitmap(size.Width, size.Height))
             {
                 // Prefer PrintWindow for top-level forms — it captures even when obscured.
@@ -1810,6 +1811,7 @@ namespace EwE_MCP_Plugin
                 // Optional downscale to limit payload size.
                 using (var finalBitmap = MaybeResize(bitmap, maxWidth, maxHeight))
                 {
+                    wasResized = finalBitmap != null;
                     base64 = BitmapToBase64Png(finalBitmap ?? bitmap);
                 }
             }
@@ -1831,7 +1833,7 @@ namespace EwE_MCP_Plugin
             // Add final dimensions if resized.
             if (maxWidth > 0 || maxHeight > 0)
             {
-                result["resized"] = base64.Length < EstimateRawBase64Length(size.Width, size.Height);
+                result["resized"] = wasResized;
             }
 
             return result;
@@ -1986,11 +1988,7 @@ namespace EwE_MCP_Plugin
             }
         }
 
-        private static int EstimateRawBase64Length(int width, int height)
-        {
-            // Very rough estimate: 4 bytes per pixel * 4/3 for base64.
-            return (int)(width * height * 4 * 1.33);
-        }
+
 
         // ── UI Refresh ────────────────────────────────────────────────
 

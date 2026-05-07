@@ -9,8 +9,9 @@ import time
 from typing import Any
 
 import base64
+import pathlib
 
-from mcp.server.fastmcp import FastMCP, Image
+from mcp.server.fastmcp import FastMCP
 from mcp.types import ImageContent, TextContent, ToolAnnotations
 
 from ewe_mcp.client import EwEMCPClient
@@ -484,6 +485,9 @@ async def capture_view(
     max_height: int | None = None,
 ) -> list[TextContent | ImageContent]:
     """Capture a screenshot of the current EwE view.
+    
+    NOTE: Prefer using data-reading tools (e.g., get_values, get_indexed_value) to extract tabular data. 
+    Only use this tool for capturing graphs, charts, and spatial visualizations.
 
     Args:
         target: What to capture — "auto" (content panel preferred), "main" (full window),
@@ -492,7 +496,7 @@ async def capture_view(
         max_height: Optional max pixel height to downscale to (preserves aspect ratio).
 
     Returns:
-        An MCP response containing the screenshot as a PNG image and metadata text.
+        A 2-element list containing TextContent with metadata and ImageContent with the PNG.
     """
     params: dict[str, Any] = {"target": target}
     if max_width is not None:
@@ -508,7 +512,7 @@ async def capture_view(
     meta = {
         key: value
         for key, value in result.items()
-        if key not in ("data",)
+        if key != "data"
     }
 
     return [
@@ -530,12 +534,18 @@ async def save_screenshot(
 ) -> dict[str, Any]:
     """Capture a screenshot and save it to a local file on the machine running the MCP server.
 
+    NOTE: Prefer using data-reading tools (e.g., get_values, get_indexed_value) to extract tabular data.
+    Only use this tool for capturing graphs, charts, and spatial visualizations.
+
     Args:
         path: File path where the PNG will be saved (local to the Python MCP process).
         target: What to capture — "auto", "main", "active", or "content".
         max_width: Optional max pixel width to downscale to.
         max_height: Optional max pixel height to downscale to.
     """
+    if ".." in pathlib.Path(path).parts:
+        raise ValueError("Path cannot contain '..' components for security.")
+
     params: dict[str, Any] = {"target": target}
     if max_width is not None:
         params["max_width"] = max_width
@@ -562,8 +572,6 @@ async def save_screenshot(
 
 def _save_screenshot_to_host(path: str, data: bytes) -> None:
     """Write screenshot bytes to a local file. Runs in a thread."""
-    import pathlib
-
     out = pathlib.Path(path)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_bytes(data)

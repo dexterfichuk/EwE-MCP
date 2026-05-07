@@ -20,6 +20,7 @@ BATCH_BLOCKED_COMMANDS = frozenset(
         "execute_ewe_code",
         "close_model",
         "capture_view",
+        "save_screenshot",
         "create_ecosim_scenario",
         "copy_ecosim_scenario",
         "delete_ecosim_scenario",
