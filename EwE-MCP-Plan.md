@@ -146,6 +146,12 @@ Build EwE MCP as a separate plugin-first project in `/Users/dexterfichuk/Project
 - Implemented Python package in `src/ewe_mcp`.
 - Implemented Python socket client and FastMCP server skeleton.
 - Added structured Python client error type `EwEMCPError` with plugin error code/message preservation.
+- Added Phase 1 bridge hardening in PR #14:
+  - configurable `EWE_MCP_ENABLED=0` disabled mode that skips socket binding
+  - startup diagnostics with plugin assembly version, plugin path, EwE install path, and explicit bind failure logging
+  - plugin/client command timeout plumbing
+  - client-side socket invalidation on timeout or failed in-flight command, preventing late responses from poisoning the next command
+  - socket timeout and reconnect regression coverage
 - Exposed initial Python tools and resources, including `ewe://state` and `ewe://commands`.
 - Added Python protocol/helper tests.
 - Added edge-case tests for structured errors, batch blocking, unknown commands, invalid paths, and mutation validation.
@@ -202,7 +208,7 @@ SSHPASS=... ./scripts/vm-live-smoke.sh
 Current local test expectation:
 
 ```text
-7 passed, 23 skipped
+11 passed, 32 skipped
 ```
 
 The skipped tests are live EwE integration tests. Run them only when the VM plugin is deployed, EwE is launched, and a tunnel or direct connection is configured.
@@ -271,7 +277,7 @@ uv run pytest
 Expected baseline at the time of this update:
 
 ```text
-7 passed, 23 skipped
+11 passed, 32 skipped
 ```
 
 ### 3. VM Environment Variables
@@ -412,16 +418,11 @@ PY
 ## Remaining Work
 
 ### Phase 1: Harden The Bridge
-- Add a configurable plugin enabled/disabled flag. ([#15](https://github.com/dexterfichuk/EwE-MCP/issues/15))
+- ~~Add a configurable plugin enabled/disabled flag.~~ Completed via `EWE_MCP_ENABLED=0` in PR #14. ([#15](https://github.com/dexterfichuk/EwE-MCP/issues/15))
 - Move token/host/port configuration beyond environment variables if EwE’s runtime environment makes env vars awkward. ([#16](https://github.com/dexterfichuk/EwE-MCP/issues/16))
-- Add richer startup diagnostics. ([#17](https://github.com/dexterfichuk/EwE-MCP/issues/17))
-  - plugin assembly version
-  - EwE install path
-  - plugin path
-  - port bind failures
-  - dependency versions
-- Add socket idle/client cleanup tests. ([#18](https://github.com/dexterfichuk/EwE-MCP/issues/18))
-- Add command timeout handling in the plugin and Python client. ([#19](https://github.com/dexterfichuk/EwE-MCP/issues/19))
+- ~~Add richer startup diagnostics.~~ Completed for plugin assembly version, EwE install path, plugin path, and port bind failures in PR #14. ([#17](https://github.com/dexterfichuk/EwE-MCP/issues/17))
+- ~~Add socket idle/client cleanup tests.~~ Completed for disconnect/idempotent cleanup and timeout cleanup behavior in PR #14. ([#18](https://github.com/dexterfichuk/EwE-MCP/issues/18))
+- ~~Add command timeout handling in the plugin and Python client.~~ Completed in PR #14, including client reconnect safety after timed-out requests. ([#19](https://github.com/dexterfichuk/EwE-MCP/issues/19))
 - Add a `shutdown_server` or `restart_server` development-only command if useful. ([#20](https://github.com/dexterfichuk/EwE-MCP/issues/20))
 
 ### Phase 2: Model Inspection And Safe Model Workflow (COMPLETED)
@@ -528,6 +529,7 @@ PY
 
 ### Current Passing Tests
 - Python framing/protocol tests.
+- Timeout protocol tests, including socket invalidation after timed-out in-flight commands.
 - Python helper/config tests.
 - Structured client error tests via `EwEMCPError`.
 - Edge-case tests for batch blocking, unknown commands, invalid model paths, invalid domains, out-of-range indices, and unknown mutation properties.
@@ -535,6 +537,7 @@ PY
 - Indexed value tests for live read/write/restore plus unknown variable, empty indices, bad conversion, target index out of range, and indexed cell bounds.
 - Live VM smoke test for plugin startup and basic commands.
 - Live VM sample-model smoke test for Ecopath groups, diets, fleets, and counters.
+- Full live VM suite at PR #14 merge point: `39 passed`.
 
 ### Next Tests To Add
 - Plugin routing tests with fake handlers where possible. ([#39](https://github.com/dexterfichuk/EwE-MCP/issues/39))

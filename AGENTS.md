@@ -43,6 +43,8 @@ export EWE_MCP_REMOTE_PORT=9877
 export EWE_MODEL_PATH='C:\Users\dexter\Eii.Ecopath\Database\Tampa_Bay.EwEmdb'
 ```
 
+Optional: set `EWE_MCP_ENABLED=0` before launching EwE to keep the plugin installed but prevent it from binding the socket. Leave it unset for normal build/deploy/live work.
+
 If you are working from a separate worktree whose directory name is not `EwE-MCP`, either use scripts that derive the remote root from the worktree name or set:
 
 ```bash
@@ -155,7 +157,7 @@ EWE_MODEL_PATH='C:\Users\dexter\Eii.Ecopath\Database\Tampa_Bay.EwEmdb' \
 uv run pytest
 ```
 
-Expected local baseline with live tests skipped is currently `7 passed, 23 skipped`. The focused indexed live suite is:
+Expected local baseline with live tests skipped is currently `11 passed, 32 skipped`. The focused indexed live suite is:
 
 ```bash
 EWE_MCP_HOST=127.0.0.1 \
@@ -180,6 +182,8 @@ uv run pytest tests/test_ecosim_control.py
 ```
 
 Expected focused Ecosim live result is `5 passed`. The suite loads the sample model, loads an Ecosim scenario, inspects group/fleet inputs, runs Ecosim asynchronously, waits for completion, and reads short result time-series windows.
+
+Expected full live result on current `main` is `39 passed`.
 
 Prefer testing mutations against copied models. If you mutate the shared sample model, restore the original value in a `finally` block and call `discard_changes` so EwE clears the unsaved-change flag without saving over the sample model. `discard_changes` only clears dirty flags; it does not physically revert values.
 

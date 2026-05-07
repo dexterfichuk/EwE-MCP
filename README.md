@@ -41,6 +41,16 @@ export EWE_MCP_PORT=9877
 
 The plugin defaults to `ewe-mcp-local-dev` if no token is configured. That is for local smoke tests only.
 
+The plugin can be disabled without uninstalling DLLs:
+
+```bash
+export EWE_MCP_ENABLED=0
+```
+
+When disabled, the plugin logs the disabled state and does not bind the socket. Leave `EWE_MCP_ENABLED` unset, or set it to any value other than `0`, for normal operation.
+
+Client calls include a timeout value in the socket request. If a command times out or an in-flight socket operation fails, the Python client closes that socket before re-raising so a late response cannot be read by the next command.
+
 ## Build Plugin
 
 Build against either an installed EwE directory or compiled EwE assemblies:
