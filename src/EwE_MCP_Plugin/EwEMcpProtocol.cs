@@ -14,6 +14,7 @@ namespace EwE_MCP_Plugin
         public int Port { get; private set; }
         public string Token { get; private set; }
         public bool UsingDefaultToken { get; private set; }
+        public bool Enabled { get; private set; }
         public bool EnableEval { get; private set; }
         public int MaxMessageBytes { get; private set; }
 
@@ -29,6 +30,7 @@ namespace EwE_MCP_Plugin
 
             return new EwEMcpConfig
             {
+                Enabled = !string.Equals(Environment.GetEnvironmentVariable("EWE_MCP_ENABLED"), "0", StringComparison.OrdinalIgnoreCase),
                 Host = Environment.GetEnvironmentVariable("EWE_MCP_HOST") ?? DefaultHost,
                 Port = port,
                 Token = string.IsNullOrWhiteSpace(token) ? DefaultToken : token,
@@ -45,16 +47,24 @@ namespace EwE_MCP_Plugin
         public string Type { get; set; }
         public JObject Params { get; set; }
         public string Token { get; set; }
+        public int? Timeout { get; set; }
 
         public static EwEMcpRequest FromJson(string json)
         {
             var obj = JObject.Parse(json);
+            int? timeout = null;
+            if (obj["timeout"] != null && int.TryParse(obj["timeout"].ToString(), out var parsedTimeout))
+            {
+                timeout = parsedTimeout;
+            }
+
             return new EwEMcpRequest
             {
                 Id = obj["id"]?.ToString() ?? Guid.NewGuid().ToString("N"),
                 Type = obj["type"]?.ToString(),
                 Params = obj["params"] as JObject ?? new JObject(),
-                Token = obj["token"]?.ToString()
+                Token = obj["token"]?.ToString(),
+                Timeout = timeout
             };
         }
     }

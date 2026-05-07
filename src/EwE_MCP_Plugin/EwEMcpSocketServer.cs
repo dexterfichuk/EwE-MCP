@@ -105,7 +105,7 @@ namespace EwE_MCP_Plugin
                             return;
                         }
 
-                        var response = Execute(requestJson);
+                        var response = await ExecuteAsync(requestJson, token).ConfigureAwait(false);
                         await WriteFrameAsync(stream, response.ToString(Formatting.None), token).ConfigureAwait(false);
                     }
                     catch (IOException)
@@ -121,7 +121,7 @@ namespace EwE_MCP_Plugin
             }
         }
 
-        private JObject Execute(string requestJson)
+        private async Task<JObject> ExecuteAsync(string requestJson, CancellationToken baseToken)
         {
             EwEMcpRequest request = null;
             try
@@ -136,14 +136,47 @@ namespace EwE_MCP_Plugin
                     throw new EwEMcpException("unauthorized", "Invalid or missing EWE_MCP_TOKEN");
                 }
 
-                var result = _router.Dispatch(request);
-                _auditLog.Add(request.Type, "success", request.Params?.ToString(Formatting.None));
-                return new JObject
+                var timeoutMs = request.Timeout.HasValue ? request.Timeout.Value * 1000 : Timeout.Infinite;
+                using (var cts = CancellationTokenSource.CreateLinkedTokenSource(baseToken))
                 {
-                    ["id"] = request.Id,
-                    ["status"] = "success",
-                    ["result"] = result ?? new JObject()
-                };
+                    if (timeoutMs > 0)
+                    {
+                        cts.CancelAfter(timeoutMs);
+                    }
+
+                    var tcs = new TaskCompletionSource<JObject>();
+
+                    _ = Task.Run(() =>
+                    {
+                        try
+                        {
+                            var result = _router.Dispatch(request);
+                            _auditLog.Add(request.Type, "success", request.Params?.ToString(Formatting.None));
+                            tcs.TrySetResult(new JObject
+                            {
+                                ["id"] = request.Id,
+                                ["status"] = "success",
+                                ["result"] = result ?? new JObject()
+                            });
+                        }
+                        catch (Exception ex)
+                        {
+                            tcs.TrySetException(ex);
+                        }
+                    }, cts.Token);
+
+                    using (cts.Token.Register(() => tcs.TrySetCanceled()))
+                    {
+                        try
+                        {
+                            return await tcs.Task.ConfigureAwait(false);
+                        }
+                        catch (OperationCanceledException)
+                        {
+                            throw new EwEMcpException("timeout", $"Command {request.Type} timed out after {request.Timeout} seconds");
+                        }
+                    }
+                }
             }
             catch (EwEMcpException ex)
             {
