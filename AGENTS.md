@@ -122,7 +122,7 @@ EWE_MCP_TOKEN=ewe-mcp-local-dev \
 uv run ewe-mcp
 ```
 
-The MCP server exposes tools backed by the running EwE plugin. Current main-branch tools include diagnostics, model load/save/close, Ecopath group/fleet reads, generic entity/value reads, indexed value reads/writes such as `DietComp(prey)` and `Landings(group)`, Ecosim scenario load/create/copy/delete/save, Ecosim run state, Ecosim group/fleet inputs, Ecosim group/fleet result time-series, selected mutations through `set_values` and `set_indexed_value`, UI command invocation, batching, and a disabled-by-default eval helper.
+The MCP server exposes tools backed by the running EwE plugin. Current main-branch tools include diagnostics, model load/save/close, Ecopath group/fleet reads, generic entity/value reads, indexed value reads/writes such as `DietComp(prey)` and `Landings(group)`, Ecosim scenario load/create/copy/delete/save, Ecosim run state, Ecosim group/fleet inputs, Ecosim group/fleet result time-series, selected mutations through `set_values` and `set_indexed_value`, UI command invocation, navigation through `list_navigation_nodes`/`navigate_to_node`/`get_active_view`, batching, and a disabled-by-default eval helper.
 
 ## Live Tests
 Run live tests only after build/deploy/launch/smoke succeeds:
@@ -168,6 +168,7 @@ Prefer testing mutations against copied models. If you mutate the shared sample 
 - Keep `execute_ewe_code` disabled unless the user explicitly asks for it and understands the risk.
 - Do not batch `execute_ewe_code`, model-closing operations, or destructive Ecosim scenario management.
 - Use `validate_values` before `set_values` when possible.
+- Use `navigate_to_node` before UI-sensitive workflows, or pass `navigate=True` to `set_values` / `set_indexed_value` so EwE selects the matching edit screen while the mutation runs.
 - For model-changing workflows, prefer `save_model_as` to a temporary/copy path instead of overwriting the shared model.
 - Record what you changed and what you restored in your final message.
 

@@ -21,9 +21,9 @@ Implemented now:
 - Ecosim control tools: scenario list/get/load/create/copy/delete/save, `get_ecosim_run_state`, group/fleet input inspection, group/fleet result time-series, and reflected `export_ecosim_results` for installed-build compatibility.
 - Generic entity/value tools: `get_entity`, `list_variables`, `get_variable_metadata`, `get_values`, `validate_values`.
 - Indexed value tools: `get_indexed_value`, `validate_indexed_value`, `set_indexed_value` for targeted cell-level control such as `DietComp(prey)` or `Landings(group)`.
-- Mutation tools: `set_values` supports Ecopath groups/fleets and Ecosim group/fleet inputs; `set_indexed_value` supports targeted indexed cells.
+- Mutation tools: `set_values` supports Ecopath groups/fleets and Ecosim group/fleet inputs; `set_indexed_value` supports targeted indexed cells. Pass `navigate=True` to show the relevant EwE screen while editing.
 - Expanded generic domains now include Ecopath, Ecosim, Ecospace, Ecotracer, taxa, `core`, and UI commands. Some subsystem entity collections remain unavailable until EwE initializes or loads the relevant scenario.
-- UI command tools: `list_ui_commands`, `invoke_ui_command`.
+- UI command/navigation tools: `list_ui_commands`, `invoke_ui_command`, `list_navigation_nodes`, `navigate_to_node`, `get_active_view`.
 - Python MCP server, socket client, batch command guard, and protocol tests.
 
 The broad Ecospace/Ecotracer/MSE/Monte Carlo object model is intentionally not fully filled in yet; the bridge spine and first Ecosim scenario/run/results loop are ready for expansion.

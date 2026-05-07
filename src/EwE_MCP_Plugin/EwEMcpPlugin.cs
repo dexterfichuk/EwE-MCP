@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Reflection;
 using System.Threading;
+using System.Windows.Forms;
 using EwECore;
 using EwEPlugin;
 using Newtonsoft.Json.Linq;
@@ -194,6 +195,12 @@ namespace EwE_MCP_Plugin
                     return ListUiCommands();
                 case "invoke_ui_command":
                     return OnUiThread(() => InvokeUiCommand(request.Params));
+                case "list_navigation_nodes":
+                    return OnUiThread(ListNavigationNodes);
+                case "navigate_to_node":
+                    return OnUiThread(() => NavigateToNode(request.Params));
+                case "get_active_view":
+                    return OnUiThread(GetActiveView);
                 case "load_model":
                     return OnUiThread(() => LoadModel(request.Params));
                 case "save_model":
@@ -1346,6 +1353,283 @@ namespace EwE_MCP_Plugin
             return new JObject { ["invoked"] = true, ["name"] = cmd.Name, ["enabled"] = cmd.Enabled };
         }
 
+        private JObject ListNavigationNodes()
+        {
+            var tree = RequireNavigationTreeView();
+            var nodes = new JArray();
+            var ordinal = 0;
+            foreach (TreeNode node in tree.Nodes)
+            {
+                AddNavigationNode(nodes, node, null, 0, ref ordinal, tree.SelectedNode);
+            }
+
+            return new JObject
+            {
+                ["nodes"] = nodes,
+                ["total_count"] = nodes.Count,
+                ["selected"] = tree.SelectedNode == null ? null : BuildNavigationNode(tree.SelectedNode, null, -1, -1, tree.SelectedNode)
+            };
+        }
+
+        private JObject NavigateToNode(JObject parameters)
+        {
+            var tree = RequireNavigationTreeView();
+            var node = FindNavigationNode(tree, parameters ?? new JObject());
+            if (node == null)
+            {
+                throw new EwEMcpException("navigation_node_not_found", "No navigation node matched the supplied id, name, text, path, or query.");
+            }
+
+            tree.SelectedNode = node;
+            node.EnsureVisible();
+            tree.Focus();
+            RefreshUI();
+
+            return new JObject
+            {
+                ["navigated"] = true,
+                ["selected"] = BuildNavigationNode(node, null, -1, -1, node)
+            };
+        }
+
+        private JObject GetActiveView()
+        {
+            var tree = FindNavigationTreeView();
+            TreeNode selected = tree?.SelectedNode;
+            return new JObject
+            {
+                ["has_navigation_tree"] = tree != null,
+                ["selected"] = selected == null ? null : BuildNavigationNode(selected, null, -1, -1, selected),
+                ["form_main_type"] = SafeGetProperty(_uiContext(), "FormMain")?.GetType().FullName ?? string.Empty,
+                ["active_form"] = Form.ActiveForm?.GetType().FullName ?? string.Empty
+            };
+        }
+
+        private TreeView RequireNavigationTreeView()
+        {
+            return FindNavigationTreeView()
+                ?? throw new EwEMcpException("navigation_tree_unavailable", "EwE navigation tree is not available yet.");
+        }
+
+        private TreeView FindNavigationTreeView()
+        {
+            foreach (Form form in Application.OpenForms)
+            {
+                var tree = FindTreeViewByName(form, "m_tvNavigation");
+                if (tree != null)
+                {
+                    return tree;
+                }
+            }
+
+            var formMain = SafeGetProperty(_uiContext(), "FormMain") as Control;
+            return FindTreeViewByName(formMain, "m_tvNavigation");
+        }
+
+        private static TreeView FindTreeViewByName(Control root, string name)
+        {
+            if (root == null)
+            {
+                return null;
+            }
+
+            if (root is TreeView tree && string.Equals(tree.Name, name, StringComparison.OrdinalIgnoreCase))
+            {
+                return tree;
+            }
+
+            foreach (Control child in root.Controls)
+            {
+                var found = FindTreeViewByName(child, name);
+                if (found != null)
+                {
+                    return found;
+                }
+            }
+
+            return null;
+        }
+
+        private static void AddNavigationNode(JArray nodes, TreeNode node, string parentId, int depth, ref int ordinal, TreeNode selected)
+        {
+            nodes.Add(BuildNavigationNode(node, parentId, depth, ordinal, selected));
+            ordinal++;
+            foreach (TreeNode child in node.Nodes)
+            {
+                AddNavigationNode(nodes, child, node.Name, depth + 1, ref ordinal, selected);
+            }
+        }
+
+        private static JObject BuildNavigationNode(TreeNode node, string parentId, int depth, int ordinal, TreeNode selected)
+        {
+            return new JObject
+            {
+                ["id"] = node.Name ?? string.Empty,
+                ["name"] = node.Name ?? string.Empty,
+                ["text"] = node.Text ?? string.Empty,
+                ["path"] = NavigationPath(node, useIds: false),
+                ["id_path"] = NavigationPath(node, useIds: true),
+                ["depth"] = depth >= 0 ? depth : NodeDepth(node),
+                ["parent_id"] = parentId ?? node.Parent?.Name ?? string.Empty,
+                ["ordinal"] = ordinal,
+                ["tag_type"] = node.Tag?.GetType().FullName ?? string.Empty,
+                ["has_children"] = node.Nodes.Count > 0,
+                ["is_selected"] = ReferenceEquals(node, selected)
+            };
+        }
+
+        private static string NavigationPath(TreeNode node, bool useIds)
+        {
+            var parts = new Stack<string>();
+            var current = node;
+            while (current != null)
+            {
+                var part = useIds ? current.Name : current.Text;
+                parts.Push(part ?? string.Empty);
+                current = current.Parent;
+            }
+            return string.Join(" > ", parts.ToArray());
+        }
+
+        private static int NodeDepth(TreeNode node)
+        {
+            var depth = 0;
+            var current = node.Parent;
+            while (current != null)
+            {
+                depth++;
+                current = current.Parent;
+            }
+            return depth;
+        }
+
+        private static TreeNode FindNavigationNode(TreeView tree, JObject parameters)
+        {
+            var id = OptionalString(parameters, "id") ?? OptionalString(parameters, "name");
+            var text = OptionalString(parameters, "text");
+            var path = OptionalString(parameters, "path");
+            var query = OptionalString(parameters, "query");
+            if (string.IsNullOrWhiteSpace(id) && string.IsNullOrWhiteSpace(text) &&
+                string.IsNullOrWhiteSpace(path) && string.IsNullOrWhiteSpace(query))
+            {
+                throw new EwEMcpException("missing_parameter", "Provide one of id, name, text, path, or query.");
+            }
+
+            var all = FlattenNavigationNodes(tree);
+            return all.FirstOrDefault(n => Matches(n.Name, id)) ??
+                   all.FirstOrDefault(n => Matches(n.Text, text)) ??
+                   all.FirstOrDefault(n => Matches(NavigationPath(n, useIds: false), path)) ??
+                   all.FirstOrDefault(n => Matches(NavigationPath(n, useIds: true), path)) ??
+                   all.FirstOrDefault(n => Contains(n.Name, query) || Contains(n.Text, query) ||
+                                           Contains(NavigationPath(n, useIds: false), query) ||
+                                           Contains(NavigationPath(n, useIds: true), query));
+        }
+
+        private static List<TreeNode> FlattenNavigationNodes(TreeView tree)
+        {
+            var nodes = new List<TreeNode>();
+            foreach (TreeNode node in tree.Nodes)
+            {
+                FlattenNavigationNodes(node, nodes);
+            }
+            return nodes;
+        }
+
+        private static void FlattenNavigationNodes(TreeNode node, List<TreeNode> nodes)
+        {
+            nodes.Add(node);
+            foreach (TreeNode child in node.Nodes)
+            {
+                FlattenNavigationNodes(child, nodes);
+            }
+        }
+
+        private static bool Matches(string value, string expected)
+        {
+            return !string.IsNullOrWhiteSpace(expected) &&
+                   string.Equals(value ?? string.Empty, expected, StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool Contains(string value, string query)
+        {
+            return !string.IsNullOrWhiteSpace(query) &&
+                   (value ?? string.Empty).IndexOf(query, StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        private JObject NavigateToSuggestedEditNode(string domain, IEnumerable<string> variables)
+        {
+            var nodeId = SuggestedEditNodeId(domain, variables);
+            if (string.IsNullOrWhiteSpace(nodeId))
+            {
+                return new JObject
+                {
+                    ["attempted"] = false,
+                    ["reason"] = "no_suggestion",
+                    ["domain"] = domain
+                };
+            }
+
+            try
+            {
+                var result = NavigateToNode(new JObject { ["id"] = nodeId });
+                result["attempted"] = true;
+                result["suggested_node_id"] = nodeId;
+                return result;
+            }
+            catch (EwEMcpException ex)
+            {
+                return new JObject
+                {
+                    ["attempted"] = true,
+                    ["suggested_node_id"] = nodeId,
+                    ["error"] = ex.Code,
+                    ["message"] = ex.Message
+                };
+            }
+        }
+
+        private static string SuggestedEditNodeId(string domain, IEnumerable<string> variables)
+        {
+            var normalized = NormalizeDomain(domain);
+            var vars = (variables ?? Enumerable.Empty<string>())
+                .Select(v => (v ?? string.Empty).Trim().ToLowerInvariant())
+                .ToArray();
+
+            if (normalized == "ecopath_groups")
+            {
+                if (vars.Any(v => v == "dietcomp" || v == "diet_comp" || v == "dietcomposition" || v == "diet_composition"))
+                {
+                    return "ndDietComposition";
+                }
+                return "ndBasicInput";
+            }
+
+            if (normalized == "ecopath_fleets")
+            {
+                if (vars.Any(v => v == "landings" || v == "landing"))
+                {
+                    return "ndLandings";
+                }
+                if (vars.Any(v => v == "discards" || v == "discard"))
+                {
+                    return "ndDiscards";
+                }
+                return "ndDefFleets";
+            }
+
+            if (normalized == "ecosim_group_inputs")
+            {
+                return "ndGroupInfo";
+            }
+
+            if (normalized == "ecosim_fleet_inputs")
+            {
+                return "ndFleetSizeDynamics";
+            }
+
+            return string.Empty;
+        }
+
         private JObject LoadModel(JObject parameters)
         {
             var path = RequiredString(parameters, "path");
@@ -1470,23 +1754,36 @@ namespace EwE_MCP_Plugin
             var domain = RequiredString(parameters, "domain").Trim().ToLowerInvariant();
             var index = RequiredInt(parameters, "index");
             var values = parameters["values"] as JObject ?? throw new EwEMcpException("missing_parameter", "Missing 'values' object");
+            var navigate = OptionalBool(parameters, "navigate");
             var core = RequireCore();
+            var navigation = navigate ? NavigateToSuggestedEditNode(domain, values.Properties().Select(p => p.Name)) : null;
 
+            JObject result;
             switch (domain)
             {
                 case "ecopath_group":
-                    return SetEcopathGroupValues(core, index, values);
+                    result = SetEcopathGroupValues(core, index, values);
+                    break;
                 case "ecopath_fleet":
-                    return SetEcopathFleetValues(core, index, values);
+                    result = SetEcopathFleetValues(core, index, values);
+                    break;
                 case "ecosim_group_input":
                 case "ecosim_group_inputs":
-                    return SetGenericValues("ecosim_group_inputs", SafeGetIndexedProperty(core, "EcosimGroupInputs", index), index, values);
+                    result = SetGenericValues("ecosim_group_inputs", SafeGetIndexedProperty(core, "EcosimGroupInputs", index), index, values);
+                    break;
                 case "ecosim_fleet_input":
                 case "ecosim_fleet_inputs":
-                    return SetGenericValues("ecosim_fleet_inputs", SafeGetIndexedProperty(core, "EcosimFleetInputs", index), index, values);
+                    result = SetGenericValues("ecosim_fleet_inputs", SafeGetIndexedProperty(core, "EcosimFleetInputs", index), index, values);
+                    break;
                 default:
                     throw new EwEMcpException("unsupported_domain", $"Setting values for domain '{domain}' is not supported yet.");
             }
+
+            if (navigation != null)
+            {
+                result["navigation"] = navigation;
+            }
+            return result;
         }
 
         private JObject SetIndexedValue(JObject parameters)
@@ -1495,6 +1792,7 @@ namespace EwE_MCP_Plugin
             var variable = RequiredString(parameters, "variable");
             var indices = RequiredIntArray(parameters, "indices");
             var value = parameters["value"] ?? throw new EwEMcpException("missing_parameter", "Missing value");
+            var navigation = OptionalBool(parameters, "navigate") ? NavigateToSuggestedEditNode(target.NormalizedDomain, new[] { variable }) : null;
             var property = FindIndexedProperty(target.Entity, variable, target.NormalizedDomain, indices.Length, requireWritable: true);
             if (property == null)
             {
@@ -1515,7 +1813,7 @@ namespace EwE_MCP_Plugin
                 throw new EwEMcpException("set_failed", ex.Message);
             }
 
-            return new JObject
+            var result = new JObject
             {
                 ["domain"] = target.NormalizedDomain,
                 ["index"] = target.Index.HasValue ? JToken.FromObject(target.Index.Value) : JValue.CreateNull(),
@@ -1525,6 +1823,11 @@ namespace EwE_MCP_Plugin
                 ["result"] = "updated",
                 ["value"] = ToJToken(convertedValue)
             };
+            if (navigation != null)
+            {
+                result["navigation"] = navigation;
+            }
+            return result;
         }
 
         private JObject SetEcopathGroupValues(cCore core, int index, JObject values)
@@ -2227,6 +2530,12 @@ namespace EwE_MCP_Plugin
             return value;
         }
 
+        private static string OptionalString(JObject parameters, string name)
+        {
+            var value = parameters?[name]?.ToString();
+            return string.IsNullOrWhiteSpace(value) ? null : value;
+        }
+
         private static int RequiredInt(JObject parameters, string name)
         {
             var token = parameters?[name];
@@ -2235,6 +2544,24 @@ namespace EwE_MCP_Plugin
                 throw new EwEMcpException("missing_parameter", $"Missing required integer parameter: {name}");
             }
             return value;
+        }
+
+        private static bool OptionalBool(JObject parameters, string name)
+        {
+            var token = parameters?[name];
+            if (token == null || token.Type == JTokenType.Null || string.IsNullOrWhiteSpace(token.ToString()))
+            {
+                return false;
+            }
+            if (token.Type == JTokenType.Boolean)
+            {
+                return token.Value<bool>();
+            }
+            if (bool.TryParse(token.ToString(), out var value))
+            {
+                return value;
+            }
+            throw new EwEMcpException("invalid_parameter", $"Parameter must be a boolean: {name}");
         }
 
         private static int? OptionalInt(JObject parameters, string name)
