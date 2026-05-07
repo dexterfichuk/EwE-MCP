@@ -95,7 +95,7 @@ async def _send(command_type: str, params: dict[str, Any] | None = None, timeout
         raise
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
 async def estimate_fishing_mortality(catch: float, biomass: float) -> float:
     """
     Estimate fishing mortality (F) as Catch (C) / Biomass (B).
@@ -104,7 +104,7 @@ async def estimate_fishing_mortality(catch: float, biomass: float) -> float:
     return ecopath_estimate_fishing_mortality(catch, biomass)
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
 async def estimate_total_mortality(fishing_mortality: float, natural_mortality: float) -> float:
     """
     Estimate total mortality (Z) as the sum of fishing mortality (F) and natural mortality (M).
@@ -113,7 +113,7 @@ async def estimate_total_mortality(fishing_mortality: float, natural_mortality: 
     return ecopath_estimate_total_mortality(fishing_mortality, natural_mortality)
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
 async def estimate_catch(biomass: float, fishing_mortality: float) -> float:
     """
     Estimate catch (C) as Biomass (B) * Fishing Mortality (F).
@@ -122,7 +122,7 @@ async def estimate_catch(biomass: float, fishing_mortality: float) -> float:
     return ecopath_estimate_catch(biomass, fishing_mortality)
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
 async def estimate_production(biomass: float, pb_ratio: float) -> float:
     """
     Estimate total production (P) as Biomass (B) * Production/Biomass ratio (P/B).
@@ -131,7 +131,7 @@ async def estimate_production(biomass: float, pb_ratio: float) -> float:
     return ecopath_estimate_production(biomass, pb_ratio)
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
 async def estimate_consumption(biomass: float, qb_ratio: float) -> float:
     """
     Estimate total consumption (Q) as Biomass (B) * Consumption/Biomass ratio (Q/B).
@@ -140,7 +140,7 @@ async def estimate_consumption(biomass: float, qb_ratio: float) -> float:
     return ecopath_estimate_consumption(biomass, qb_ratio)
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
 async def estimate_average_longevity(pb_ratio: float) -> float:
     """
     Estimate average longevity as the inverse of the P/B ratio (expressed in years).
