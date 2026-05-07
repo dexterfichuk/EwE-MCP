@@ -168,7 +168,7 @@ Prefer testing mutations against copied models. If you mutate the shared sample 
 - Keep `execute_ewe_code` disabled unless the user explicitly asks for it and understands the risk.
 - Do not batch `execute_ewe_code`, model-closing operations, or destructive Ecosim scenario management.
 - Use `validate_values` before `set_values` when possible.
-- Use `navigate_to_node` before UI-sensitive workflows, or pass `navigate=True` to `set_values` / `set_indexed_value` so EwE selects the matching edit screen while the mutation runs.
+- Value reads/writes navigate by default through `get_values`, `get_indexed_value`, `set_values`, and `set_indexed_value`; pass `navigate=False` for quiet/background access or batch-like workflows.
 - For model-changing workflows, prefer `save_model_as` to a temporary/copy path instead of overwriting the shared model.
 - Record what you changed and what you restored in your final message.
 

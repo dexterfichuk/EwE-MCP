@@ -81,7 +81,7 @@ Build EwE MCP as a separate plugin-first project in `/Users/dexterfichuk/Project
 - Implemented `refresh_ui` using `FormMain.Refresh` and a best-effort `~navigate` invoke.
 - Implemented first-class UI navigation over EwE's navigation tree, including node listing, direct navigation by node id/text/path/query, and active view reporting.
 - Implemented `set_values` for `ecopath_group`, `ecopath_fleet`, `ecosim_group_input`, and `ecosim_fleet_input`.
-- Implemented Python-side automatic UI refresh after `set_values`, plus optional `navigate=True` on `set_values` and `set_indexed_value` to select the relevant edit screen while mutating values.
+- Implemented Python-side automatic UI refresh after `set_values`, plus default value-tool navigation on `get_values`, `get_indexed_value`, `set_values`, and `set_indexed_value`; callers can pass `navigate=False` for quiet/background access.
 - Implemented the first explicit Ecosim control loop:
   - list/get scenarios
   - load a scenario

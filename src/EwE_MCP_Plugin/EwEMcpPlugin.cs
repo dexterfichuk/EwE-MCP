@@ -652,13 +652,19 @@ namespace EwE_MCP_Plugin
             int? index = OptionalInt(parameters, "index");
             var target = ResolveEntity(domain, index);
             var variables = OptionalStringArray(parameters, "variables");
+            var navigation = OptionalBool(parameters, "navigate") ? NavigateToSuggestedEditNode(target.NormalizedDomain, variables) : null;
 
-            return new JObject
+            var result = new JObject
             {
                 ["domain"] = target.NormalizedDomain,
                 ["index"] = target.Index.HasValue ? JToken.FromObject(target.Index.Value) : JValue.CreateNull(),
                 ["values"] = ReadScalarValues(target.Entity, variables, true, target.NormalizedDomain)
             };
+            if (navigation != null)
+            {
+                result["navigation"] = navigation;
+            }
+            return result;
         }
 
         private JObject ValidateValues(JObject parameters)
@@ -703,6 +709,7 @@ namespace EwE_MCP_Plugin
             var target = ResolveEntity(RequiredString(parameters, "domain"), OptionalInt(parameters, "index"));
             var variable = RequiredString(parameters, "variable");
             var indices = RequiredIntArray(parameters, "indices");
+            var navigation = OptionalBool(parameters, "navigate") ? NavigateToSuggestedEditNode(target.NormalizedDomain, new[] { variable }) : null;
             var property = FindIndexedProperty(target.Entity, variable, target.NormalizedDomain, indices.Length, requireWritable: false);
             if (property == null)
             {
@@ -711,7 +718,7 @@ namespace EwE_MCP_Plugin
             ValidateIndexedBounds(target, property, indices);
 
             var value = ReadIndexedPropertyValue(target.Entity, property, indices);
-            return new JObject
+            var result = new JObject
             {
                 ["domain"] = target.NormalizedDomain,
                 ["index"] = target.Index.HasValue ? JToken.FromObject(target.Index.Value) : JValue.CreateNull(),
@@ -720,6 +727,11 @@ namespace EwE_MCP_Plugin
                 ["indices"] = JArray.FromObject(indices),
                 ["value"] = value
             };
+            if (navigation != null)
+            {
+                result["navigation"] = navigation;
+            }
+            return result;
         }
 
         private JObject ValidateIndexedValue(JObject parameters)
@@ -1590,7 +1602,15 @@ namespace EwE_MCP_Plugin
 
         private static string SuggestedEditNodeId(string domain, IEnumerable<string> variables)
         {
-            var normalized = NormalizeDomain(domain);
+            string normalized;
+            try
+            {
+                normalized = NormalizeDomain(domain);
+            }
+            catch (EwEMcpException)
+            {
+                return string.Empty;
+            }
             var vars = (variables ?? Enumerable.Empty<string>())
                 .Select(v => (v ?? string.Empty).Trim().ToLowerInvariant())
                 .ToArray();

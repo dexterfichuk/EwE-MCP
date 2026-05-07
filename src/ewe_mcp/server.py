@@ -235,9 +235,14 @@ async def get_variable_metadata(domain: str, variable: str, index: int | None = 
 
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
-async def get_values(domain: str, index: int | None = None, variables: list[str] | None = None) -> dict[str, Any]:
-    """Read values from an EwE entity. Omit variables to read all scalar/simple array values."""
-    params: dict[str, Any] = {"domain": domain}
+async def get_values(
+    domain: str,
+    index: int | None = None,
+    variables: list[str] | None = None,
+    navigate: bool = True,
+) -> dict[str, Any]:
+    """Read values from an EwE entity. Pass navigate=False to avoid changing the visible EwE screen."""
+    params: dict[str, Any] = {"domain": domain, "navigate": navigate}
     if index is not None:
         params["index"] = index
     if variables is not None:
@@ -255,9 +260,15 @@ async def validate_values(domain: str, values: dict[str, Any], index: int | None
 
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
-async def get_indexed_value(domain: str, variable: str, indices: list[int], index: int | None = None) -> dict[str, Any]:
-    """Read one indexed EwE value, such as DietComp(prey) or Landings(group)."""
-    params: dict[str, Any] = {"domain": domain, "variable": variable, "indices": indices}
+async def get_indexed_value(
+    domain: str,
+    variable: str,
+    indices: list[int],
+    index: int | None = None,
+    navigate: bool = True,
+) -> dict[str, Any]:
+    """Read one indexed EwE value. Pass navigate=False to avoid changing the visible EwE screen."""
+    params: dict[str, Any] = {"domain": domain, "variable": variable, "indices": indices, "navigate": navigate}
     if index is not None:
         params["index"] = index
     return await _send("get_indexed_value", params)
@@ -453,8 +464,8 @@ async def refresh_ui() -> dict[str, Any]:
 
 
 @mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
-async def set_values(domain: str, index: int, values: dict[str, Any], navigate: bool = False) -> dict[str, Any]:
-    """Set values for an EwE entity and refresh the UI. Pass navigate=True to show the relevant EwE screen while editing."""
+async def set_values(domain: str, index: int, values: dict[str, Any], navigate: bool = True) -> dict[str, Any]:
+    """Set values for an EwE entity and refresh the UI. Pass navigate=False to avoid changing the visible EwE screen."""
     result = await _send(
         "set_values",
         {"domain": domain, "index": index, "values": values, "navigate": navigate},
@@ -472,9 +483,9 @@ async def set_indexed_value(
     indices: list[int],
     value: Any,
     index: int | None = None,
-    navigate: bool = False,
+    navigate: bool = True,
 ) -> dict[str, Any]:
-    """Set one indexed EwE value and refresh the UI. Pass navigate=True to show the relevant EwE grid/screen."""
+    """Set one indexed EwE value and refresh the UI. Pass navigate=False to avoid changing the visible EwE screen."""
     params: dict[str, Any] = {
         "domain": domain,
         "variable": variable,
