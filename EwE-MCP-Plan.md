@@ -412,17 +412,17 @@ PY
 ## Remaining Work
 
 ### Phase 1: Harden The Bridge
-- Add a configurable plugin enabled/disabled flag.
-- Move token/host/port configuration beyond environment variables if EwE’s runtime environment makes env vars awkward.
-- Add richer startup diagnostics:
+- Add a configurable plugin enabled/disabled flag. ([#15](https://github.com/dexterfichuk/EwE-MCP/issues/15))
+- Move token/host/port configuration beyond environment variables if EwE’s runtime environment makes env vars awkward. ([#16](https://github.com/dexterfichuk/EwE-MCP/issues/16))
+- Add richer startup diagnostics. ([#17](https://github.com/dexterfichuk/EwE-MCP/issues/17))
   - plugin assembly version
   - EwE install path
   - plugin path
   - port bind failures
   - dependency versions
-- Add socket idle/client cleanup tests.
-- Add command timeout handling in the plugin and Python client.
-- Add a `shutdown_server` or `restart_server` development-only command if useful.
+- Add socket idle/client cleanup tests. ([#18](https://github.com/dexterfichuk/EwE-MCP/issues/18))
+- Add command timeout handling in the plugin and Python client. ([#19](https://github.com/dexterfichuk/EwE-MCP/issues/19))
+- Add a `shutdown_server` or `restart_server` development-only command if useful. ([#20](https://github.com/dexterfichuk/EwE-MCP/issues/20))
 
 ### Phase 2: Model Inspection And Safe Model Workflow (COMPLETED)
 - ~~Locate sample model files on the VM or in EwE install/source directories. Initial sample located and verified:~~
@@ -440,7 +440,7 @@ PY
 
 ### Phase 3: Generic EwE Object And Variable Layer
 - Initial generic reflection-backed entity/value reads are done for available domains.
-- Initial domain-specific mutation is done for Ecopath groups/fleets and Ecosim group/fleet inputs via `set_values`; the remaining deeper generic data layer should build around EwE’s variable APIs, likely including:
+- Initial domain-specific mutation is done for Ecopath groups/fleets and Ecosim group/fleet inputs via `set_values`; the remaining deeper generic data layer should build around EwE’s variable APIs. ([#21](https://github.com/dexterfichuk/EwE-MCP/issues/21)) Likely includes:
   - `cCoreInputOutputBase`
   - `eVarNameFlags`
   - `cVariableMetaData`
@@ -449,15 +449,15 @@ PY
   - status and remark fields
   - entity IDs
 - Remaining MCP/value work:
-  - expose EwE metadata/status/remarks from `cCoreInputOutputBase`
-  - initialize/load subsystem scenario data before reading unavailable Ecospace/Ecotracer collections
-  - broaden edit-to-screen navigation mappings beyond the current Ecopath group/fleet and Ecosim group/fleet input mappings
-  - add generic `set_values` support beyond Ecopath groups/fleets and Ecosim group/fleet inputs
-  - extend indexed writes into multi-index variables and additional domains after the initial single-index Ecopath group/fleet slice
-- Add broader batch safety rules for mixed read/write command groups; destructive scenario management is already blocked.
+  - expose EwE metadata/status/remarks from `cCoreInputOutputBase` ([#22](https://github.com/dexterfichuk/EwE-MCP/issues/22))
+  - initialize/load subsystem scenario data before reading unavailable Ecospace/Ecotracer collections ([#23](https://github.com/dexterfichuk/EwE-MCP/issues/23))
+  - broaden edit-to-screen navigation mappings beyond the current Ecopath group/fleet and Ecosim group/fleet input mappings ([#24](https://github.com/dexterfichuk/EwE-MCP/issues/24))
+  - add generic `set_values` support beyond Ecopath groups/fleets and Ecosim group/fleet inputs ([#25](https://github.com/dexterfichuk/EwE-MCP/issues/25))
+  - extend indexed writes into multi-index variables and additional domains after the initial single-index Ecopath group/fleet slice ([#26](https://github.com/dexterfichuk/EwE-MCP/issues/26))
+- Add broader batch safety rules for mixed read/write command groups; destructive scenario management is already blocked. ([#27](https://github.com/dexterfichuk/EwE-MCP/issues/27))
 
 ### Phase 4: Ecopath And Ecosim Control
-- Implement explicit Ecopath tools:
+- Implement explicit Ecopath tools. ([#28](https://github.com/dexterfichuk/EwE-MCP/issues/28))
   - run Ecopath
   - fetch balancing diagnostics
   - fetch group/fleet values
@@ -468,30 +468,30 @@ PY
   - load scenario: done
   - set scenario parameters: initial group/fleet input support done
   - run/stop Ecosim: done
-  - subscribe to progress/completion events where available
+  - subscribe to progress/completion events where available ([#29](https://github.com/dexterfichuk/EwE-MCP/issues/29))
   - fetch time-series outputs: initial group/fleet result series done
   - export results: initial reflected `dumpEcosimModelResults` wrapper done for installed-build compatibility
 
 ### Phase 5: Full EwE Suite Coverage
-- Add Ecospace tools:
+- Add Ecospace tools. ([#30](https://github.com/dexterfichuk/EwE-MCP/issues/30))
   - scenario management
   - spatial layer inspection
   - run/stop
   - progress
   - results and map exports
-- Add Ecotracer tools:
+- Add Ecotracer tools. ([#31](https://github.com/dexterfichuk/EwE-MCP/issues/31))
   - tracer setup inspection
   - scenario/run control
   - result extraction
-- Add MSE tools:
+- Add MSE tools. ([#32](https://github.com/dexterfichuk/EwE-MCP/issues/32))
   - management procedure/scenario inspection
   - run control
   - result extraction
-- Add Monte Carlo tools:
+- Add Monte Carlo tools. ([#33](https://github.com/dexterfichuk/EwE-MCP/issues/33))
   - configuration inspection
   - run control
   - result summaries
-- Add plugin manager/control diagnostics where safe.
+- Add plugin manager/control diagnostics where safe. ([#34](https://github.com/dexterfichuk/EwE-MCP/issues/34))
 
 ### Phase 6: UI-Equivalent Ergonomics
 - Navigation tools are implemented:
@@ -509,16 +509,16 @@ PY
 - Implemented view capture:
   - `capture_view` (returns inline image)
   - `save_screenshot` (saves to host)
-  - `export_active_plot` (pending)
-- Improve command catalog with command grouping, enabled state, checked state, and descriptions.
-- Add prompt templates for common workflows:
+  - `export_active_plot` (pending) ([#35](https://github.com/dexterfichuk/EwE-MCP/issues/35))
+- Improve command catalog with command grouping, enabled state, checked state, and descriptions. ([#36](https://github.com/dexterfichuk/EwE-MCP/issues/36))
+- Add prompt templates for common workflows. ([#37](https://github.com/dexterfichuk/EwE-MCP/issues/37))
   - balance a model
   - run Ecosim scenario
   - compare scenarios
   - export report-ready outputs
 
 ### Phase 7: Gated Power-User Escape Hatch
-- A limited `execute_ewe_code` exists now. Remaining work is hardening, not initial implementation.
+- A limited `execute_ewe_code` exists now. Remaining work is hardening, not initial implementation. ([#38](https://github.com/dexterfichuk/EwE-MCP/issues/38))
 - Keep it disabled by default and require token auth plus `EWE_MCP_ENABLE_EVAL=1`.
 - Keep it blocked from batches.
 - Add stricter allow/deny rules before broadening beyond simple `Core.*` reflection.
@@ -537,32 +537,32 @@ PY
 - Live VM sample-model smoke test for Ecopath groups, diets, fleets, and counters.
 
 ### Next Tests To Add
-- Plugin routing tests with fake handlers where possible:
+- Plugin routing tests with fake handlers where possible. ([#39](https://github.com/dexterfichuk/EwE-MCP/issues/39))
   - malformed JSON
   - bad token
   - unknown command
   - oversized message
   - exception envelope
-- VM lifecycle tests:
+- VM lifecycle tests. ([#40](https://github.com/dexterfichuk/EwE-MCP/issues/40))
   - build
   - deploy
   - launch EwE
   - wait for socket
   - smoke commands
   - collect logs
-- Model workflow tests:
+- Model workflow tests. ([#41](https://github.com/dexterfichuk/EwE-MCP/issues/41))
   - load sample model
   - inspect groups/fleets
   - save a copy
   - close/reload
-- Domain smoke tests:
+- Domain smoke tests. ([#42](https://github.com/dexterfichuk/EwE-MCP/issues/42))
   - Ecopath read-only and mutation workflow
   - Ecosim read-only and mutation workflow
   - Ecospace read-only workflow
   - Ecotracer read-only workflow
   - MSE read-only workflow
   - Monte Carlo read-only workflow
-- Safety tests:
+- Safety tests. ([#43](https://github.com/dexterfichuk/EwE-MCP/issues/43))
   - localhost binding
   - token required
   - eval disabled by default
@@ -590,12 +590,12 @@ PY
 
 ### C# Plugin (.dll)
 - **Versioning Strategy:** The EwE core libraries update frequently. To maximize compatibility across minor EwE versions, the plugin references EwE DLLs with `<SpecificVersion>False</SpecificVersion>` and `<Private>False</Private>`. This ensures the plugin uses the user's installed EwE binaries at runtime. Breaking ABI changes will still require distributing version-specific builds (e.g., separate installers for EwE 6.6 vs 6.7).
-- **Distribution:** Wrap the plugin in a standard Windows installer (e.g., **Inno Setup**) rather than requiring users to manually copy files into `Program Files (x86)`. The installer should request Administrator privileges, auto-detect or ask for the EwE `Plugins` directory, copy `EwE_MCP_Plugin.dll` and `Newtonsoft.Json.dll`, and provide a clean uninstaller.
+- **Distribution:** Wrap the plugin in a standard Windows installer (e.g., **Inno Setup**) rather than requiring users to manually copy files into `Program Files (x86)`. The installer should request Administrator privileges, auto-detect or ask for the EwE `Plugins` directory, copy `EwE_MCP_Plugin.dll` and `Newtonsoft.Json.dll`, and provide a clean uninstaller. ([#44](https://github.com/dexterfichuk/EwE-MCP/issues/44))
 
 ### Python Server (ewe-mcp)
 - The Python server is packaged via standard `pyproject.toml` tools (`hatchling`).
-- Build the distribution wheel using `uv build`.
-- Users install the wheel via `pip install ewe_mcp-*.whl` and run it via the `ewe-mcp` CLI command, ensuring they configure their connection environment variables (`EWE_MCP_TOKEN`, `EWE_MCP_HOST`, `EWE_MCP_PORT`) first.
+- Build the distribution wheel using `uv build`. ([#45](https://github.com/dexterfichuk/EwE-MCP/issues/45))
+- Users install the wheel via `pip install ewe_mcp-*.whl` and run it via the `ewe-mcp` CLI command, ensuring they configure their connection environment variables (`EWE_MCP_TOKEN`, `EWE_MCP_HOST`, `EWE_MCP_PORT`) first. ([#45](https://github.com/dexterfichuk/EwE-MCP/issues/45))
 
 ## Rollback
 The integration is optional and external. To disable it, close EwE and remove these files from the installed EwE `Plugins` folder:
