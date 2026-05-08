@@ -689,7 +689,7 @@ async def set_indexed_value(
 
 @mcp.tool(
     description="Execute multiple EwE MCP commands in one round-trip. "
-    "Blocked commands include execute_ewe_code, close_model, and destructive Ecosim scenario management.",
+    "Blocked commands include eval, model load/save/close, simulation runs/stops, view capture, and scenario mutations/loads.",
 )
 async def batch_commands(commands: list[dict[str, Any]]) -> dict[str, Any]:
     """Execute multiple non-blocked commands through the EwE plugin."""

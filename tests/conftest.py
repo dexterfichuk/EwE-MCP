@@ -1,4 +1,6 @@
 import os
+from pathlib import Path
+
 import pytest
 from ewe_mcp.client import EwEMCPClient
 
@@ -7,6 +9,13 @@ FIXTURE_MODEL = os.path.join(os.path.dirname(__file__), "fixtures", "Tampa_Bay.E
 @pytest.fixture
 def sample_model_path():
     """Path to the sample EwE model included in the test fixtures."""
+    if os.environ.get("EWE_LIVE_TESTS"):
+        if os.environ.get("EWE_MODEL_PATH"):
+            return os.environ["EWE_MODEL_PATH"]
+        remote_root = os.environ.get("EWE_VM_REMOTE_ROOT")
+        if not remote_root:
+            remote_root = f"C:/Users/dexter/{Path(__file__).resolve().parents[1].name}"
+        return f"{remote_root.rstrip('/\\\\')}\\tests\\fixtures\\Tampa_Bay.EwEmdb"
     return FIXTURE_MODEL
 
 @pytest.fixture
