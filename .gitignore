@@ -12,3 +12,4 @@ dist/
 !.env.example
 secrets/
 *.log
+scratch_*

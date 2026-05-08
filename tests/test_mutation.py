@@ -13,10 +13,9 @@ live = pytest.mark.skipif(
 
 @live
 @pytest.mark.asyncio
-async def test_set_values_group():
+async def test_set_values_group(sample_model_path):
     # Ensure model is loaded
-    model_path = os.environ.get("EWE_MODEL_PATH", r"C:\Users\dexter\Eii.Ecopath\Database\Tampa_Bay.EwEmdb")
-    await load_model(model_path)
+    await load_model(sample_model_path)
 
     idx = 1
     try:
@@ -32,7 +31,9 @@ async def test_set_values_group():
 
 @live
 @pytest.mark.asyncio
-async def test_set_values_fleet():
+async def test_set_values_fleet(sample_model_path):
+    await load_model(sample_model_path)
+
     idx = 1
     try:
         res = await set_values(domain="ecopath_fleet", index=idx, values={"name": "New Fleet Name"})

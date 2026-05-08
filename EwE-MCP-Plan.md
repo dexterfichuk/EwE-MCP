@@ -208,43 +208,26 @@ SSHPASS=... ./scripts/vm-live-smoke.sh
 Current local test expectation:
 
 ```text
-11 passed, 32 skipped
+19 passed, 35 skipped
 ```
 
 The skipped tests are live EwE integration tests. Run them only when the VM plugin is deployed, EwE is launched, and a tunnel or direct connection is configured.
 
-Current focused live indexed-value expectation:
+The sample model is bundled at `tests/fixtures/Tampa_Bay.EwEmdb` (GPL-3.0) and does not require a `EWE_MODEL_PATH` environment variable.
 
-```text
-7 passed
-```
-
-Run it from the repo or active worktree after build/deploy/launch with:
+Run live tests after build/deploy/launch with:
 
 ```bash
+SSHPASS="$SSHPASS" sshpass -e ssh -f -N \
+  -L 19877:127.0.0.1:9877 \
+  -o StrictHostKeyChecking=no \
+  dexter@192.168.64.2
+
 EWE_MCP_HOST=127.0.0.1 \
 EWE_MCP_PORT=19877 \
 EWE_MCP_TOKEN=ewe-mcp-local-dev \
 EWE_LIVE_TESTS=1 \
-EWE_MODEL_PATH='C:\Users\dexter\Eii.Ecopath\Database\Tampa_Bay.EwEmdb' \
-uv run pytest tests/test_indexed_values.py
-```
-
-Current focused live Ecosim-control expectation:
-
-```text
-5 passed
-```
-
-Run it from the repo or active worktree after build/deploy/launch with:
-
-```bash
-EWE_MCP_HOST=127.0.0.1 \
-EWE_MCP_PORT=19877 \
-EWE_MCP_TOKEN=ewe-mcp-local-dev \
-EWE_LIVE_TESTS=1 \
-EWE_MODEL_PATH='C:\Users\dexter\Eii.Ecopath\Database\Tampa_Bay.EwEmdb' \
-uv run pytest tests/test_ecosim_control.py
+uv run pytest
 ```
 
 ### Important Discovery
@@ -439,23 +422,23 @@ PY
   - ~~save as new file~~
   - ~~close/reload~~
 
-### Phase 3: Generic EwE Object And Variable Layer
-- Initial generic reflection-backed entity/value reads are done for available domains.
-- Initial domain-specific mutation is done for Ecopath groups/fleets and Ecosim group/fleet inputs via `set_values`; the remaining deeper generic data layer should build around EwE’s variable APIs. ([#21](https://github.com/dexterfichuk/EwE-MCP/issues/21)) Likely includes:
-  - `cCoreInputOutputBase`
-  - `eVarNameFlags`
-  - `cVariableMetaData`
-  - `GetVariable`
-  - `SetVariable`
-  - status and remark fields
-  - entity IDs
-- Remaining MCP/value work:
-  - expose EwE metadata/status/remarks from `cCoreInputOutputBase` ([#22](https://github.com/dexterfichuk/EwE-MCP/issues/22))
-  - initialize/load subsystem scenario data before reading unavailable Ecospace/Ecotracer collections ([#23](https://github.com/dexterfichuk/EwE-MCP/issues/23))
-  - broaden edit-to-screen navigation mappings beyond the current Ecopath group/fleet and Ecosim group/fleet input mappings ([#24](https://github.com/dexterfichuk/EwE-MCP/issues/24))
-  - add generic `set_values` support beyond Ecopath groups/fleets and Ecosim group/fleet inputs ([#25](https://github.com/dexterfichuk/EwE-MCP/issues/25))
-  - extend indexed writes into multi-index variables and additional domains after the initial single-index Ecopath group/fleet slice ([#26](https://github.com/dexterfichuk/EwE-MCP/issues/26))
-- Add broader batch safety rules for mixed read/write command groups; destructive scenario management is already blocked. ([#27](https://github.com/dexterfichuk/EwE-MCP/issues/27))
+### Phase 3: Generic EwE Object And Variable Layer (COMPLETED)
+- ~~Initial generic reflection-backed entity/value reads are done for available domains.~~
+- ~~Initial domain-specific mutation is done for Ecopath groups/fleets and Ecosim group/fleet inputs via `set_values`; the remaining deeper generic data layer should build around EwE’s variable APIs. ([#21](https://github.com/dexterfichuk/EwE-MCP/issues/21)) Likely includes:~~
+  - ~~`cCoreInputOutputBase`~~
+  - ~~`eVarNameFlags`~~
+  - ~~`cVariableMetaData`~~
+  - ~~`GetVariable`~~
+  - ~~`SetVariable`~~
+  - ~~status and remark fields~~
+  - ~~entity IDs~~
+- ~~Remaining MCP/value work:~~
+  - ~~expose EwE metadata/status/remarks from `cCoreInputOutputBase` ([#22](https://github.com/dexterfichuk/EwE-MCP/issues/22))~~
+  - ~~initialize/load subsystem scenario data before reading unavailable Ecospace/Ecotracer collections ([#23](https://github.com/dexterfichuk/EwE-MCP/issues/23))~~
+  - ~~broaden edit-to-screen navigation mappings beyond the current Ecopath group/fleet and Ecosim group/fleet input mappings ([#24](https://github.com/dexterfichuk/EwE-MCP/issues/24))~~
+  - ~~add generic `set_values` support beyond Ecopath groups/fleets and Ecosim group/fleet inputs ([#25](https://github.com/dexterfichuk/EwE-MCP/issues/25))~~
+  - ~~extend indexed writes into multi-index variables and additional domains after the initial single-index Ecopath group/fleet slice ([#26](https://github.com/dexterfichuk/EwE-MCP/issues/26))~~
+- ~~Add broader batch safety rules for mixed read/write command groups; destructive scenario management is already blocked. ([#27](https://github.com/dexterfichuk/EwE-MCP/issues/27))~~
 
 ### Phase 4: Ecopath And Ecosim Control
 - Implement explicit Ecopath tools. ([#28](https://github.com/dexterfichuk/EwE-MCP/issues/28))

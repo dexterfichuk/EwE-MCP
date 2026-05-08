@@ -18,22 +18,19 @@ live = pytest.mark.skipif(
     reason="Requires live EwE MCP plugin (set EWE_LIVE_TESTS=1 to run)",
 )
 
-SAMPLE_MODEL = os.environ.get(
-    "EWE_MODEL_PATH",
-    r"C:\Users\dexter\Eii.Ecopath\Database\Tampa_Bay.EwEmdb",
-)
+
 
 
 @pytest.mark.asyncio
-async def test_navigate_to_node_requires_target():
+async def test_navigate_to_node_requires_target(sample_model_path):
     with pytest.raises(ValueError, match="Provide one of"):
         await navigate_to_node()
 
 
 @live
 @pytest.mark.asyncio
-async def test_list_and_navigate_to_basic_input():
-    await load_model(SAMPLE_MODEL)
+async def test_list_and_navigate_to_basic_input(sample_model_path):
+    await load_model(sample_model_path)
 
     nodes = await list_navigation_nodes()
     node_ids = {node["id"] for node in nodes["nodes"]}
@@ -49,8 +46,8 @@ async def test_list_and_navigate_to_basic_input():
 
 @live
 @pytest.mark.asyncio
-async def test_set_values_can_navigate_to_edit_screen():
-    await load_model(SAMPLE_MODEL)
+async def test_set_values_can_navigate_to_edit_screen(sample_model_path):
+    await load_model(sample_model_path)
 
     result = await set_values(domain="ecopath_group", index=1, values={"name": "0-12 Snook"})
     assert result["results"]["name"] == "updated"
@@ -60,8 +57,8 @@ async def test_set_values_can_navigate_to_edit_screen():
 
 @live
 @pytest.mark.asyncio
-async def test_value_reads_navigate_by_default_and_can_skip():
-    await load_model(SAMPLE_MODEL)
+async def test_value_reads_navigate_by_default_and_can_skip(sample_model_path):
+    await load_model(sample_model_path)
 
     values = await get_values(domain="ecopath_group", index=1, variables=["name"])
     assert values["navigation"]["suggested_node_id"] == "ndBasicInput"

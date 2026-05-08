@@ -10,6 +10,7 @@ from ewe_mcp.server import (
     get_model_info,
     _send,
 )
+from ewe_mcp.helpers import BATCH_BLOCKED_COMMANDS
 
 # Tests that require a running EwE plugin on the Windows VM.
 live = pytest.mark.skipif(
@@ -17,30 +18,26 @@ live = pytest.mark.skipif(
     reason="Requires live EwE MCP plugin (set EWE_LIVE_TESTS=1 to run)",
 )
 
-SAMPLE_MODEL = os.environ.get(
-    "EWE_MODEL_PATH",
-    r"C:\Users\dexter\Eii.Ecopath\Database\Tampa_Bay.EwEmdb",
-)
 
 
-async def _ensure_model_loaded():
+
+async def _ensure_model_loaded(sample_model_path):
     """Load the sample model if not already loaded (idempotent)."""
-    res = await load_model(SAMPLE_MODEL)
-    assert res["loaded"] is True, f"Failed to load sample model: {SAMPLE_MODEL}"
+    res = await load_model(sample_model_path)
+    assert res["loaded"] is True, f"Failed to load sample model: {sample_model_path}"
 
 
 @live
 @pytest.mark.asyncio
-async def test_set_values_invalid_domain():
+async def test_set_values_invalid_domain(sample_model_path):
     with pytest.raises(EwEMCPError) as excinfo:
         await set_values(domain="invalid_domain", index=1, values={"name": "test"})
-    assert excinfo.value.code == "unsupported_domain"
-
+    assert excinfo.value.code == "unknown_domain"
 
 @live
 @pytest.mark.asyncio
-async def test_set_values_index_out_of_range():
-    await _ensure_model_loaded()
+async def test_set_values_index_out_of_range(sample_model_path):
+    await _ensure_model_loaded(sample_model_path)
     with pytest.raises(EwEMCPError) as excinfo:
         await set_values(domain="ecopath_group", index=9999, values={"name": "test"})
     assert excinfo.value.code == "index_out_of_range"
@@ -48,16 +45,16 @@ async def test_set_values_index_out_of_range():
 
 @live
 @pytest.mark.asyncio
-async def test_set_values_unknown_property():
-    await _ensure_model_loaded()
+async def test_set_values_unknown_property(sample_model_path):
+    await _ensure_model_loaded(sample_model_path)
     res = await set_values(domain="ecopath_group", index=1, values={"non_existent_prop": 1.0})
-    assert res["results"]["non_existent_prop"] == "unknown_property"
+    assert res["results"]["non_existent_prop"] == "unknown_or_readonly_property"
 
 
 @live
 @pytest.mark.asyncio
-async def test_batch_commands_success():
-    await _ensure_model_loaded()
+async def test_batch_commands_success(sample_model_path):
+    await _ensure_model_loaded(sample_model_path)
     cmds = [
         {"type": "get_model_info", "params": {}},
         {"type": "ping", "params": {}},
@@ -79,7 +76,7 @@ async def test_batch_commands_blocked():
 
 @live
 @pytest.mark.asyncio
-async def test_unknown_command():
+async def test_unknown_command(sample_model_path):
     with pytest.raises(EwEMCPError) as excinfo:
         await _send("non_existent_command")
     assert excinfo.value.code == "unknown_command"
@@ -87,7 +84,20 @@ async def test_unknown_command():
 
 @live
 @pytest.mark.asyncio
-async def test_load_model_invalid_path():
+async def test_load_model_invalid_path(sample_model_path):
     res = await load_model(r"C:\non_existent_file.EwEmdb")
     assert res["loaded"] is False
+
+
+@pytest.mark.asyncio
+async def test_new_batch_blocked_commands():
+    assert "load_model" in BATCH_BLOCKED_COMMANDS
+    assert "save_model" in BATCH_BLOCKED_COMMANDS
+    assert "save_model_as" in BATCH_BLOCKED_COMMANDS
+    assert "run_ecopath" in BATCH_BLOCKED_COMMANDS
+    assert "run_ecosim" in BATCH_BLOCKED_COMMANDS
+    assert "stop_ecosim" in BATCH_BLOCKED_COMMANDS
+    assert "load_ecosim_scenario" in BATCH_BLOCKED_COMMANDS
+    assert "load_ecospace_scenario" in BATCH_BLOCKED_COMMANDS
+    assert "load_ecotracer_scenario" in BATCH_BLOCKED_COMMANDS
 

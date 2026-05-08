@@ -26,14 +26,11 @@ live = pytest.mark.skipif(
     reason="Requires live EwE MCP plugin (set EWE_LIVE_TESTS=1 to run)",
 )
 
-SAMPLE_MODEL = os.environ.get(
-    "EWE_MODEL_PATH",
-    r"C:\Users\dexter\Eii.Ecopath\Database\Tampa_Bay.EwEmdb",
-)
 
 
-async def _ensure_ecosim_loaded():
-    model = await load_model(SAMPLE_MODEL)
+
+async def _ensure_ecosim_loaded(sample_model_path):
+    model = await load_model(sample_model_path)
     assert model["loaded"] is True
     scenarios = await list_ecosim_scenarios()
     assert scenarios["total_count"] >= 1
@@ -55,7 +52,7 @@ async def _wait_for_ecosim_completed(timeout_seconds=60):
 
 
 @pytest.mark.asyncio
-async def test_ecosim_destructive_scenario_commands_blocked_from_batch():
+async def test_ecosim_destructive_scenario_commands_blocked_from_batch(sample_model_path):
     assert "create_ecosim_scenario" in BATCH_BLOCKED_COMMANDS
     assert "copy_ecosim_scenario" in BATCH_BLOCKED_COMMANDS
     assert "delete_ecosim_scenario" in BATCH_BLOCKED_COMMANDS
@@ -65,8 +62,8 @@ async def test_ecosim_destructive_scenario_commands_blocked_from_batch():
 
 @live
 @pytest.mark.asyncio
-async def test_ecosim_scenario_list_and_load():
-    active = await _ensure_ecosim_loaded()
+async def test_ecosim_scenario_list_and_load(sample_model_path):
+    active = await _ensure_ecosim_loaded(sample_model_path)
 
     scenario = await get_ecosim_scenario(active)
     assert scenario["index"] == active
@@ -79,8 +76,8 @@ async def test_ecosim_scenario_list_and_load():
 
 @live
 @pytest.mark.asyncio
-async def test_ecosim_inputs_available_after_load():
-    await _ensure_ecosim_loaded()
+async def test_ecosim_inputs_available_after_load(sample_model_path):
+    await _ensure_ecosim_loaded(sample_model_path)
 
     groups = await list_ecosim_group_inputs()
     assert groups["total_count"] > 0
@@ -97,8 +94,8 @@ async def test_ecosim_inputs_available_after_load():
 
 @live
 @pytest.mark.asyncio
-async def test_ecosim_run_and_fetch_results():
-    await _ensure_ecosim_loaded()
+async def test_ecosim_run_and_fetch_results(sample_model_path):
+    await _ensure_ecosim_loaded(sample_model_path)
 
     run = await run_ecosim()
     assert run["started"] is True
@@ -126,8 +123,8 @@ async def test_ecosim_run_and_fetch_results():
 
 @live
 @pytest.mark.asyncio
-async def test_ecosim_result_bounds_error():
-    await _ensure_ecosim_loaded()
+async def test_ecosim_result_bounds_error(sample_model_path):
+    await _ensure_ecosim_loaded(sample_model_path)
     await run_ecosim()
     await _wait_for_ecosim_completed()
 

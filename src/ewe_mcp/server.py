@@ -402,10 +402,22 @@ async def get_ecosim_scenario(index: int) -> dict[str, Any]:
     return await _send("get_ecosim_scenario", {"index": index})
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
 async def load_ecosim_scenario(index: int) -> dict[str, Any]:
     """Load an Ecosim scenario by one-based index."""
     return await _send("load_ecosim_scenario", {"index": index}, timeout=TIMEOUT_LONG)
+
+
+@mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
+async def load_ecospace_scenario(index: int) -> dict[str, Any]:
+    """Load an Ecospace scenario by one-based index."""
+    return await _send("load_ecospace_scenario", {"index": index}, timeout=TIMEOUT_LONG)
+
+
+@mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
+async def load_ecotracer_scenario(index: int) -> dict[str, Any]:
+    """Load an Ecotracer scenario by one-based index."""
+    return await _send("load_ecotracer_scenario", {"index": index}, timeout=TIMEOUT_LONG)
 
 
 @mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
@@ -640,13 +652,12 @@ def _save_screenshot_to_host(path: str, data: bytes) -> None:
 
 
 @mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
-async def set_values(domain: str, index: int, values: dict[str, Any], navigate: bool = True) -> dict[str, Any]:
+async def set_values(domain: str, values: dict[str, Any], index: int | None = None, navigate: bool = True) -> dict[str, Any]:
     """Set values for an EwE entity and refresh the UI. Pass navigate=False to avoid changing the visible EwE screen."""
-    result = await _send(
-        "set_values",
-        {"domain": domain, "index": index, "values": values, "navigate": navigate},
-        timeout=TIMEOUT_LONG,
-    )
+    params: dict[str, Any] = {"domain": domain, "values": values, "navigate": navigate}
+    if index is not None:
+        params["index"] = index
+    result = await _send("set_values", params, timeout=TIMEOUT_LONG)
     # Automatically refresh UI after setting values
     await refresh_ui()
     return result
@@ -678,7 +689,7 @@ async def set_indexed_value(
 
 @mcp.tool(
     description="Execute multiple EwE MCP commands in one round-trip. "
-    "Blocked commands include execute_ewe_code, close_model, and destructive Ecosim scenario management.",
+    "Blocked commands include eval, model load/save/close, simulation runs/stops, view capture, and scenario mutations/loads.",
 )
 async def batch_commands(commands: list[dict[str, Any]]) -> dict[str, Any]:
     """Execute multiple non-blocked commands through the EwE plugin."""

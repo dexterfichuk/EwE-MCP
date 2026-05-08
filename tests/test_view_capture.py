@@ -18,17 +18,14 @@ live = pytest.mark.skipif(
     reason="Requires live EwE MCP plugin (set EWE_LIVE_TESTS=1 to run)",
 )
 
-SAMPLE_MODEL = os.environ.get(
-    "EWE_MODEL_PATH",
-    r"C:\Users\dexter\Eii.Ecopath\Database\Tampa_Bay.EwEmdb",
-)
+
 
 
 # ── Offline tests ─────────────────────────────────────────────────
 
 
 @pytest.mark.asyncio
-async def test_capture_view_batch_blocked():
+async def test_capture_view_batch_blocked(sample_model_path):
     """capture_view should be blocked from batch commands."""
     from ewe_mcp.helpers import BATCH_BLOCKED_COMMANDS
 
@@ -40,9 +37,9 @@ async def test_capture_view_batch_blocked():
 
 @live
 @pytest.mark.asyncio
-async def test_capture_view_returns_image():
+async def test_capture_view_returns_image(sample_model_path):
     """Basic capture_view should return a PNG image with metadata."""
-    await load_model(SAMPLE_MODEL)
+    await load_model(sample_model_path)
 
     result = await capture_view()
 
@@ -65,9 +62,9 @@ async def test_capture_view_returns_image():
 
 @live
 @pytest.mark.asyncio
-async def test_capture_view_with_max_dimensions():
+async def test_capture_view_with_max_dimensions(sample_model_path):
     """capture_view with max_width/max_height should still return valid PNG."""
-    await load_model(SAMPLE_MODEL)
+    await load_model(sample_model_path)
 
     result = await capture_view(max_width=640, max_height=480)
 
@@ -79,9 +76,9 @@ async def test_capture_view_with_max_dimensions():
 
 @live
 @pytest.mark.asyncio
-async def test_capture_view_targets():
+async def test_capture_view_targets(sample_model_path):
     """Different capture targets should all succeed."""
-    await load_model(SAMPLE_MODEL)
+    await load_model(sample_model_path)
 
     for target in ("auto", "main", "active", "content"):
         result = await capture_view(target=target)
@@ -93,9 +90,9 @@ async def test_capture_view_targets():
 
 @live
 @pytest.mark.asyncio
-async def test_capture_view_after_navigation():
+async def test_capture_view_after_navigation(sample_model_path):
     """Capture should reflect the currently navigated view."""
-    await load_model(SAMPLE_MODEL)
+    await load_model(sample_model_path)
 
     # Navigate to a known screen
     await navigate_to_node(id="ndBasicInput")
@@ -110,9 +107,9 @@ async def test_capture_view_after_navigation():
 
 @live
 @pytest.mark.asyncio
-async def test_save_screenshot():
+async def test_save_screenshot(sample_model_path):
     """save_screenshot should write a valid PNG to the local filesystem."""
-    await load_model(SAMPLE_MODEL)
+    await load_model(sample_model_path)
 
     # Use a temporary file
     with tempfile.TemporaryDirectory() as tmpdir:

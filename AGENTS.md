@@ -12,7 +12,7 @@ This repo builds an MCP bridge for a live Ecopath with Ecosim (EwE) desktop proc
 - Development token: `ewe-mcp-local-dev`
 - Sample model: `C:\Users\dexter\Eii.Ecopath\Database\Tampa_Bay.EwEmdb`
 
-Never commit credentials. Put the VM password in `SSHPASS` only.
+Never commit credentials. Put the VM password in the `SSHPASS` environment variable before using `sshpass` commands.
 
 ## Start Safely
 Before editing or deploying, check the local state and leave user scratch files alone:
@@ -31,7 +31,7 @@ Live tests are skipped unless `EWE_LIVE_TESTS=1` is set.
 Use these exports for build/deploy/live work:
 
 ```bash
-export SSHPASS='...'
+export SSHPASS="${SSHPASS:?Set the VM password}"
 export EWE_VM_HOST=192.168.64.2
 export EWE_VM_USER=dexter
 export EWE_VM_EWE_DIR='C:\Program Files (x86)\Ecopath with Ecosim 40 years 6.7.0.18865_32-bit'
@@ -40,7 +40,6 @@ export EWE_BUILD_PLATFORM=x86
 export EWE_MCP_TOKEN=ewe-mcp-local-dev
 export EWE_MCP_LOCAL_TUNNEL_PORT=19877
 export EWE_MCP_REMOTE_PORT=9877
-export EWE_MODEL_PATH='C:\Users\dexter\Eii.Ecopath\Database\Tampa_Bay.EwEmdb'
 ```
 
 Optional: set `EWE_MCP_ENABLED=0` before launching EwE to keep the plugin installed but prevent it from binding the socket. Leave it unset for normal build/deploy/live work.
@@ -108,7 +107,7 @@ assert client.connect()
 print(client.command_result("ping"))
 print(client.command_result("diagnose"))
 print(client.command_result("get_ewe_info"))
-print(client.command_result("load_model", {"path": r"C:\Users\dexter\Eii.Ecopath\Database\Tampa_Bay.EwEmdb"}, timeout=60))
+print(client.command_result("load_model", {"path": r"tests/fixtures/Tampa_Bay.EwEmdb"}, timeout=60))
 print(client.command_result("get_core_counters"))
 client.disconnect()
 PY
@@ -124,7 +123,7 @@ EWE_MCP_TOKEN=ewe-mcp-local-dev \
 uv run ewe-mcp
 ```
 
-The MCP server exposes tools backed by the running EwE plugin. Current main-branch tools include diagnostics, model load/save_as/close, full database metadata via `get_model_info`, change-state utilities (`has_changes`, `discard_changes`), Ecopath group/fleet reads, generic entity/value reads (which seamlessly expose stanzas, full diet matrices, detritus fate, and Ecopath balancing diagnostics), indexed value reads/writes such as `DietComp(prey)` and `Landings(group)`, Ecosim scenario load/create/copy/delete/save, Ecosim run state, Ecosim group/fleet inputs, Ecosim group/fleet result time-series, selected mutations through `set_values` and `set_indexed_value`, UI command invocation, navigation through `list_navigation_nodes`/`navigate_to_node`/`get_active_view`, view capture through `capture_view`/`save_screenshot`, batching, and a disabled-by-default eval helper.
+The MCP server exposes tools backed by the running EwE plugin. Current main-branch tools include diagnostics, model load/save_as/close, full database metadata via `get_model_info`, change-state utilities (`has_changes`, `discard_changes`), Ecopath group/fleet reads, generic entity/value reads (which seamlessly expose stanzas, full diet matrices, detritus fate, and Ecopath balancing diagnostics), indexed value reads/writes such as `DietComp(prey)` and `Landings(group)`, Ecosim scenario load/create/copy/delete/save, Ecospace and Ecotracer scenario loading, Ecosim run state, Ecosim group/fleet inputs, Ecosim group/fleet result time-series, generic `set_values` across all domains, UI command invocation, navigation through `list_navigation_nodes`/`navigate_to_node`/`get_active_view`, view capture through `capture_view`/`save_screenshot`, batching, and a disabled-by-default eval helper.
 
 For view capture tools (`capture_view` and `save_screenshot`), prefer using data-reading tools to extract tabular data, and reserve view capture for graphs, charts, and spatial visualizations.
 
@@ -153,37 +152,14 @@ EWE_MCP_HOST=127.0.0.1 \
 EWE_MCP_PORT=19877 \
 EWE_MCP_TOKEN=ewe-mcp-local-dev \
 EWE_LIVE_TESTS=1 \
-EWE_MODEL_PATH='C:\Users\dexter\Eii.Ecopath\Database\Tampa_Bay.EwEmdb' \
 uv run pytest
 ```
 
-Expected local baseline with live tests skipped is currently `11 passed, 32 skipped`. The focused indexed live suite is:
+Expected local baseline with live tests skipped is currently `19 passed, 35 skipped`.
 
-```bash
-EWE_MCP_HOST=127.0.0.1 \
-EWE_MCP_PORT=19877 \
-EWE_MCP_TOKEN=ewe-mcp-local-dev \
-EWE_LIVE_TESTS=1 \
-EWE_MODEL_PATH='C:\Users\dexter\Eii.Ecopath\Database\Tampa_Bay.EwEmdb' \
-uv run pytest tests/test_indexed_values.py
-```
+The sample model (`tests/fixtures/Tampa_Bay.EwEmdb`) is bundled under the same GPL-3.0 license as EwE and does not require a separate `EWE_MODEL_PATH` environment variable.
 
-Expected focused indexed live result is `7 passed`.
-
-The focused Ecosim control suite is:
-
-```bash
-EWE_MCP_HOST=127.0.0.1 \
-EWE_MCP_PORT=19877 \
-EWE_MCP_TOKEN=ewe-mcp-local-dev \
-EWE_LIVE_TESTS=1 \
-EWE_MODEL_PATH='C:\Users\dexter\Eii.Ecopath\Database\Tampa_Bay.EwEmdb' \
-uv run pytest tests/test_ecosim_control.py
-```
-
-Expected focused Ecosim live result is `5 passed`. The suite loads the sample model, loads an Ecosim scenario, inspects group/fleet inputs, runs Ecosim asynchronously, waits for completion, and reads short result time-series windows.
-
-Expected full live result on current `main` is `39 passed`.
+Expected full live result on current `main` is `53 passed, 1 skipped`.
 
 Prefer testing mutations against copied models. If you mutate the shared sample model, restore the original value in a `finally` block and call `discard_changes` so EwE clears the unsaved-change flag without saving over the sample model. `discard_changes` only clears dirty flags; it does not physically revert values.
 
