@@ -2,31 +2,11 @@ import os
 import pytest
 from ewe_mcp.client import EwEMCPClient
 
-@pytest.fixture
-def live_client():
-    if not os.environ.get("EWE_LIVE_TESTS"):
-        pytest.skip("Skipping live model workflow tests because EWE_LIVE_TESTS is not set")
-    
-    client = EwEMCPClient()
-    assert client.connect()
-    
-    # Ensure starting from a clean slate
-    client.command_result("close_model")
-    
-    yield client
-    
-    client.disconnect()
-
-
-def test_model_metadata_and_save_workflow(live_client):
-    original_path = os.environ.get("EWE_MODEL_PATH", r"C:\Users\dexter\Eii.Ecopath\Database\Tampa_Bay.EwEmdb")
-    if not original_path:
-        pytest.skip("EWE_MODEL_PATH must be set for live model workflow tests")
-        
-    scratch_path = original_path.replace(".EwEmdb", "_Scratch.EwEmdb")
+def test_model_metadata_and_save_workflow(live_client, sample_model_path):
+    scratch_path = sample_model_path.replace(".EwEmdb", "_Scratch.EwEmdb")
     
     # 1. Load original
-    live_client.command_result("load_model", {"path": original_path})
+    live_client.command_result("load_model", {"path": sample_model_path})
     
     # 2. Get metadata
     info = live_client.command_result("get_model_info")

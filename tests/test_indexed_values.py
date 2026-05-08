@@ -16,21 +16,18 @@ live = pytest.mark.skipif(
     reason="Requires live EwE MCP plugin (set EWE_LIVE_TESTS=1 to run)",
 )
 
-SAMPLE_MODEL = os.environ.get(
-    "EWE_MODEL_PATH",
-    r"C:\Users\dexter\Eii.Ecopath\Database\Tampa_Bay.EwEmdb",
-)
 
 
-async def _ensure_model_loaded():
-    res = await load_model(SAMPLE_MODEL)
-    assert res["loaded"] is True, f"Failed to load sample model: {SAMPLE_MODEL}"
+
+async def _ensure_model_loaded(sample_model_path):
+    res = await load_model(sample_model_path)
+    assert res["loaded"] is True, f"Failed to load sample model: {sample_model_path}"
 
 
 @live
 @pytest.mark.asyncio
-async def test_indexed_diet_comp_round_trip():
-    await _ensure_model_loaded()
+async def test_indexed_diet_comp_round_trip(sample_model_path):
+    await _ensure_model_loaded(sample_model_path)
     params = {"domain": "ecopath_group", "index": 20, "variable": "diet_comp", "indices": [25]}
     original = (await get_indexed_value(**params))["value"]
 
@@ -50,8 +47,8 @@ async def test_indexed_diet_comp_round_trip():
 
 @live
 @pytest.mark.asyncio
-async def test_indexed_fleet_landings_round_trip():
-    await _ensure_model_loaded()
+async def test_indexed_fleet_landings_round_trip(sample_model_path):
+    await _ensure_model_loaded(sample_model_path)
     params = {"domain": "ecopath_fleet", "index": 1, "variable": "landings", "indices": [18]}
     original = (await get_indexed_value(**params))["value"]
 
@@ -71,8 +68,8 @@ async def test_indexed_fleet_landings_round_trip():
 
 @live
 @pytest.mark.asyncio
-async def test_indexed_unknown_variable_errors():
-    await _ensure_model_loaded()
+async def test_indexed_unknown_variable_errors(sample_model_path):
+    await _ensure_model_loaded(sample_model_path)
     params = {"domain": "ecopath_group", "index": 20, "variable": "not_a_real_value", "indices": [25]}
 
     with pytest.raises(EwEMCPError) as excinfo:
@@ -86,8 +83,8 @@ async def test_indexed_unknown_variable_errors():
 
 @live
 @pytest.mark.asyncio
-async def test_indexed_empty_indices_error():
-    await _ensure_model_loaded()
+async def test_indexed_empty_indices_error(sample_model_path):
+    await _ensure_model_loaded(sample_model_path)
     with pytest.raises(EwEMCPError) as excinfo:
         await get_indexed_value(domain="ecopath_group", index=20, variable="diet_comp", indices=[])
     assert excinfo.value.code == "invalid_parameter"
@@ -95,8 +92,8 @@ async def test_indexed_empty_indices_error():
 
 @live
 @pytest.mark.asyncio
-async def test_indexed_bad_conversion_error():
-    await _ensure_model_loaded()
+async def test_indexed_bad_conversion_error(sample_model_path):
+    await _ensure_model_loaded(sample_model_path)
     params = {"domain": "ecopath_group", "index": 20, "variable": "diet_comp", "indices": [25]}
 
     validation = await validate_indexed_value(**params, value="definitely-not-a-number")
@@ -110,8 +107,8 @@ async def test_indexed_bad_conversion_error():
 
 @live
 @pytest.mark.asyncio
-async def test_indexed_target_index_out_of_range_error():
-    await _ensure_model_loaded()
+async def test_indexed_target_index_out_of_range_error(sample_model_path):
+    await _ensure_model_loaded(sample_model_path)
     with pytest.raises(EwEMCPError) as excinfo:
         await get_indexed_value(domain="ecopath_group", index=9999, variable="diet_comp", indices=[25])
     assert excinfo.value.code == "index_out_of_range"
@@ -119,8 +116,8 @@ async def test_indexed_target_index_out_of_range_error():
 
 @live
 @pytest.mark.asyncio
-async def test_indexed_cell_index_out_of_range_error():
-    await _ensure_model_loaded()
+async def test_indexed_cell_index_out_of_range_error(sample_model_path):
+    await _ensure_model_loaded(sample_model_path)
     with pytest.raises(EwEMCPError) as excinfo:
         await get_indexed_value(domain="ecopath_group", index=20, variable="diet_comp", indices=[9999])
     assert excinfo.value.code == "indexed_index_out_of_range"
