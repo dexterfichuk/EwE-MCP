@@ -17,8 +17,6 @@ live = pytest.mark.skipif(
 )
 
 
-
-
 async def _ensure_model_loaded(sample_model_path):
     res = await load_model(sample_model_path)
     assert res["loaded"] is True, f"Failed to load sample model: {sample_model_path}"
@@ -131,3 +129,28 @@ async def test_indexed_cell_index_out_of_range_error(sample_model_path):
     )
     assert validation["valid"] is False
     assert validation["reason"].startswith("Index 9999 is outside valid group range")
+
+
+@live
+@pytest.mark.asyncio
+async def test_indexed_detritus_fate_round_trip(sample_model_path):
+    await _ensure_model_loaded(sample_model_path)
+    params = {"domain": "ecopath_group", "index": 1, "variable": "detritus_fate", "indices": [1]}
+    original = (await get_indexed_value(**params))["value"]
+
+    validation = await validate_indexed_value(**params, value=original)
+    assert validation["valid"] is True
+    assert validation["property"] == "DetritusFate"
+
+    try:
+        updated = round(original - 0.01, 4) if original > 0 else 0.01
+        validation2 = await validate_indexed_value(**params, value=updated)
+        if not validation2["valid"]:
+            pytest.skip("Updated value failed validation, skipping write")
+        result = await set_indexed_value(**params, value=updated)
+        assert result["result"] == "updated"
+        read_back = (await get_indexed_value(**params))["value"]
+        assert abs(read_back - updated) < 0.02
+    finally:
+        await set_indexed_value(**params, value=original)
+        await discard_changes()

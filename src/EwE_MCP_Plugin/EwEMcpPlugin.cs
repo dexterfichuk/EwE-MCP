@@ -745,10 +745,16 @@ namespace EwE_MCP_Plugin
 
                 result[pair.Key] = new JObject
                 {
-                    ["valid"] = TryConvertValue(pair.Value, property.PropertyType, out _),
+                    ["valid"] = TryConvertValue(pair.Value, property.PropertyType, out var convertedValue),
                     ["target_property"] = property.Name,
                     ["type"] = FriendlyTypeName(property.PropertyType)
                 };
+                var rangeError = ValidatePropertyValue(target.Entity, property, convertedValue);
+                if (rangeError != null)
+                {
+                    result[pair.Key]["valid"] = false;
+                    result[pair.Key]["reason"] = rangeError;
+                }
             }
 
             return new JObject
@@ -806,8 +812,17 @@ namespace EwE_MCP_Plugin
                 return IndexedValidationResult(target, property.Name, indices, false, boundsError, property);
             }
 
-            var valid = TryConvertValue(value, property.PropertyType, out _);
-            return IndexedValidationResult(target, property.Name, indices, valid, valid ? string.Empty : "conversion_failed", property);
+            var valid = TryConvertValue(value, property.PropertyType, out var convertedValue);
+            if (!valid)
+            {
+                return IndexedValidationResult(target, property.Name, indices, false, "conversion_failed", property);
+            }
+            var rangeError = ValidatePropertyValue(target.Entity, property, convertedValue);
+            if (rangeError != null)
+            {
+                return IndexedValidationResult(target, property.Name, indices, false, rangeError, property);
+            }
+            return IndexedValidationResult(target, property.Name, indices, true, string.Empty, property);
         }
 
         private JObject ListEcopathGroups()
@@ -2133,6 +2148,12 @@ namespace EwE_MCP_Plugin
                 throw new EwEMcpException("conversion_failed", $"Could not convert value to {FriendlyTypeName(property.PropertyType)}");
             }
 
+            var rangeError = ValidatePropertyValue(target.Entity, property, convertedValue);
+            if (rangeError != null)
+            {
+                throw new EwEMcpException("value_out_of_range", rangeError);
+            }
+
             try
             {
                 property.SetValue(target.Entity, convertedValue, indices.Cast<object>().ToArray());
@@ -2161,11 +2182,11 @@ namespace EwE_MCP_Plugin
 
 
 
-        private JObject SetGenericValues(string domain, object entity, int index, JObject values)
+        private JObject SetGenericValues(string domain, object entity, int? index, JObject values)
         {
             if (entity == null)
             {
-                throw new EwEMcpException("entity_unavailable", $"{domain} index {index} is unavailable.");
+                throw new EwEMcpException("entity_unavailable", $"{domain} index {(index.HasValue ? index.Value.ToString() : "?")} is unavailable.");
             }
 
             var results = new JObject();
@@ -2184,6 +2205,13 @@ namespace EwE_MCP_Plugin
                     continue;
                 }
 
+                var rangeError = ValidatePropertyValue(entity, property, convertedValue);
+                if (rangeError != null)
+                {
+                    results[pair.Key] = new JObject { ["status"] = "value_out_of_range", ["reason"] = rangeError };
+                    continue;
+                }
+
                 try
                 {
                     property.SetValue(entity, convertedValue, null);
@@ -2198,9 +2226,65 @@ namespace EwE_MCP_Plugin
             return new JObject
             {
                 ["domain"] = domain,
-                ["index"] = index,
+                ["index"] = index.HasValue ? JToken.FromObject(index.Value) : JValue.CreateNull(),
                 ["results"] = results
             };
+        }
+
+        private static string ValidatePropertyValue(object entity, PropertyInfo property, object value)
+        {
+            if (value == null || !IsNumericType(value.GetType())) return null;
+
+            double numericValue = Convert.ToDouble(value);
+
+            try
+            {
+                var metadata = SafeGetProperty(entity, "Metadata");
+                if (metadata == null) return null;
+
+                var minObj = SafeGetProperty(metadata, "Min");
+                var maxObj = SafeGetProperty(metadata, "Max");
+                if (minObj == null && maxObj == null) return null;
+
+                double min = minObj != null ? Convert.ToDouble(minObj) : double.MinValue;
+                double max = maxObj != null ? Convert.ToDouble(maxObj) : double.MaxValue;
+
+                if (numericValue < min || numericValue > max)
+                {
+                    return $"Value {numericValue} is outside valid range [{min}, {max}]";
+                }
+            }
+            catch { }
+
+            try
+            {
+                var varNameProp = SafeGetProperty(entity, "VariableName");
+                if (varNameProp != null && varNameProp is string varName && !string.IsNullOrEmpty(varName))
+                {
+                    var metadataProp = entity.GetType().GetProperty("VariableMetadata(" + varName + ")");
+                    if (metadataProp == null) return null;
+                    var metadata = metadataProp.GetValue(entity);
+                    if (metadata == null) return null;
+                    var minObj = SafeGetProperty(metadata, "Min");
+                    var maxObj = SafeGetProperty(metadata, "Max");
+                    if (minObj == null && maxObj == null) return null;
+                    double min = minObj != null ? Convert.ToDouble(minObj) : double.MinValue;
+                    double max = maxObj != null ? Convert.ToDouble(maxObj) : double.MaxValue;
+                    if (numericValue < min || numericValue > max)
+                    {
+                        return $"Value {numericValue} is outside valid range [{min}, {max}] for {varName}";
+                    }
+                }
+            }
+            catch { }
+
+            return null;
+        }
+
+        private static bool IsNumericType(Type type)
+        {
+            var t = Nullable.GetUnderlyingType(type) ?? type;
+            return t == typeof(int) || t == typeof(long) || t == typeof(float) || t == typeof(double) || t == typeof(decimal) || t == typeof(short) || t == typeof(byte) || t == typeof(uint) || t == typeof(ulong) || t == typeof(ushort) || t == typeof(sbyte);
         }
 
         private EntityTarget ResolveEntity(string domain, int? requestedIndex)

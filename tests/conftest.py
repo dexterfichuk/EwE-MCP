@@ -4,11 +4,11 @@ from ewe_mcp.client import EwEMCPClient
 
 @pytest.fixture
 def sample_model_path():
-    """Provides a consistent fallback path for the test model on the VM."""
-    return os.environ.get(
-        "EWE_MODEL_PATH", 
-        r"C:\Users\dexter\Eii.Ecopath\Database\Tampa_Bay.EwEmdb"
-    )
+    """Path to the sample EwE model on the VM. Requires EWE_MODEL_PATH to be set."""
+    path = os.environ.get("EWE_MODEL_PATH")
+    if not path:
+        pytest.skip("EWE_MODEL_PATH must be set for live tests")
+    return path
 
 @pytest.fixture
 def live_client():
