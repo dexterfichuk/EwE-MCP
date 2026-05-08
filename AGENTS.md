@@ -40,7 +40,6 @@ export EWE_BUILD_PLATFORM=x86
 export EWE_MCP_TOKEN=ewe-mcp-local-dev
 export EWE_MCP_LOCAL_TUNNEL_PORT=19877
 export EWE_MCP_REMOTE_PORT=9877
-export EWE_MODEL_PATH='C:\Users\dexter\Eii.Ecopath\Database\Tampa_Bay.EwEmdb'
 ```
 
 Optional: set `EWE_MCP_ENABLED=0` before launching EwE to keep the plugin installed but prevent it from binding the socket. Leave it unset for normal build/deploy/live work.
@@ -108,7 +107,7 @@ assert client.connect()
 print(client.command_result("ping"))
 print(client.command_result("diagnose"))
 print(client.command_result("get_ewe_info"))
-print(client.command_result("load_model", {"path": r"C:\Users\dexter\Eii.Ecopath\Database\Tampa_Bay.EwEmdb"}, timeout=60))
+print(client.command_result("load_model", {"path": r"tests/fixtures/Tampa_Bay.EwEmdb"}, timeout=60))
 print(client.command_result("get_core_counters"))
 client.disconnect()
 PY
@@ -153,35 +152,12 @@ EWE_MCP_HOST=127.0.0.1 \
 EWE_MCP_PORT=19877 \
 EWE_MCP_TOKEN=ewe-mcp-local-dev \
 EWE_LIVE_TESTS=1 \
-EWE_MODEL_PATH='C:\Users\dexter\Eii.Ecopath\Database\Tampa_Bay.EwEmdb' \
 uv run pytest
 ```
 
-Expected local baseline with live tests skipped is currently `16 passed, 38 skipped`. The focused indexed live suite is:
+Expected local baseline with live tests skipped is currently `19 passed, 35 skipped`.
 
-```bash
-EWE_MCP_HOST=127.0.0.1 \
-EWE_MCP_PORT=19877 \
-EWE_MCP_TOKEN=ewe-mcp-local-dev \
-EWE_LIVE_TESTS=1 \
-EWE_MODEL_PATH='C:\Users\dexter\Eii.Ecopath\Database\Tampa_Bay.EwEmdb' \
-uv run pytest tests/test_indexed_values.py
-```
-
-Expected focused indexed live result is `7 passed`.
-
-The focused Ecosim control suite is:
-
-```bash
-EWE_MCP_HOST=127.0.0.1 \
-EWE_MCP_PORT=19877 \
-EWE_MCP_TOKEN=ewe-mcp-local-dev \
-EWE_LIVE_TESTS=1 \
-EWE_MODEL_PATH='C:\Users\dexter\Eii.Ecopath\Database\Tampa_Bay.EwEmdb' \
-uv run pytest tests/test_ecosim_control.py
-```
-
-Expected focused Ecosim live result is `5 passed`. The suite loads the sample model, loads an Ecosim scenario, inspects group/fleet inputs, runs Ecosim asynchronously, waits for completion, and reads short result time-series windows.
+The sample model (`tests/fixtures/Tampa_Bay.EwEmdb`) is bundled under the same GPL-3.0 license as EwE and does not require a separate `EWE_MODEL_PATH` environment variable.
 
 Expected full live result on current `main` is `53 passed, 1 skipped`.
 

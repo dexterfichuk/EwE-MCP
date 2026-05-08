@@ -160,6 +160,7 @@ EWE_MCP_HOST=127.0.0.1 \
 EWE_MCP_PORT=19877 \
 EWE_MCP_TOKEN=ewe-mcp-local-dev \
 EWE_LIVE_TESTS=1 \
-EWE_MODEL_PATH='C:\Users\dexter\Eii.Ecopath\Database\Tampa_Bay.EwEmdb' \
 uv run pytest
 ```
+
+The sample model is bundled at `tests/fixtures/Tampa_Bay.EwEmdb` (GPL-3.0, same license as EwE) and does not require a separate `EWE_MODEL_PATH` environment variable.

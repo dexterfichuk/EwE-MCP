@@ -208,43 +208,26 @@ SSHPASS=... ./scripts/vm-live-smoke.sh
 Current local test expectation:
 
 ```text
-11 passed, 32 skipped
+19 passed, 35 skipped
 ```
 
 The skipped tests are live EwE integration tests. Run them only when the VM plugin is deployed, EwE is launched, and a tunnel or direct connection is configured.
 
-Current focused live indexed-value expectation:
+The sample model is bundled at `tests/fixtures/Tampa_Bay.EwEmdb` (GPL-3.0) and does not require a `EWE_MODEL_PATH` environment variable.
 
-```text
-7 passed
-```
-
-Run it from the repo or active worktree after build/deploy/launch with:
+Run live tests after build/deploy/launch with:
 
 ```bash
+SSHPASS="$SSHPASS" sshpass -e ssh -f -N \
+  -L 19877:127.0.0.1:9877 \
+  -o StrictHostKeyChecking=no \
+  dexter@192.168.64.2
+
 EWE_MCP_HOST=127.0.0.1 \
 EWE_MCP_PORT=19877 \
 EWE_MCP_TOKEN=ewe-mcp-local-dev \
 EWE_LIVE_TESTS=1 \
-EWE_MODEL_PATH='C:\Users\dexter\Eii.Ecopath\Database\Tampa_Bay.EwEmdb' \
-uv run pytest tests/test_indexed_values.py
-```
-
-Current focused live Ecosim-control expectation:
-
-```text
-5 passed
-```
-
-Run it from the repo or active worktree after build/deploy/launch with:
-
-```bash
-EWE_MCP_HOST=127.0.0.1 \
-EWE_MCP_PORT=19877 \
-EWE_MCP_TOKEN=ewe-mcp-local-dev \
-EWE_LIVE_TESTS=1 \
-EWE_MODEL_PATH='C:\Users\dexter\Eii.Ecopath\Database\Tampa_Bay.EwEmdb' \
-uv run pytest tests/test_ecosim_control.py
+uv run pytest
 ```
 
 ### Important Discovery
