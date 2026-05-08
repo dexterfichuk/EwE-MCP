@@ -10,6 +10,7 @@ from ewe_mcp.server import (
     get_model_info,
     _send,
 )
+from ewe_mcp.helpers import BATCH_BLOCKED_COMMANDS
 
 # Tests that require a running EwE plugin on the Windows VM.
 live = pytest.mark.skipif(
@@ -66,7 +67,7 @@ async def test_batch_commands_success(sample_model_path):
 
 
 @pytest.mark.asyncio
-async def test_batch_commands_blocked(sample_model_path):
+async def test_batch_commands_blocked():
     """This test is purely local — it raises before any socket connection."""
     cmds = [{"type": "close_model", "params": {}}]
     with pytest.raises(ValueError, match="is not allowed in batch"):
@@ -86,4 +87,17 @@ async def test_unknown_command(sample_model_path):
 async def test_load_model_invalid_path(sample_model_path):
     res = await load_model(r"C:\non_existent_file.EwEmdb")
     assert res["loaded"] is False
+
+
+@pytest.mark.asyncio
+async def test_new_batch_blocked_commands():
+    assert "load_model" in BATCH_BLOCKED_COMMANDS
+    assert "save_model" in BATCH_BLOCKED_COMMANDS
+    assert "save_model_as" in BATCH_BLOCKED_COMMANDS
+    assert "run_ecopath" in BATCH_BLOCKED_COMMANDS
+    assert "run_ecosim" in BATCH_BLOCKED_COMMANDS
+    assert "stop_ecosim" in BATCH_BLOCKED_COMMANDS
+    assert "load_ecosim_scenario" in BATCH_BLOCKED_COMMANDS
+    assert "load_ecospace_scenario" in BATCH_BLOCKED_COMMANDS
+    assert "load_ecotracer_scenario" in BATCH_BLOCKED_COMMANDS
 
