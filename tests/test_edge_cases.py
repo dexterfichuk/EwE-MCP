@@ -34,8 +34,7 @@ async def _ensure_model_loaded():
 async def test_set_values_invalid_domain():
     with pytest.raises(EwEMCPError) as excinfo:
         await set_values(domain="invalid_domain", index=1, values={"name": "test"})
-    assert excinfo.value.code == "unsupported_domain"
-
+    assert excinfo.value.code == "unknown_domain"
 
 @live
 @pytest.mark.asyncio
@@ -51,7 +50,7 @@ async def test_set_values_index_out_of_range():
 async def test_set_values_unknown_property():
     await _ensure_model_loaded()
     res = await set_values(domain="ecopath_group", index=1, values={"non_existent_prop": 1.0})
-    assert res["results"]["non_existent_prop"] == "unknown_property"
+    assert res["results"]["non_existent_prop"] == "unknown_or_readonly_property"
 
 
 @live

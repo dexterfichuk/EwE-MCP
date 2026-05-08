@@ -11,7 +11,7 @@ def live_client():
     assert client.connect()
     
     client.command_result("close_model")
-    original_path = os.environ.get("EWE_MODEL_PATH")
+    original_path = os.environ.get("EWE_MODEL_PATH", r"C:\Users\dexter\Eii.Ecopath\Database\Tampa_Bay.EwEmdb")
     client.command_result("load_model", {"path": original_path})
     
     yield client

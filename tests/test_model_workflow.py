@@ -19,7 +19,7 @@ def live_client():
 
 
 def test_model_metadata_and_save_workflow(live_client):
-    original_path = os.environ.get("EWE_MODEL_PATH")
+    original_path = os.environ.get("EWE_MODEL_PATH", r"C:\Users\dexter\Eii.Ecopath\Database\Tampa_Bay.EwEmdb")
     if not original_path:
         pytest.skip("EWE_MODEL_PATH must be set for live model workflow tests")
         
