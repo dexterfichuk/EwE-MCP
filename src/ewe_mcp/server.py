@@ -652,13 +652,12 @@ def _save_screenshot_to_host(path: str, data: bytes) -> None:
 
 
 @mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
-async def set_values(domain: str, index: int, values: dict[str, Any], navigate: bool = True) -> dict[str, Any]:
+async def set_values(domain: str, values: dict[str, Any], index: int | None = None, navigate: bool = True) -> dict[str, Any]:
     """Set values for an EwE entity and refresh the UI. Pass navigate=False to avoid changing the visible EwE screen."""
-    result = await _send(
-        "set_values",
-        {"domain": domain, "index": index, "values": values, "navigate": navigate},
-        timeout=TIMEOUT_LONG,
-    )
+    params: dict[str, Any] = {"domain": domain, "values": values, "navigate": navigate}
+    if index is not None:
+        params["index"] = index
+    result = await _send("set_values", params, timeout=TIMEOUT_LONG)
     # Automatically refresh UI after setting values
     await refresh_ui()
     return result
