@@ -2,13 +2,12 @@ import os
 import pytest
 from ewe_mcp.client import EwEMCPClient
 
+FIXTURE_MODEL = os.path.join(os.path.dirname(__file__), "fixtures", "Tampa_Bay.EwEmdb")
+
 @pytest.fixture
 def sample_model_path():
-    """Path to the sample EwE model on the VM. Requires EWE_MODEL_PATH to be set."""
-    path = os.environ.get("EWE_MODEL_PATH")
-    if not path:
-        pytest.skip("EWE_MODEL_PATH must be set for live tests")
-    return path
+    """Path to the sample EwE model included in the test fixtures."""
+    return FIXTURE_MODEL
 
 @pytest.fixture
 def live_client():
