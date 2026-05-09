@@ -123,7 +123,7 @@ EWE_MCP_TOKEN=ewe-mcp-local-dev \
 uv run ewe-mcp
 ```
 
-The MCP server exposes tools backed by the running EwE plugin. Current main-branch tools include diagnostics, model load/save_as/close, full database metadata via `get_model_info`, change-state utilities (`has_changes`, `discard_changes`), Ecopath group/fleet reads, generic entity/value reads (which seamlessly expose stanzas, full diet matrices, detritus fate, and Ecopath balancing diagnostics), indexed value reads/writes such as `DietComp(prey)` and `Landings(group)`, Ecosim scenario load/create/copy/delete/save, Ecospace and Ecotracer scenario loading, Ecosim run state, Ecosim group/fleet inputs, Ecosim group/fleet result time-series, generic `set_values` across all domains, UI command invocation, navigation through `list_navigation_nodes`/`navigate_to_node`/`get_active_view`, view capture through `capture_view`/`save_screenshot`, batching, and a disabled-by-default eval helper.
+The MCP server exposes tools backed by the running EwE plugin. Current main-branch tools include diagnostics, model load/save_as/close, full database metadata via `get_model_info`, change-state utilities (`has_changes`, `discard_changes`), Ecopath group/fleet reads, Ecopath control tools (`run_ecopath` with balancing state, `get_ecopath_run_state`, `get_ecopath_stats`, `get_ecopath_group_diagnostics`, `get_ecopath_fleet_diagnostics`, `export_ecopath_results`), generic entity/value reads (which seamlessly expose stanzas, full diet matrices, detritus fate, and Ecopath balancing diagnostics), indexed value reads/writes such as `DietComp(prey)` and `Landings(group)`, Ecosim scenario load/create/copy/delete/save, Ecosim run state and `wait_for_ecosim_completion` polling, Ecosim group/fleet inputs, Ecosim group/fleet result time-series, generic `set_values` across all domains, UI command invocation, navigation through `list_navigation_nodes`/`navigate_to_node`/`get_active_view`, view capture through `capture_view`/`save_screenshot`, batching, and a disabled-by-default eval helper.
 
 For view capture tools (`capture_view` and `save_screenshot`), prefer using data-reading tools to extract tabular data, and reserve view capture for graphs, charts, and spatial visualizations.
 
@@ -155,11 +155,11 @@ EWE_LIVE_TESTS=1 \
 uv run pytest
 ```
 
-Expected local baseline with live tests skipped is currently `19 passed, 35 skipped`.
+Expected local baseline with live tests skipped is currently `20 passed, 42 skipped`.
 
 The sample model (`tests/fixtures/Tampa_Bay.EwEmdb`) is bundled under the same GPL-3.0 license as EwE and does not require a separate `EWE_MODEL_PATH` environment variable.
 
-Expected full live result on current `main` is `53 passed, 1 skipped`.
+Expected full live result on current `main` is `61 passed, 1 skipped`.
 
 Prefer testing mutations against copied models. If you mutate the shared sample model, restore the original value in a `finally` block and call `discard_changes` so EwE clears the unsaved-change flag without saving over the sample model. `discard_changes` only clears dirty flags; it does not physically revert values.
 
@@ -170,6 +170,7 @@ Prefer testing mutations against copied models. If you mutate the shared sample 
 - Value reads/writes navigate by default through `get_values`, `get_indexed_value`, `set_values`, and `set_indexed_value`; pass `navigate=False` for quiet/background access, batches, or batch-like workflows to avoid UI flicker.
 - Use `discard_changes` only as an explicit cleanup step after test mutations have been restored; it clears EwE's dirty flag but does not physically revert values.
 - For model-changing workflows, prefer `save_model_as` to a temporary/copy path instead of overwriting the shared model.
+- `export_ecopath_results` validates that the path has a `.csv` or `.txt` extension and rejects directory traversal (`..`).
 - Record what you changed and what you restored in your final message.
 
 ## Troubleshooting

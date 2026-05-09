@@ -30,13 +30,13 @@ def test_detritus_fate_and_diet_matrix(live_client, sample_model_path):
 
 def test_ecopath_balancing_diagnostics(live_client, sample_model_path):
     live_client.command_result("load_model", {"path": sample_model_path})
-    # Run ecopath first
-    live_client.command_result("run_ecopath")
-    
-    # Read diagnostics from outputs
+    run_res = live_client.command_result("run_ecopath")
+    assert run_res["started"] is True
+    assert "is_model_balanced" in run_res
+    assert "ecopath_run_state" in run_res
+
     res = live_client.command_result("get_values", {
-        "domain": "ecopath_group_outputs",
-        "index": 1,
+        "domain": "ecopath_group_outputs", "index": 1,
         "variables": ["eeoutput", "eeoutput_status", "pboutput", "pboutput_status"]
     })
     vals = res["values"]

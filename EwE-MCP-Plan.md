@@ -440,19 +440,19 @@ PY
   - ~~extend indexed writes into multi-index variables and additional domains after the initial single-index Ecopath group/fleet slice ([#26](https://github.com/dexterfichuk/EwE-MCP/issues/26))~~
 - ~~Add broader batch safety rules for mixed read/write command groups; destructive scenario management is already blocked. ([#27](https://github.com/dexterfichuk/EwE-MCP/issues/27))~~
 
-### Phase 4: Ecopath And Ecosim Control
-- Implement explicit Ecopath tools. ([#28](https://github.com/dexterfichuk/EwE-MCP/issues/28))
-  - run Ecopath
-  - fetch balancing diagnostics
-  - fetch group/fleet values
-  - export key Ecopath tables
+### Phase 4: Ecopath And Ecosim Control ✓
+- Implement explicit Ecopath tools. ([#28](https://github.com/dexterfichuk/EwE-MCP/issues/28)) ✓
+  - ~~run Ecopath~~ ✓ (enhanced with `is_model_balanced` and `ecopath_run_state`)
+  - ~~fetch balancing diagnostics~~ ✓ (`get_ecopath_run_state`, `get_ecopath_group_diagnostics`)
+  - ~~fetch group/fleet values~~ ✓ (`get_ecopath_group_diagnostics`, `get_ecopath_fleet_diagnostics` + existing `get_values`)
+  - ~~export key Ecopath tables~~ ✓ (`export_ecopath_results`)
 - Implement explicit Ecosim tools:
   - list scenarios: done
   - create/copy/delete scenario: done
   - load scenario: done
   - set scenario parameters: initial group/fleet input support done
   - run/stop Ecosim: done
-  - subscribe to progress/completion events where available ([#29](https://github.com/dexterfichuk/EwE-MCP/issues/29))
+  - ~~subscribe to progress/completion events where available~~ ✓ ([#29](https://github.com/dexterfichuk/EwE-MCP/issues/29)) — `wait_for_ecosim_completion` polling + `CoreExecutionStateEvent` subscription with `queried_at` timestamps
   - fetch time-series outputs: initial group/fleet result series done
   - export results: initial reflected `dumpEcosimModelResults` wrapper done for installed-build compatibility
 

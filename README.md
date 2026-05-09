@@ -17,8 +17,9 @@ Implemented now:
 - EwE plugin lifecycle: `IPlugin`, `IUIContextPlugin`, `IDisposedPlugin`.
 - Core tools: `ping`, `diagnose`, `get_ewe_info`, `get_runtime_state`, `get_message_log`.
 - Model/run tools: `load_model`, `save_model`, `save_model_as`, `close_model`, `get_model_info` (which extracts robust model database metadata via reflection), `has_changes`, `discard_changes`, `get_core_counters`, `run_ecopath`, `run_ecosim`, `stop_ecosim`.
+- Ecopath control tools: `run_ecopath` (returns `is_model_balanced` and `ecopath_run_state`), `get_ecopath_run_state` (read-only balancing state check), `get_ecopath_stats` (system-level statistics like throughput, connectance, diversity), `get_ecopath_group_diagnostics` (EE/PB/GE/biomass/trophic level for all groups), `get_ecopath_fleet_diagnostics` (catch/landings/discards by group for all fleets), `export_ecopath_results` (CSV export to caller-specified path).
 - Read-only Ecopath tools: `list_domains`, `list_entities`, `list_ecopath_groups`, `get_ecopath_group`, `list_ecopath_fleets`, `get_ecopath_fleet`. The generic data layer seamlessly exposes deep Ecopath objects including stanzas, detritus fate arrays, the full diet matrix, remarks, and balancing diagnostics (`eeoutput`, `pboutput`, `respiration`, etc.).
-- Ecosim control tools: scenario list/get/load/create/copy/delete/save, `get_ecosim_run_state`, group/fleet input inspection, group/fleet result time-series, and reflected `export_ecosim_results` for installed-build compatibility. Ecospace and Ecotracer scenario loading tools are also available.
+- Ecosim control tools: scenario list/get/load/create/copy/delete/save, `get_ecosim_run_state`, `wait_for_ecosim_completion` (polls until completion with timeout), group/fleet input inspection, group/fleet result time-series, and reflected `export_ecosim_results` for installed-build compatibility. Ecospace and Ecotracer scenario loading tools are also available.
 - Generic entity/value tools: `get_entity`, `list_variables`, `get_variable_metadata`, `get_values`, `validate_values`.
 - Indexed value tools: `get_indexed_value`, `validate_indexed_value`, `set_indexed_value` for targeted cell-level control such as `DietComp(prey)` or `Landings(group)`.
 - Value tools: `get_values`, `get_indexed_value`, `set_values`, and `set_indexed_value` navigate EwE to the relevant screen by default; pass `navigate=False` for quiet/background access, especially in batches to avoid UI flicker. `set_values` is generic and works across all domains (Ecopath, Ecosim, Ecospace, Ecotracer, taxa, core); `set_indexed_value` supports targeted indexed cells.
@@ -27,7 +28,7 @@ Implemented now:
 - View capture tools: `capture_view` and `save_screenshot` (primarily for graphs and spatial visualizations; prefer data-reading tools for tables).
 - Python MCP server, socket client, batch command guard, and protocol tests.
 
-The broad Ecospace/Ecotracer/MSE/Monte Carlo object model is intentionally not fully filled in yet; the bridge spine and first Ecosim scenario/run/results loop are ready for expansion.
+The broad Ecospace/Ecotracer/MSE/Monte Carlo object model and Ecosim progress event subscription are intentionally not fully filled in yet; the bridge spine and first Ecosim scenario/run/results loop are ready for expansion.
 
 ## Local Configuration
 

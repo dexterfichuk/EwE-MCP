@@ -308,6 +308,16 @@ namespace EwE_MCP_Plugin
                     return OnUiThread(() => ExportEcosimResults(request.Params));
                 case "run_ecopath":
                     return OnUiThread(RunEcopath);
+                case "get_ecopath_run_state":
+                    return GetEcopathRunState();
+                case "get_ecopath_stats":
+                    return GetEcopathStats();
+                case "get_ecopath_group_diagnostics":
+                    return GetEcopathGroupDiagnostics();
+                case "get_ecopath_fleet_diagnostics":
+                    return GetEcopathFleetDiagnostics();
+                case "export_ecopath_results":
+                    return OnUiThread(() => ExportEcopathResults(request.Params));
                 case "run_ecosim":
                     return OnUiThread(RunEcosim);
                 case "stop_ecosim":
@@ -490,6 +500,7 @@ namespace EwE_MCP_Plugin
                     Domain("ecopath_group_outputs", "Ecopath functional group output values from the latest Ecopath run", true, true),
                     Domain("ecopath_fleets", "Ecopath fleets with landings/discards by group", true, true),
                     Domain("ecopath_fleet_outputs", "Ecopath fleet output values from the latest Ecopath run", true, true),
+                    Domain("ecopath_stats", "Ecopath system-level statistics from the latest Ecopath run", true, true),
                     Domain("ecosim_scenarios", "Ecosim scenarios", true, true),
                     Domain("ecosim_group_inputs", "Ecosim group input parameters", true, true),
                     Domain("ecosim_group_outputs", "Ecosim group output time-series/results", true, true),
@@ -540,6 +551,9 @@ namespace EwE_MCP_Plugin
                 case "ecopath_fleet_outputs":
                 case "ecopath_fleet_output":
                     return ListGenericEntities("ecopath_fleet_outputs");
+                case "ecopath_stats":
+                case "ecopath_stat":
+                    return ListGenericEntities("ecopath_stats");
                 case "ecosim_scenarios":
                 case "ecosim_scenario":
                 case "ecosim_group_inputs":
@@ -1118,7 +1132,8 @@ namespace EwE_MCP_Plugin
                 ["scenario_count"] = SafeIntProperty(core, "nEcosimScenarios"),
                 ["years"] = SafeIntProperty(core, "nEcosimYears"),
                 ["time_steps"] = SafeIntProperty(core, "nEcosimTimeSteps"),
-                ["first_year"] = SafeInvokeInt(core, "EcosimFirstYear")
+                ["first_year"] = SafeInvokeInt(core, "EcosimFirstYear"),
+                ["queried_at"] = DateTime.UtcNow.ToString("o")
             };
             if (activeIndex > 0)
             {
@@ -1788,8 +1803,246 @@ namespace EwE_MCP_Plugin
 
         private JObject RunEcopath()
         {
-            bool ok = RequireCore().RunEcopath();
-            return new JObject { ["started"] = ok, ["run_type"] = "ecopath" };
+            var core = RequireCore();
+            bool ok = core.RunEcopath();
+            bool isBalanced = false;
+            string runState = "unknown";
+            try { isBalanced = (bool)SafeInvokeBool(core, "IsModelBalanced"); } catch { }
+            try
+            {
+                var ecopath = SafeGetProperty(core, "Ecopath");
+                if (ecopath != null)
+                {
+                    runState = SafeInvokeToString(ecopath, "RunState");
+                    if (string.IsNullOrEmpty(runState)) runState = "unknown";
+                }
+            }
+            catch { }
+            return new JObject
+            {
+                ["started"] = ok,
+                ["run_type"] = "ecopath",
+                ["is_model_balanced"] = isBalanced,
+                ["ecopath_run_state"] = runState
+            };
+        }
+
+        private JObject GetEcopathRunState()
+        {
+            var core = RequireCore();
+            var sm = SafeGetProperty(core, "StateMonitor");
+            bool hasEcopathRan = false;
+            bool isBalanced = false;
+            string runState = "unknown";
+            try { hasEcopathRan = SafeInvokeBool(sm, "HasEcopathRan"); } catch { }
+            try { isBalanced = SafeInvokeBool(core, "IsModelBalanced"); } catch { }
+            try
+            {
+                var ecopath = SafeGetProperty(core, "Ecopath");
+                if (ecopath != null)
+                {
+                    runState = SafeInvokeToString(ecopath, "RunState");
+                    if (string.IsNullOrEmpty(runState)) runState = "unknown";
+                }
+            }
+            catch { }
+            return new JObject
+            {
+                ["core_execution_state"] = SafeInvokeToString(sm, "CoreExecutionState"),
+                ["has_ecopath_loaded"] = SafeInvokeBool(sm, "HasEcopathLoaded"),
+                ["has_ecopath_ran"] = hasEcopathRan,
+                ["is_model_balanced"] = isBalanced,
+                ["ecopath_run_state"] = runState,
+                ["queried_at"] = DateTime.UtcNow.ToString("o")
+            };
+        }
+
+        private JObject GetEcopathStats()
+        {
+            var core = RequireCore();
+            var stats = SafeGetProperty(core, "EcopathStats");
+            if (stats == null)
+            {
+                throw new EwEMcpException("stats_unavailable", "Ecopath statistics not available; run Ecopath first");
+            }
+            var values = ReadScalarValues(stats, null, true, "ecopath_stats");
+            return new JObject
+            {
+                ["values"] = values,
+                ["available"] = true
+            };
+        }
+
+        private JObject GetEcopathGroupDiagnostics()
+        {
+            var core = RequireCore();
+            var count = SafeIntProperty(core, "nGroups");
+            var groups = new JArray();
+            var diagVars = new[] { "EEOutput", "EEOutputStatus", "PBOutput", "PBOutputStatus", "GEOutput", "GEOutputStatus", "TTLX", "Biomass" };
+
+            for (var i = 1; i <= count; i++)
+            {
+                var output = SafeGetIndexedProperty(core, "EcopathGroupOutputs", i);
+                var input = SafeGetIndexedProperty(core, "EcopathGroupInputs", i);
+                if (output == null || input == null) continue;
+                var group = new JObject
+                {
+                    ["index"] = i,
+                    ["name"] = SafeStringProperty(input, "Name"),
+                    ["is_living"] = !SafeBoolProperty(input, "IsDetritus"),
+                    ["values"] = ReadScalarValues(output, diagVars, true, "ecopath_group_outputs")
+                };
+                groups.Add(group);
+            }
+            return new JObject { ["groups"] = groups, ["total_count"] = count };
+        }
+
+        private JObject GetEcopathFleetDiagnostics()
+        {
+            var core = RequireCore();
+            var fleetCount = SafeIntProperty(core, "nFleets");
+            var groupCount = SafeIntProperty(core, "nGroups");
+            var fleets = new JArray();
+
+            for (var f = 1; f <= fleetCount; f++)
+            {
+                var fleetInput = SafeGetIndexedProperty(core, "EcopathFleetInputs", f);
+                var fleetOutput = SafeGetIndexedProperty(core, "EcopathFleetOutputs", f);
+                if (fleetInput == null || fleetOutput == null) continue;
+
+                var catchByGroup = new JArray();
+                for (var g = 1; g <= groupCount; g++)
+                {
+                    var catchTotal = SafeGetPropertyWithIndex(fleetOutput, "CatchTotalByGroup", g);
+                    var landings = SafeGetPropertyWithIndex(fleetInput, "Landings", g);
+                    var discards = SafeGetPropertyWithIndex(fleetOutput, "DiscardByGroup", g);
+                    var isNonZero = IsNonZero(catchTotal) || IsNonZero(landings) || IsNonZero(discards);
+                    if (!isNonZero) continue;
+
+                    var groupInput = SafeGetIndexedProperty(core, "EcopathGroupInputs", g);
+                    if (groupInput == null) continue;
+                    catchByGroup.Add(new JObject
+                    {
+                        ["group_index"] = g,
+                        ["group_name"] = SafeStringProperty(groupInput, "Name"),
+                        ["catch_total"] = ToJToken(catchTotal),
+                        ["landings"] = ToJToken(landings),
+                        ["discards"] = ToJToken(discards)
+                    });
+                }
+
+                fleets.Add(new JObject
+                {
+                    ["index"] = f,
+                    ["name"] = SafeStringProperty(fleetInput, "Name"),
+                    ["catch_by_group"] = catchByGroup
+                });
+            }
+
+            return new JObject { ["fleets"] = fleets, ["total_count"] = fleetCount };
+        }
+
+        private static string ToCsvValue(object val)
+        {
+            if (val == null) return "";
+            if (val is float f) return f.ToString("G", System.Globalization.CultureInfo.InvariantCulture);
+            if (val is double d) return d.ToString("G", System.Globalization.CultureInfo.InvariantCulture);
+            return val.ToString();
+        }
+
+        private JObject ExportEcopathResults(JObject parameters)
+        {
+            var path = RequiredString(parameters, "path");
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                throw new EwEMcpException("missing_parameter", "path is required");
+            }
+            var ext = System.IO.Path.GetExtension(path).ToLowerInvariant();
+            if (ext != ".csv" && ext != ".txt")
+            {
+                throw new EwEMcpException("invalid_parameter", "path must have a .csv or .txt extension");
+            }
+            var fullPath = System.IO.Path.GetFullPath(path);
+            if (fullPath.Contains(".."))
+            {
+                throw new EwEMcpException("invalid_parameter", "path must not contain directory traversal");
+            }
+            var core = RequireCore();
+            var sm = SafeGetProperty(core, "StateMonitor");
+            bool hasRan = false;
+            try { hasRan = SafeInvokeBool(sm, "HasEcopathRan"); } catch { }
+            if (!hasRan)
+            {
+                throw new EwEMcpException("not_ready", "Ecopath has not been run; run it first before exporting results");
+            }
+
+            try
+            {
+                var writerType = core.GetType().Assembly.GetType("EwECore.cEcopathResultWriter");
+                if (writerType != null)
+                {
+                    var writer = Activator.CreateInstance(writerType, core);
+                    var writeResults = writerType.GetMethod("WriteResults", new[] { typeof(string) });
+                    if (writeResults != null)
+                    {
+                        bool ok = (bool)writeResults.Invoke(writer, new object[] { path });
+                        return new JObject
+                        {
+                            ["exported"] = ok,
+                            ["path"] = path,
+                            ["method"] = "result_writer"
+                        };
+                    }
+                }
+            }
+            catch { }
+
+            var count = SafeIntProperty(core, "nGroups");
+            var sb = new System.Text.StringBuilder();
+            sb.AppendLine("GroupNo,Group,B,PB,QB,EE,GE,FishMort,PredMort,BioAccum,NetMig,OtherMort,NatMort");
+            for (var i = 1; i <= count; i++)
+            {
+                var input = SafeGetIndexedProperty(core, "EcopathGroupInputs", i);
+                var output = SafeGetIndexedProperty(core, "EcopathGroupOutputs", i);
+                if (input == null) continue;
+                sb.Append(i);
+                sb.Append(',');
+                sb.Append((SafeStringProperty(input, "Name") ?? "").Replace(",", ";"));
+                sb.Append(',');
+                sb.Append(ToCsvValue(SafeGetProperty(output, "Biomass")));
+                sb.Append(',');
+                sb.Append(ToCsvValue(SafeGetProperty(output, "PBOutput")));
+                sb.Append(',');
+                sb.Append(ToCsvValue(SafeGetProperty(output, "QBOutput")));
+                sb.Append(',');
+                sb.Append(ToCsvValue(SafeGetProperty(output, "EEOutput")));
+                sb.Append(',');
+                sb.Append(ToCsvValue(SafeGetProperty(output, "GEOutput")));
+                sb.Append(',');
+                sb.Append(ToCsvValue(SafeGetProperty(output, "MortCoFishRate")));
+                sb.Append(',');
+                sb.Append(ToCsvValue(SafeGetProperty(output, "MortCoPredMort")));
+                sb.Append(',');
+                sb.Append(ToCsvValue(SafeGetProperty(output, "BioAccum")));
+                sb.Append(',');
+                sb.Append(ToCsvValue(SafeGetProperty(output, "NetMigration")));
+                sb.Append(',');
+                sb.Append(ToCsvValue(SafeGetProperty(output, "MortCoOtherMort")));
+                sb.Append(',');
+                sb.Append(ToCsvValue(SafeGetProperty(output, "MortCoPB")));
+                sb.AppendLine();
+            }
+            var csvContent = sb.ToString();
+            System.Threading.Tasks.Task.Run(() =>
+                System.IO.File.WriteAllText(fullPath, csvContent, System.Text.Encoding.UTF8)
+            ).Wait();
+            return new JObject
+            {
+                ["exported"] = true,
+                ["path"] = path,
+                ["method"] = "manual_csv",
+                ["group_count"] = count
+            };
         }
 
         private JObject RunEcosim()
@@ -2331,6 +2584,9 @@ namespace EwE_MCP_Plugin
                 case "ecopath_fleet_output":
                 case "ecopath_fleet_outputs":
                     return "ecopath_fleet_outputs";
+                case "ecopath_stat":
+                case "ecopath_stats":
+                    return "ecopath_stats";
                 case "ecosim_scenario":
                 case "ecosim_scenarios":
                     return "ecosim_scenarios";
@@ -2391,6 +2647,8 @@ namespace EwE_MCP_Plugin
                 case "ecopath_groups":
                 case "ecopath_group_outputs":
                     return SafeIntProperty(core, "nGroups");
+                case "ecopath_stats":
+                    return 1;
                 case "ecopath_fleets":
                 case "ecopath_fleet_outputs":
                 case "ecosim_fleet_inputs":
@@ -2435,6 +2693,8 @@ namespace EwE_MCP_Plugin
                     return "EcopathFleetInputs";
                 case "ecopath_fleet_outputs":
                     return "EcopathFleetOutputs";
+                case "ecopath_stats":
+                    return "EcopathStats";
                 case "ecosim_scenarios":
                     return "EcosimScenarios";
                 case "ecosim_group_inputs":
@@ -3001,6 +3261,18 @@ namespace EwE_MCP_Plugin
             {
                 return null;
             }
+        }
+
+        private static object SafeGetPropertyWithIndex(object obj, string propertyName, int index)
+        {
+            if (obj == null) return null;
+            try
+            {
+                var prop = obj.GetType().GetProperty(propertyName, BindingFlags.Instance | BindingFlags.Public);
+                if (prop == null) return null;
+                return prop.GetValue(obj, new object[] { index });
+            }
+            catch { return null; }
         }
 
         private static object SafeGetIndexedProperty(object obj, string propertyName, int index)

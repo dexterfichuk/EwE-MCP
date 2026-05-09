@@ -460,6 +460,29 @@ async def get_ecosim_run_state() -> dict[str, Any]:
 
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+async def wait_for_ecosim_completion(
+    timeout_seconds: int = 120,
+    poll_interval_seconds: float = 1.0,
+) -> dict[str, Any]:
+    """Wait for Ecosim to finish running, polling until completion or timeout.
+
+    Returns the final Ecosim run state. Polls at the specified interval.
+    Raises a timeout error if Ecosim doesn't complete within the timeout.
+    """
+    deadline = asyncio.get_running_loop().time() + timeout_seconds
+    last_state: dict[str, Any] = {}
+    while asyncio.get_running_loop().time() < deadline:
+        last_state = await _send("get_ecosim_run_state")
+        if last_state.get("has_ecosim_ran"):
+            return last_state
+        await asyncio.sleep(poll_interval_seconds)
+    raise RuntimeError(
+        f"Ecosim did not complete within {timeout_seconds}s. "
+        f"Last state: {last_state}"
+    )
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
 async def list_ecosim_group_inputs() -> dict[str, Any]:
     """List Ecosim group input parameters for the active scenario."""
     return await _send("list_ecosim_group_inputs")
@@ -530,8 +553,42 @@ async def export_ecosim_results(path: str) -> dict[str, Any]:
 
 @mcp.tool()
 async def run_ecopath() -> dict[str, Any]:
-    """Run Ecopath mass balance."""
+    """Run Ecopath mass balance. Returns whether the model balanced and the Ecopath run state."""
     return await _send("run_ecopath", timeout=TIMEOUT_LONG)
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+async def get_ecopath_run_state() -> dict[str, Any]:
+    """Get Ecopath run state: whether Ecopath has run, whether the model is balanced, and the run state."""
+    return await _send("get_ecopath_run_state")
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+async def get_ecopath_stats() -> dict[str, Any]:
+    """Get Ecopath system-level statistics after an Ecopath run (throughput, connectance, etc.)."""
+    return await _send("get_ecopath_stats")
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+async def get_ecopath_group_diagnostics() -> dict[str, Any]:
+    """Fetch balancing diagnostics (EE, PB, GE outputs and status flags, biomass, trophic level) for all Ecopath groups after a run."""
+    return await _send("get_ecopath_group_diagnostics")
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+async def get_ecopath_fleet_diagnostics() -> dict[str, Any]:
+    """Fetch fleet-level Ecopath catch, landings, and discard breakdowns after an Ecopath run."""
+    return await _send("get_ecopath_fleet_diagnostics")
+
+
+@mcp.tool()
+async def export_ecopath_results(path: str) -> dict[str, Any]:
+    """Export Ecopath results (basic estimates CSV) to a file path on the EwE host.
+
+    Requires Ecopath to have been run first. The path should be a writable path
+    on the Windows machine running EwE.
+    """
+    return await _send("export_ecopath_results", {"path": path}, timeout=TIMEOUT_LONG)
 
 
 @mcp.tool()

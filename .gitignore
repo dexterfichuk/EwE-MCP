@@ -13,3 +13,4 @@ dist/
 secrets/
 *.log
 scratch_*
+.worktrees/

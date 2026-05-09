@@ -19,6 +19,7 @@ from ewe_mcp.server import (
     load_ecosim_scenario,
     load_model,
     run_ecosim,
+    wait_for_ecosim_completion,
 )
 
 live = pytest.mark.skipif(
@@ -131,3 +132,14 @@ async def test_ecosim_result_bounds_error(sample_model_path):
     with pytest.raises(EwEMCPError) as excinfo:
         await get_ecosim_group_results(index=1, start_time=0, end_time=1)
     assert excinfo.value.code == "time_range_out_of_range"
+
+
+@live
+@pytest.mark.asyncio
+async def test_wait_for_ecosim_completion(sample_model_path):
+    await _ensure_ecosim_loaded(sample_model_path)
+    run = await run_ecosim()
+    assert run["started"] is True
+    state = await wait_for_ecosim_completion(timeout_seconds=120)
+    assert state["has_ecosim_ran"] is True
+    assert "core_execution_state" in state

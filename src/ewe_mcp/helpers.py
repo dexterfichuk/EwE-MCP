@@ -33,6 +33,7 @@ BATCH_BLOCKED_COMMANDS = frozenset(
         "load_ecosim_scenario",
         "load_ecospace_scenario",
         "load_ecotracer_scenario",
+        "export_ecopath_results",
     }
 )
 
