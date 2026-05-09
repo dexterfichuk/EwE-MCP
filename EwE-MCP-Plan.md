@@ -208,7 +208,7 @@ SSHPASS=... ./scripts/vm-live-smoke.sh
 Current local test expectation:
 
 ```text
-19 passed, 35 skipped
+24 passed, 57 skipped
 ```
 
 The skipped tests are live EwE integration tests. Run them only when the VM plugin is deployed, EwE is launched, and a tunnel or direct connection is configured.
@@ -260,7 +260,7 @@ uv run pytest
 Expected baseline at the time of this update:
 
 ```text
-11 passed, 32 skipped
+24 passed, 57 skipped
 ```
 
 ### 3. VM Environment Variables
@@ -456,26 +456,37 @@ PY
   - fetch time-series outputs: initial group/fleet result series done
   - export results: initial reflected `dumpEcosimModelResults` wrapper done for installed-build compatibility
 
-### Phase 5: Full EwE Suite Coverage
-- Add Ecospace tools. ([#30](https://github.com/dexterfichuk/EwE-MCP/issues/30))
-  - scenario management
-  - spatial layer inspection
-  - run/stop
-  - progress
-  - results and map exports
-- Add Ecotracer tools. ([#31](https://github.com/dexterfichuk/EwE-MCP/issues/31))
-  - tracer setup inspection
-  - scenario/run control
-  - result extraction
-- Add MSE tools. ([#32](https://github.com/dexterfichuk/EwE-MCP/issues/32))
-  - management procedure/scenario inspection
-  - run control
-  - result extraction
-- Add Monte Carlo tools. ([#33](https://github.com/dexterfichuk/EwE-MCP/issues/33))
-  - configuration inspection
-  - run control
-  - result summaries
-- Add plugin manager/control diagnostics where safe. ([#34](https://github.com/dexterfichuk/EwE-MCP/issues/34))
+### Phase 5: Full EwE Suite Coverage ✓
+- Ecospace tools: ([#30](https://github.com/dexterfichuk/EwE-MCP/issues/30)) ✓
+  - `list_ecospace_scenarios`, `get_ecospace_scenario`, `load_ecospace_scenario`
+  - `create_ecospace_scenario`, `copy_ecospace_scenario`, `delete_ecospace_scenario`, `save_ecospace_scenario`
+  - `get_ecospace_run_state`, `run_ecospace`, `stop_ecospace`, `wait_for_ecospace_completion`
+  - `list_ecospace_group_inputs`, `get_ecospace_group_input`, `list_ecospace_fleet_inputs`, `get_ecospace_fleet_input`
+  - `get_ecospace_group_results`, `get_ecospace_fleet_results`
+  - `list_ecospace_habitats`, `get_ecospace_habitat`, `list_ecospace_mpas`, `get_ecospace_mpa`
+  - `get_ecospace_basemap`, `get_ecospace_model_parameters`
+- Ecotracer tools: ([#31](https://github.com/dexterfichuk/EwE-MCP/issues/31)) ✓
+  - `list_ecotracer_scenarios`, `get_ecotracer_scenario`, `load_ecotracer_scenario`
+  - `create_ecotracer_scenario`, `copy_ecotracer_scenario`, `delete_ecotracer_scenario`, `save_ecotracer_scenario`, `close_ecotracer_scenario`
+  - `get_ecotracer_run_state`, `get_ecotracer_model_parameters`, `list_ecotracer_group_inputs`, `get_ecotracer_group_input`
+  - `get_ecotracer_group_results` (concentration/conbio time-series after Ecosim/Ecospace run with tracer enabled)
+  - Note: No `run_ecotracer` — Ecotracer runs within Ecosim/Ecospace when `ContaminantTracing` is enabled
+- MSE tools: ([#32](https://github.com/dexterfichuk/EwE-MCP/issues/32)) ✓
+  - `get_mse_parameters`, `list_mse_group_inputs`, `get_mse_group_input`, `list_mse_fleet_inputs`, `get_mse_fleet_input`
+  - `get_mse_run_state` (includes `search_mode` from `StateMonitor`), `run_mse`, `stop_mse`
+  - `get_mse_group_results`, `get_mse_fleet_results`
+- Monte Carlo tools: ([#33](https://github.com/dexterfichuk/EwE-MCP/issues/33)) ✓
+  - `get_monte_carlo_parameters`, `list_monte_carlo_groups`, `get_monte_carlo_group`
+  - `get_monte_carlo_run_state` (includes `search_mode`), `run_monte_carlo`, `stop_monte_carlo`
+- Plugin diagnostics: ([#34](https://github.com/dexterfichuk/EwE-MCP/issues/34)) ✓
+  - `get_installed_plugins` (read-only list of installed EwE plugins with name/description/author/contact/type)
+- Generic domain coverage expanded:
+  - `ecotracer_model_parameters`, `ecotracer_group_outputs`
+  - `mse_parameters`, `mse_group_inputs`, `mse_fleet_inputs`, `mse_group_outputs`, `mse_fleet_outputs`
+  - `monte_carlo_groups`
+- Batch blocking expanded for all new destructive commands
+- Tool annotations: `readOnlyHint=True` for reads, `destructiveHint=True` for mutations/run/stop
+- Tests: offline batch-blocking for all 5 subsystems, live read-only tests for Ecospace/Ecotracer/MSE/Monte Carlo/Plugin Diagnostics
 
 ### Phase 6: UI-Equivalent Ergonomics
 - Navigation tools are implemented:

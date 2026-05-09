@@ -49,6 +49,8 @@ def test_ecospace_scenario_list_and_load(live_client, sample_model_path):
     live_client.command_result("load_model", {"path": sample_model_path})
     scenarios = live_client.command_result("list_entities", {"domain": "ecospace_scenarios"})
     assert scenarios["total_count"] >= 1
+    dedicated = live_client.command_result("list_ecospace_scenarios")
+    assert dedicated["total_count"] >= 1
     live_client.command_result("load_ecosim_scenario", {"index": 1})
     loaded = live_client.command_result("load_ecospace_scenario", {"index": 1})
     assert loaded["loaded"] is True
@@ -59,6 +61,8 @@ def test_ecotracer_scenario_list_and_load(live_client, sample_model_path):
     scenarios = live_client.command_result("list_entities", {"domain": "ecotracer_scenarios"})
     if scenarios["total_count"] < 1:
         pytest.skip("No Ecotracer scenarios in sample model")
+    dedicated = live_client.command_result("list_ecotracer_scenarios")
+    assert dedicated["total_count"] >= 1
     live_client.command_result("load_ecosim_scenario", {"index": 1})
     loaded = live_client.command_result("load_ecotracer_scenario", {"index": 1})
     assert loaded["loaded"] is True

@@ -414,15 +414,406 @@ async def load_ecospace_scenario(index: int) -> dict[str, Any]:
     return await _send("load_ecospace_scenario", {"index": index}, timeout=TIMEOUT_LONG)
 
 
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+async def list_ecospace_scenarios() -> dict[str, Any]:
+    """List Ecospace scenarios in the loaded model."""
+    return await _send("list_ecospace_scenarios")
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+async def get_ecospace_scenario(index: int) -> dict[str, Any]:
+    """Get Ecospace scenario metadata by one-based index."""
+    return await _send("get_ecospace_scenario", {"index": index})
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+async def get_ecospace_run_state() -> dict[str, Any]:
+    """Get Ecospace run state: whether Ecospace is running, loaded, and has outputs."""
+    return await _send("get_ecospace_run_state")
+
+
+@mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
+async def run_ecospace() -> dict[str, Any]:
+    """Run the active Ecospace scenario."""
+    return await _send("run_ecospace", timeout=TIMEOUT_LONG)
+
+
+@mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
+async def stop_ecospace() -> dict[str, Any]:
+    """Stop the active Ecospace run."""
+    return await _send("stop_ecospace")
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+async def list_ecospace_group_inputs() -> dict[str, Any]:
+    """List Ecospace group input parameters for the active scenario."""
+    return await _send("list_ecospace_group_inputs")
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+async def get_ecospace_group_input(index: int) -> dict[str, Any]:
+    """Get one Ecospace group input parameter record."""
+    return await _send("get_ecospace_group_input", {"index": index})
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+async def list_ecospace_fleet_inputs() -> dict[str, Any]:
+    """List Ecospace fleet input parameters for the active scenario."""
+    return await _send("list_ecospace_fleet_inputs")
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+async def get_ecospace_fleet_input(index: int) -> dict[str, Any]:
+    """Get one Ecospace fleet input parameter record."""
+    return await _send("get_ecospace_fleet_input", {"index": index})
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+async def get_ecospace_group_results(
+    index: int,
+    variables: list[str] | None = None,
+    start_time: int | None = None,
+    end_time: int | None = None,
+) -> dict[str, Any]:
+    """Read Ecospace group result time-series after a run."""
+    params: dict[str, Any] = {"index": index}
+    if variables is not None:
+        params["variables"] = variables
+    if start_time is not None:
+        params["start_time"] = start_time
+    if end_time is not None:
+        params["end_time"] = end_time
+    return await _send("get_ecospace_group_results", params, timeout=TIMEOUT_LONG)
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+async def get_ecospace_fleet_results(
+    index: int,
+    variables: list[str] | None = None,
+    start_time: int | None = None,
+    end_time: int | None = None,
+) -> dict[str, Any]:
+    """Read Ecospace fleet result time-series after a run."""
+    params: dict[str, Any] = {"index": index}
+    if variables is not None:
+        params["variables"] = variables
+    if start_time is not None:
+        params["start_time"] = start_time
+    if end_time is not None:
+        params["end_time"] = end_time
+    return await _send("get_ecospace_fleet_results", params, timeout=TIMEOUT_LONG)
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+async def list_ecospace_habitats() -> dict[str, Any]:
+    """List Ecospace habitats in the active scenario."""
+    return await _send("list_ecospace_habitats")
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+async def get_ecospace_habitat(index: int) -> dict[str, Any]:
+    """Get one Ecospace habitat by one-based index."""
+    return await _send("get_ecospace_habitat", {"index": index})
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+async def list_ecospace_mpas() -> dict[str, Any]:
+    """List Ecospace MPAs in the active scenario."""
+    return await _send("list_ecospace_mpas")
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+async def get_ecospace_mpa(index: int) -> dict[str, Any]:
+    """Get one Ecospace MPA by one-based index."""
+    return await _send("get_ecospace_mpa", {"index": index})
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+async def get_ecospace_basemap() -> dict[str, Any]:
+    """Get the Ecospace basemap for the active scenario."""
+    return await _send("get_ecospace_basemap")
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+async def get_ecospace_model_parameters() -> dict[str, Any]:
+    """Get Ecospace model parameters for the active scenario."""
+    return await _send("get_ecospace_model_parameters")
+
+
+@mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
+async def create_ecospace_scenario(
+    name: str,
+    description: str = "",
+    author: str = "",
+    contact: str = "",
+    rows: int = 30,
+    cols: int = 30,
+    latitude: float = 0.0,
+    longitude: float = 0.0,
+    cell_length: float = 0.0833,
+) -> dict[str, Any]:
+    """Create and load a new Ecospace scenario."""
+    return await _send(
+        "create_ecospace_scenario",
+        {
+            "name": name,
+            "description": description,
+            "author": author,
+            "contact": contact,
+            "rows": rows,
+            "cols": cols,
+            "latitude": latitude,
+            "longitude": longitude,
+            "cell_length": cell_length,
+        },
+        timeout=TIMEOUT_LONG,
+    )
+
+
+@mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
+async def copy_ecospace_scenario(name: str, description: str = "") -> dict[str, Any]:
+    """Copy the active Ecospace scenario under a new name and load the copy."""
+    return await _send("copy_ecospace_scenario", {"name": name, "description": description}, timeout=TIMEOUT_LONG)
+
+
+@mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
+async def delete_ecospace_scenario(index: int) -> dict[str, Any]:
+    """Delete an unloaded Ecospace scenario by one-based index."""
+    return await _send("delete_ecospace_scenario", {"index": index}, timeout=TIMEOUT_LONG)
+
+
+@mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
+async def save_ecospace_scenario() -> dict[str, Any]:
+    """Save the active Ecospace scenario."""
+    return await _send("save_ecospace_scenario", timeout=TIMEOUT_LONG)
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+async def wait_for_ecospace_completion(
+    timeout_seconds: float = 300,
+    poll_interval_seconds: float = 2.0,
+) -> dict[str, Any]:
+    """Wait for Ecospace to finish running, polling until completion or timeout.
+
+    Returns the final Ecospace run state. Polls at the specified interval.
+    Raises a timeout error if Ecospace doesn't complete within the timeout.
+    """
+    deadline = asyncio.get_running_loop().time() + timeout_seconds
+    last_state: dict[str, Any] = {}
+    while asyncio.get_running_loop().time() < deadline:
+        last_state = await _send("get_ecospace_run_state")
+        if not last_state.get("is_ecospace_running") and last_state.get("has_ecospace_loaded"):
+            return last_state
+        await asyncio.sleep(poll_interval_seconds)
+    raise RuntimeError(
+        f"Ecospace did not complete within {timeout_seconds}s. "
+        f"Last state: {last_state}"
+    )
+
+
 @mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
 async def load_ecotracer_scenario(index: int) -> dict[str, Any]:
     """Load an Ecotracer scenario by one-based index."""
     return await _send("load_ecotracer_scenario", {"index": index}, timeout=TIMEOUT_LONG)
 
 
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+async def list_ecotracer_scenarios() -> dict[str, Any]:
+    """List Ecotracer scenarios in the loaded model."""
+    return await _send("list_ecotracer_scenarios")
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+async def get_ecotracer_scenario(index: int) -> dict[str, Any]:
+    """Get Ecotracer scenario metadata by one-based index."""
+    return await _send("get_ecotracer_scenario", {"index": index})
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+async def get_ecotracer_run_state() -> dict[str, Any]:
+    """Get Ecotracer run state: whether Ecotracer is running and has outputs."""
+    return await _send("get_ecotracer_run_state")
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+async def get_ecotracer_model_parameters() -> dict[str, Any]:
+    """Get Ecotracer model parameters for the active scenario."""
+    return await _send("get_ecotracer_model_parameters")
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+async def list_ecotracer_group_inputs() -> dict[str, Any]:
+    """List Ecotracer group input parameters for the active scenario."""
+    return await _send("list_ecotracer_group_inputs")
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+async def get_ecotracer_group_input(index: int) -> dict[str, Any]:
+    """Get one Ecotracer group input parameter record."""
+    return await _send("get_ecotracer_group_input", {"index": index})
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+async def get_ecotracer_group_results(
+    index: int,
+    variables: list[str] | None = None,
+    start_time: int | None = None,
+    end_time: int | None = None,
+) -> dict[str, Any]:
+    """Read Ecotracer group result time-series after a run."""
+    params: dict[str, Any] = {"index": index}
+    if variables is not None:
+        params["variables"] = variables
+    if start_time is not None:
+        params["start_time"] = start_time
+    if end_time is not None:
+        params["end_time"] = end_time
+    return await _send("get_ecotracer_group_results", params, timeout=TIMEOUT_LONG)
+
+
 @mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
-async def create_ecosim_scenario(
+async def create_ecotracer_scenario(
     name: str,
+    description: str = "",
+    author: str = "",
+    contact: str = "",
+) -> dict[str, Any]:
+    """Create and load a new Ecotracer scenario."""
+    return await _send(
+        "create_ecotracer_scenario",
+        {"name": name, "description": description, "author": author, "contact": contact},
+        timeout=TIMEOUT_LONG,
+    )
+
+
+@mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
+async def copy_ecotracer_scenario(name: str, description: str = "") -> dict[str, Any]:
+    """Copy the active Ecotracer scenario under a new name and load the copy."""
+    return await _send("copy_ecotracer_scenario", {"name": name, "description": description}, timeout=TIMEOUT_LONG)
+
+
+@mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
+async def delete_ecotracer_scenario(index: int) -> dict[str, Any]:
+    """Delete an unloaded Ecotracer scenario by one-based index."""
+    return await _send("delete_ecotracer_scenario", {"index": index}, timeout=TIMEOUT_LONG)
+
+
+@mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
+async def save_ecotracer_scenario() -> dict[str, Any]:
+    """Save the active Ecotracer scenario."""
+    return await _send("save_ecotracer_scenario", timeout=TIMEOUT_LONG)
+
+
+@mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
+async def close_ecotracer_scenario() -> dict[str, Any]:
+    """Close the active Ecotracer scenario."""
+    return await _send("close_ecotracer_scenario")
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+async def get_mse_parameters() -> dict[str, Any]:
+    """Get MSE model parameters."""
+    return await _send("get_mse_parameters")
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+async def list_mse_group_inputs() -> dict[str, Any]:
+    """List MSE group input parameters."""
+    return await _send("list_mse_group_inputs")
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+async def get_mse_group_input(index: int) -> dict[str, Any]:
+    """Get one MSE group input parameter record."""
+    return await _send("get_mse_group_input", {"index": index})
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+async def list_mse_fleet_inputs() -> dict[str, Any]:
+    """List MSE fleet input parameters."""
+    return await _send("list_mse_fleet_inputs")
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+async def get_mse_fleet_input(index: int) -> dict[str, Any]:
+    """Get one MSE fleet input parameter record."""
+    return await _send("get_mse_fleet_input", {"index": index})
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+async def get_mse_run_state() -> dict[str, Any]:
+    """Get MSE run state."""
+    return await _send("get_mse_run_state")
+
+
+@mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
+async def run_mse() -> dict[str, Any]:
+    """Run the active MSE scenario."""
+    return await _send("run_mse", timeout=TIMEOUT_LONG)
+
+
+@mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
+async def stop_mse() -> dict[str, Any]:
+    """Stop the active MSE run."""
+    return await _send("stop_mse")
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+async def get_mse_group_results(index: int) -> dict[str, Any]:
+    """Get MSE group results by one-based index."""
+    return await _send("get_mse_group_results", {"index": index})
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+async def get_mse_fleet_results(index: int) -> dict[str, Any]:
+    """Get MSE fleet results by one-based index."""
+    return await _send("get_mse_fleet_results", {"index": index})
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+async def get_monte_carlo_parameters() -> dict[str, Any]:
+    """Get Monte Carlo model parameters."""
+    return await _send("get_monte_carlo_parameters")
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+async def list_monte_carlo_groups() -> dict[str, Any]:
+    """List Monte Carlo group parameters."""
+    return await _send("list_monte_carlo_groups")
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+async def get_monte_carlo_group(index: int) -> dict[str, Any]:
+    """Get one Monte Carlo group parameter record."""
+    return await _send("get_monte_carlo_group", {"index": index})
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+async def get_monte_carlo_run_state() -> dict[str, Any]:
+    """Get Monte Carlo run state."""
+    return await _send("get_monte_carlo_run_state")
+
+
+@mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
+async def run_monte_carlo() -> dict[str, Any]:
+    """Run Monte Carlo analysis."""
+    return await _send("run_monte_carlo", timeout=TIMEOUT_LONG)
+
+
+@mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
+async def stop_monte_carlo() -> dict[str, Any]:
+    """Stop the active Monte Carlo run."""
+    return await _send("stop_monte_carlo")
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+async def get_installed_plugins() -> dict[str, Any]:
+    """List EwE plugins installed in the running instance."""
+    return await _send("get_installed_plugins")
+
+
+@mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
+async def create_ecosim_scenario(name: str,
     description: str = "",
     author: str = "",
     contact: str = "",

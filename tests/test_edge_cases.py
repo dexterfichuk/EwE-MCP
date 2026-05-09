@@ -100,4 +100,19 @@ async def test_new_batch_blocked_commands():
     assert "load_ecosim_scenario" in BATCH_BLOCKED_COMMANDS
     assert "load_ecospace_scenario" in BATCH_BLOCKED_COMMANDS
     assert "load_ecotracer_scenario" in BATCH_BLOCKED_COMMANDS
+    assert "create_ecospace_scenario" in BATCH_BLOCKED_COMMANDS
+    assert "copy_ecospace_scenario" in BATCH_BLOCKED_COMMANDS
+    assert "delete_ecospace_scenario" in BATCH_BLOCKED_COMMANDS
+    assert "save_ecospace_scenario" in BATCH_BLOCKED_COMMANDS
+    assert "run_ecospace" in BATCH_BLOCKED_COMMANDS
+    assert "stop_ecospace" in BATCH_BLOCKED_COMMANDS
+    assert "create_ecotracer_scenario" in BATCH_BLOCKED_COMMANDS
+    assert "copy_ecotracer_scenario" in BATCH_BLOCKED_COMMANDS
+    assert "delete_ecotracer_scenario" in BATCH_BLOCKED_COMMANDS
+    assert "save_ecotracer_scenario" in BATCH_BLOCKED_COMMANDS
+    assert "close_ecotracer_scenario" in BATCH_BLOCKED_COMMANDS
+    assert "run_mse" in BATCH_BLOCKED_COMMANDS
+    assert "stop_mse" in BATCH_BLOCKED_COMMANDS
+    assert "run_monte_carlo" in BATCH_BLOCKED_COMMANDS
+    assert "stop_monte_carlo" in BATCH_BLOCKED_COMMANDS
 

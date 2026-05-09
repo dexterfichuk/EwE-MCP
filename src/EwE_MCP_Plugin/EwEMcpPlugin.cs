@@ -278,10 +278,110 @@ namespace EwE_MCP_Plugin
                     return GetEcosimScenario(request.Params);
                 case "load_ecosim_scenario":
                     return OnUiThread(() => LoadEcosimScenario(request.Params));
+                case "list_ecospace_scenarios":
+                    return ListEcospaceScenarios();
+                case "get_ecospace_scenario":
+                    return GetEcospaceScenario(request.Params);
                 case "load_ecospace_scenario":
                     return OnUiThread(() => LoadEcospaceScenario(request.Params));
+                case "get_ecospace_run_state":
+                    return GetEcospaceRunState();
+                case "run_ecospace":
+                    return OnUiThread(RunEcospace);
+                case "stop_ecospace":
+                    return OnUiThread(StopEcospace);
+                case "list_ecospace_group_inputs":
+                    return ListEcospaceGroupInputs();
+                case "get_ecospace_group_input":
+                    return GetEcospaceGroupInput(request.Params);
+                case "list_ecospace_fleet_inputs":
+                    return ListEcospaceFleetInputs();
+                case "get_ecospace_fleet_input":
+                    return GetEcospaceFleetInput(request.Params);
+                case "get_ecospace_group_results":
+                    return GetEcospaceGroupResults(request.Params);
+                case "get_ecospace_fleet_results":
+                    return GetEcospaceFleetResults(request.Params);
+                case "list_ecospace_habitats":
+                    return ListGenericEntities("ecospace_habitats");
+                case "get_ecospace_habitat":
+                    return GetEcospaceHabitat(request.Params);
+                case "list_ecospace_mpas":
+                    return ListGenericEntities("ecospace_mpas");
+                case "get_ecospace_mpa":
+                    return GetEcospaceMpa(request.Params);
+                case "get_ecospace_basemap":
+                    return GetEcospaceBasemap();
+                case "get_ecospace_model_parameters":
+                    return GetEcospaceModelParameters();
+                case "create_ecospace_scenario":
+                    return OnUiThread(() => CreateEcospaceScenario(request.Params));
+                case "copy_ecospace_scenario":
+                    return OnUiThread(() => CopyEcospaceScenario(request.Params));
+                case "delete_ecospace_scenario":
+                    return OnUiThread(() => DeleteEcospaceScenario(request.Params));
+                case "save_ecospace_scenario":
+                    return OnUiThread(SaveEcospaceScenario);
+                case "list_ecotracer_scenarios":
+                    return ListEcotracerScenarios();
+                case "get_ecotracer_scenario":
+                    return GetEcotracerScenario(request.Params);
                 case "load_ecotracer_scenario":
                     return OnUiThread(() => LoadEcotracerScenario(request.Params));
+                case "get_ecotracer_run_state":
+                    return GetEcotracerRunState();
+                case "get_ecotracer_model_parameters":
+                    return GetEcotracerModelParameters();
+                case "list_ecotracer_group_inputs":
+                    return ListEcotracerGroupInputs();
+                case "get_ecotracer_group_input":
+                    return GetEcotracerGroupInput(request.Params);
+                case "get_ecotracer_group_results":
+                    return GetEcotracerGroupResults(request.Params);
+                case "create_ecotracer_scenario":
+                    return OnUiThread(() => CreateEcotracerScenario(request.Params));
+                case "copy_ecotracer_scenario":
+                    return OnUiThread(() => CopyEcotracerScenario(request.Params));
+                case "delete_ecotracer_scenario":
+                    return OnUiThread(() => DeleteEcotracerScenario(request.Params));
+                case "save_ecotracer_scenario":
+                    return OnUiThread(SaveEcotracerScenario);
+                case "close_ecotracer_scenario":
+                    return OnUiThread(CloseEcotracerScenario);
+                case "get_mse_parameters":
+                    return GetMseParameters();
+                case "list_mse_group_inputs":
+                    return ListMseGroupInputs();
+                case "get_mse_group_input":
+                    return GetMseGroupInput(request.Params);
+                case "list_mse_fleet_inputs":
+                    return ListMseFleetInputs();
+                case "get_mse_fleet_input":
+                    return GetMseFleetInput(request.Params);
+                case "get_mse_run_state":
+                    return GetMseRunState();
+                case "run_mse":
+                    return OnUiThread(RunMse);
+                case "stop_mse":
+                    return OnUiThread(StopMse);
+                case "get_mse_group_results":
+                    return GetMseGroupResults(request.Params);
+                case "get_mse_fleet_results":
+                    return GetMseFleetResults(request.Params);
+                case "get_monte_carlo_parameters":
+                    return GetMonteCarloParameters();
+                case "list_monte_carlo_groups":
+                    return ListMonteCarloGroups();
+                case "get_monte_carlo_group":
+                    return GetMonteCarloGroup(request.Params);
+                case "get_monte_carlo_run_state":
+                    return GetMonteCarloRunState();
+                case "run_monte_carlo":
+                    return OnUiThread(RunMonteCarlo);
+                case "stop_monte_carlo":
+                    return OnUiThread(StopMonteCarlo);
+                case "get_installed_plugins":
+                    return GetInstalledPlugins();
                 case "create_ecosim_scenario":
                     return OnUiThread(() => CreateEcosimScenario(request.Params));
                 case "copy_ecosim_scenario":
@@ -516,6 +616,14 @@ namespace EwE_MCP_Plugin
                     Domain("ecospace_region_outputs", "Ecospace region output values", true, true),
                     Domain("ecotracer_scenarios", "Ecotracer scenarios", true, true),
                     Domain("ecotracer_group_inputs", "Ecotracer group input parameters", true, true),
+                    Domain("ecotracer_model_parameters", "Ecotracer environment-level model parameters", true, true),
+                    Domain("ecotracer_group_outputs", "Ecotracer group output concentrations", true, true),
+                    Domain("mse_parameters", "MSE model parameters", true, true),
+                    Domain("mse_group_inputs", "MSE group input parameters", true, true),
+                    Domain("mse_fleet_inputs", "MSE fleet input parameters", true, true),
+                    Domain("mse_group_outputs", "MSE group output results", true, true),
+                    Domain("mse_fleet_outputs", "MSE fleet output results", true, true),
+                    Domain("monte_carlo_groups", "Monte Carlo per-group uncertainty parameters", true, true),
                     Domain("taxa", "Taxonomy records linked to the model", true, true),
                     Domain("core", "Top-level EwE cCore public scalar properties", true, true),
                     Domain("ui_commands", "Commands registered with EwE's UI command handler", true, true)
@@ -584,6 +692,22 @@ namespace EwE_MCP_Plugin
                 case "ecotracer_scenario":
                 case "ecotracer_group_inputs":
                 case "ecotracer_group_input":
+                case "ecotracer_model_parameters":
+                case "ecotracer_model_parameter":
+                case "ecotracer_group_outputs":
+                case "ecotracer_group_output":
+                case "mse_group_inputs":
+                case "mse_group_input":
+                case "mse_fleet_inputs":
+                case "mse_fleet_input":
+                case "mse_parameters":
+                case "mse_parameter":
+                case "mse_group_outputs":
+                case "mse_group_output":
+                case "mse_fleet_outputs":
+                case "mse_fleet_output":
+                case "monte_carlo_groups":
+                case "monte_carlo_group":
                 case "taxa":
                 case "taxon":
                     return ListGenericEntities(NormalizeDomain(domain));
@@ -1052,6 +1176,776 @@ namespace EwE_MCP_Plugin
             var index = RequiredInt(parameters, "index");
             bool ok = RequireCore().LoadEcotracerScenario(index);
             return new JObject { ["loaded"] = ok, ["index"] = index };
+        }
+
+        // ── Ecospace Handlers ───────────────────────────────────────────
+
+        private JObject ListEcospaceScenarios()
+        {
+            var core = RequireCore();
+            int count = SafeIntProperty(core, "nEcospaceScenarios");
+            var scenarios = new JArray();
+            for (var i = 1; i <= count; i++)
+            {
+                var scenario = SafeGetIndexedProperty(core, "EcospaceScenarios", i);
+                if (scenario == null) continue;
+                scenarios.Add(new JObject
+                {
+                    ["index"] = i,
+                    ["name"] = SafeStringProperty(scenario, "Name"),
+                    ["description"] = SafeStringProperty(scenario, "Description"),
+                });
+            }
+            return new JObject
+            {
+                ["scenarios"] = scenarios,
+                ["total_count"] = count,
+                ["active_index"] = SafeIntProperty(core, "ActiveEcospaceScenarioIndex"),
+            };
+        }
+
+        private JObject GetEcospaceScenario(JObject parameters)
+        {
+            var core = RequireCore();
+            int index = RequiredInt(parameters, "index");
+            var scenario = SafeGetIndexedProperty(core, "EcospaceScenarios", index);
+            if (scenario == null) throw new EwEMcpException("index_out_of_range", $"Ecospace scenario index {index} out of range");
+            return new JObject
+            {
+                ["index"] = index,
+                ["name"] = SafeStringProperty(scenario, "Name"),
+                ["description"] = SafeStringProperty(scenario, "Description"),
+                ["author"] = SafeStringProperty(scenario, "Author"),
+                ["contact"] = SafeStringProperty(scenario, "Contact"),
+                ["last_saved"] = SafeStringProperty(scenario, "LastSaved"),
+                ["is_loaded"] = SafeIntProperty(core, "ActiveEcospaceScenarioIndex") == index,
+            };
+        }
+
+        private JObject GetEcospaceRunState()
+        {
+            var core = RequireCore();
+            var sm = SafeGetProperty(core, "StateMonitor");
+            return new JObject
+            {
+                ["has_ecospace_loaded"] = sm != null && SafeInvokeBool(sm, "HasEcospaceLoaded"),
+                ["has_ecospace_initialized"] = sm != null && SafeInvokeBool(sm, "HasEcospaceInitialized"),
+                ["is_ecospace_running"] = sm != null && SafeInvokeBool(sm, "IsEcospaceRunning"),
+                ["has_ecospace_ran"] = sm != null && SafeInvokeBool(sm, "HasEcospaceRan"),
+                ["is_ecospace_modified"] = sm != null && SafeInvokeBool(sm, "IsEcospaceModified"),
+                ["is_ecospace_paused"] = SafeBoolProperty(core, "EcospacePaused"),
+                ["active_scenario_index"] = SafeIntProperty(core, "ActiveEcospaceScenarioIndex"),
+            };
+        }
+
+        private JObject RunEcospace()
+        {
+            var core = RequireCore();
+            var method = core.GetType().GetMethod("RunEcospace", new Type[0]);
+            if (method == null) throw new EwEMcpException("core_unavailable", "RunEcospace not available");
+            bool ok = Convert.ToBoolean(method.Invoke(core, null));
+            return new JObject { ["started"] = ok };
+        }
+
+        private JObject StopEcospace()
+        {
+            var core = RequireCore();
+            core.GetType().GetMethod("StopEcospace")?.Invoke(core, null);
+            return new JObject { ["stopped"] = true };
+        }
+
+        private JObject ListEcospaceGroupInputs()
+        {
+            var core = RequireCore();
+            int nGroups = SafeIntProperty(core, "nGroups");
+            var items = new JArray();
+            for (var i = 1; i <= nGroups; i++)
+            {
+                var group = SafeGetIndexedProperty(core, "EcospaceGroupInputs", i);
+                if (group == null) continue;
+                items.Add(new JObject { ["index"] = i, ["name"] = SafeStringProperty(group, "Name") });
+            }
+            return new JObject { ["items"] = items, ["total_count"] = nGroups };
+        }
+
+        private JObject GetEcospaceGroupInput(JObject parameters)
+        {
+            var core = RequireCore();
+            int index = RequiredInt(parameters, "index");
+            var group = SafeGetIndexedProperty(core, "EcospaceGroupInputs", index);
+            if (group == null) throw new EwEMcpException("index_out_of_range", $"Ecospace group input index {index} out of range. Load an Ecospace scenario first.");
+            return new JObject { ["index"] = index, ["name"] = SafeStringProperty(group, "Name"), ["values"] = ReadScalarValues(group, null, false, "ecospace_group_inputs") };
+        }
+
+        private JObject ListEcospaceFleetInputs()
+        {
+            var core = RequireCore();
+            int nFleets = SafeIntProperty(core, "nFleets");
+            var items = new JArray();
+            for (var i = 1; i <= nFleets; i++)
+            {
+                var fleet = SafeGetIndexedProperty(core, "EcospaceFleetInputs", i);
+                if (fleet == null) continue;
+                items.Add(new JObject { ["index"] = i, ["name"] = SafeStringProperty(fleet, "Name") });
+            }
+            return new JObject { ["items"] = items, ["total_count"] = nFleets };
+        }
+
+        private JObject GetEcospaceFleetInput(JObject parameters)
+        {
+            var core = RequireCore();
+            int index = RequiredInt(parameters, "index");
+            var fleet = SafeGetIndexedProperty(core, "EcospaceFleetInputs", index);
+            if (fleet == null) throw new EwEMcpException("index_out_of_range", $"Ecospace fleet input index {index} out of range. Load an Ecospace scenario first.");
+            return new JObject { ["index"] = index, ["name"] = SafeStringProperty(fleet, "Name"), ["values"] = ReadScalarValues(fleet, null, false, "ecospace_fleet_inputs") };
+        }
+
+        private JObject GetEcospaceGroupResults(JObject parameters)
+        {
+            var core = RequireCore();
+            int index = RequiredInt(parameters, "index");
+            var groupCount = SafeIntProperty(core, "nGroups");
+            if (index < 1 || index > groupCount) throw new EwEMcpException("index_out_of_range", $"Ecospace group index {index} outside 1..{groupCount}");
+            var output = SafeGetIndexedProperty(core, "EcospaceGroupOutput", index);
+            if (output == null) throw new EwEMcpException("entity_unavailable", $"Ecospace group output {index} unavailable. Run Ecospace first.");
+            var maxTime = SafeIntProperty(core, "nEcospaceTimeSteps");
+            if (maxTime < 1) throw new EwEMcpException("ecospace_results_unavailable", "Ecospace has no result timesteps.");
+            var start = OptionalInt(parameters, "start_time") ?? 1;
+            var end = OptionalInt(parameters, "end_time") ?? Math.Min(maxTime, start + 119);
+            if (start < 1 || start > maxTime || end < start || end > maxTime)
+                throw new EwEMcpException("time_range_out_of_range", $"Ecospace time range {start}..{end} outside 1..{maxTime}");
+            var variables = OptionalStringArray(parameters, "variables") ?? new[] { "biomass", "relative_biomass" };
+            var series = new JObject();
+            foreach (var variable in variables)
+            {
+                var arr = new JArray();
+                for (var t = start; t <= end; t++)
+                {
+                    object val = null;
+                    switch ((variable ?? string.Empty).Trim().ToLowerInvariant())
+                    {
+                        case "biomass": val = SafeGetIndexedProperty(output, "Biomass", t); break;
+                        case "relative_biomass": val = SafeGetIndexedProperty(output, "RelativeBiomass", t); break;
+                        default: break;
+                    }
+                    arr.Add(new JObject { ["time"] = t, ["value"] = ToJToken(val) });
+                }
+                series[variable] = arr;
+            }
+            return new JObject { ["index"] = index, ["name"] = SafeStringProperty(output, "Name"), ["time_start"] = start, ["time_end"] = end, ["time_steps"] = maxTime, ["series"] = series };
+        }
+
+        private JObject GetEcospaceFleetResults(JObject parameters)
+        {
+            var core = RequireCore();
+            int index = RequiredInt(parameters, "index");
+            var fleetCount = SafeIntProperty(core, "nFleets");
+            if (index < 1 || index > fleetCount) throw new EwEMcpException("index_out_of_range", $"Ecospace fleet index {index} outside 1..{fleetCount}");
+            var output = SafeGetIndexedProperty(core, "EcospaceFleetOutput", index);
+            if (output == null) throw new EwEMcpException("entity_unavailable", $"Ecospace fleet output {index} unavailable. Run Ecospace first.");
+            var maxTime = SafeIntProperty(core, "nEcospaceTimeSteps");
+            if (maxTime < 1) throw new EwEMcpException("ecospace_results_unavailable", "Ecospace has no result timesteps.");
+            var start = OptionalInt(parameters, "start_time") ?? 1;
+            var end = OptionalInt(parameters, "end_time") ?? Math.Min(maxTime, start + 119);
+            if (start < 1 || start > maxTime || end < start || end > maxTime)
+                throw new EwEMcpException("time_range_out_of_range", $"Ecospace time range {start}..{end} outside 1..{maxTime}");
+            var variables = OptionalStringArray(parameters, "variables") ?? new[] { "catch_biomass", "value" };
+            var series = new JObject();
+            foreach (var variable in variables)
+            {
+                var arr = new JArray();
+                for (var t = start; t <= end; t++)
+                {
+                    object val = null;
+                    switch ((variable ?? string.Empty).Trim().ToLowerInvariant())
+                    {
+                        case "catch_biomass": val = SafeGetIndexedProperty(output, "CatchBiomass", t); break;
+                        case "value": val = SafeGetIndexedProperty(output, "Value", t); break;
+                        default: break;
+                    }
+                    arr.Add(new JObject { ["time"] = t, ["value"] = ToJToken(val) });
+                }
+                series[variable] = arr;
+            }
+            return new JObject { ["index"] = index, ["time_start"] = start, ["time_end"] = end, ["time_steps"] = maxTime, ["series"] = series };
+        }
+
+        private JObject GetEcospaceHabitat(JObject parameters)
+        {
+            var core = RequireCore();
+            int index = RequiredInt(parameters, "index");
+            var habitat = SafeGetIndexedProperty(core, "EcospaceHabitats", index);
+            if (habitat == null) throw new EwEMcpException("index_out_of_range", $"Ecospace habitat index {index} out of range");
+            return new JObject { ["index"] = index, ["name"] = SafeStringProperty(habitat, "Name"), ["values"] = ReadScalarValues(habitat, null, false, "ecospace_habitats") };
+        }
+
+        private JObject GetEcospaceMpa(JObject parameters)
+        {
+            var core = RequireCore();
+            int index = RequiredInt(parameters, "index");
+            var mpa = SafeGetIndexedProperty(core, "EcospaceMPAs", index);
+            if (mpa == null) throw new EwEMcpException("index_out_of_range", $"Ecospace MPA index {index} out of range");
+            return new JObject { ["index"] = index, ["name"] = SafeStringProperty(mpa, "Name"), ["values"] = ReadScalarValues(mpa, null, false, "ecospace_mpas") };
+        }
+
+        private JObject GetEcospaceBasemap()
+        {
+            var core = RequireCore();
+            var basemap = SafeGetProperty(core, "EcospaceBasemap");
+            if (basemap == null) throw new EwEMcpException("core_unavailable", "Ecospace basemap not available. Load an Ecospace scenario first.");
+            return new JObject
+            {
+                ["rows"] = SafeIntProperty(basemap, "InRow"),
+                ["cols"] = SafeIntProperty(basemap, "InCol"),
+                ["cell_length"] = SafeJTokenProperty(basemap, "CellLength"),
+                ["cell_size"] = SafeJTokenProperty(basemap, "CellSize"),
+                ["latitude"] = SafeJTokenProperty(basemap, "Latitude"),
+                ["longitude"] = SafeJTokenProperty(basemap, "Longitude"),
+            };
+        }
+
+        private JObject GetEcospaceModelParameters()
+        {
+            var core = RequireCore();
+            var parameters = SafeGetProperty(core, "EcospaceModelParameters");
+            if (parameters == null) throw new EwEMcpException("core_unavailable", "Ecospace model parameters not available. Load an Ecospace scenario first.");
+            return ReadScalarValues(parameters, null, false, "ecospace_model_parameters");
+        }
+
+        private JObject CreateEcospaceScenario(JObject parameters)
+        {
+            var core = RequireCore();
+            var name = RequiredString(parameters, "name");
+            var description = parameters?["description"]?.ToString() ?? string.Empty;
+            var author = parameters?["author"]?.ToString() ?? string.Empty;
+            var contact = parameters?["contact"]?.ToString() ?? string.Empty;
+            int rows = RequiredInt(parameters, "rows");
+            int cols = RequiredInt(parameters, "cols");
+            float lat = RequiredFloat(parameters, "latitude");
+            float lon = RequiredFloat(parameters, "longitude");
+            float cellLength = RequiredFloat(parameters, "cell_length");
+            var method = core.GetType().GetMethod("NewEcospaceScenario", new[] { typeof(string), typeof(string), typeof(string), typeof(string), typeof(int), typeof(int), typeof(float), typeof(float), typeof(float) });
+            if (method == null) throw new EwEMcpException("unsupported_operation", "NewEcospaceScenario not available in this EwE build");
+            bool ok = Convert.ToBoolean(method.Invoke(core, new object[] { name, description, author, contact, rows, cols, lat, lon, cellLength }));
+            if (!ok) throw new EwEMcpException("create_failed", "Failed to create Ecospace scenario");
+            return new JObject { ["created"] = true, ["index"] = SafeIntProperty(core, "ActiveEcospaceScenarioIndex") };
+        }
+
+        private float RequiredFloat(JObject parameters, string name)
+        {
+            var token = parameters?[name];
+            if (token == null) throw new EwEMcpException("missing_parameter", $"Missing required float parameter: {name}");
+            try { return Convert.ToSingle(token); }
+            catch { throw new EwEMcpException("invalid_parameter", $"Parameter {name} must be a number"); }
+        }
+
+        private JObject CopyEcospaceScenario(JObject parameters)
+        {
+            var core = RequireCore();
+            var name = RequiredString(parameters, "name");
+            var description = parameters?["description"]?.ToString() ?? string.Empty;
+            if (SafeIntProperty(core, "ActiveEcospaceScenarioIndex") < 1)
+                throw new EwEMcpException("ecospace_scenario_not_loaded", "Load an Ecospace scenario before copying it.");
+            var method = core.GetType().GetMethod("SaveEcospaceScenarioAs", new[] { typeof(string), typeof(string) });
+            if (method == null) throw new EwEMcpException("unsupported_operation", "SaveEcospaceScenarioAs not available in this EwE build");
+            bool ok = Convert.ToBoolean(method.Invoke(core, new object[] { name, description }));
+            if (!ok) throw new EwEMcpException("copy_failed", "Failed to copy Ecospace scenario");
+            return new JObject { ["copied"] = true, ["index"] = SafeIntProperty(core, "ActiveEcospaceScenarioIndex") };
+        }
+
+        private JObject DeleteEcospaceScenario(JObject parameters)
+        {
+            var core = RequireCore();
+            int index = RequiredInt(parameters, "index");
+            var activeIndex = SafeIntProperty(core, "ActiveEcospaceScenarioIndex");
+            if (index == activeIndex)
+                throw new EwEMcpException("cannot_delete_active_scenario", "Close or load a different Ecospace scenario before deleting this one.");
+            var method = core.GetType().GetMethod("RemoveEcospaceScenario", new[] { typeof(int) });
+            if (method == null) throw new EwEMcpException("unsupported_operation", "Ecospace scenario deletion not supported by this EwE build");
+            bool ok = Convert.ToBoolean(method.Invoke(core, new object[] { index }));
+            return new JObject { ["deleted"] = ok, ["index"] = index };
+        }
+
+        private JObject SaveEcospaceScenario()
+        {
+            var core = RequireCore();
+            var method = core.GetType().GetMethod("SaveEcospaceScenario", new Type[0]);
+            if (method == null) throw new EwEMcpException("unsupported_operation", "SaveEcospaceScenario not available in this EwE build");
+            bool ok = Convert.ToBoolean(method.Invoke(core, null));
+            return new JObject { ["saved"] = ok };
+        }
+
+        // ── Ecotracer Handlers ──────────────────────────────────────────
+
+        private JObject ListEcotracerScenarios()
+        {
+            var core = RequireCore();
+            int count = SafeIntProperty(core, "nEcotracerScenarios");
+            var scenarios = new JArray();
+            for (var i = 1; i <= count; i++)
+            {
+                var scenario = SafeGetIndexedProperty(core, "EcotracerScenarios", i);
+                if (scenario == null) continue;
+                scenarios.Add(new JObject
+                {
+                    ["index"] = i,
+                    ["name"] = SafeStringProperty(scenario, "Name"),
+                    ["description"] = SafeStringProperty(scenario, "Description"),
+                });
+            }
+            return new JObject
+            {
+                ["scenarios"] = scenarios,
+                ["total_count"] = count,
+                ["active_index"] = SafeIntProperty(core, "ActiveEcotracerScenarioIndex"),
+            };
+        }
+
+        private JObject GetEcotracerScenario(JObject parameters)
+        {
+            var core = RequireCore();
+            int index = RequiredInt(parameters, "index");
+            var scenario = SafeGetIndexedProperty(core, "EcotracerScenarios", index);
+            if (scenario == null) throw new EwEMcpException("index_out_of_range", $"Ecotracer scenario index {index} out of range");
+            return new JObject
+            {
+                ["index"] = index,
+                ["name"] = SafeStringProperty(scenario, "Name"),
+                ["description"] = SafeStringProperty(scenario, "Description"),
+                ["author"] = SafeStringProperty(scenario, "Author"),
+                ["contact"] = SafeStringProperty(scenario, "Contact"),
+                ["last_saved"] = SafeStringProperty(scenario, "LastSaved"),
+                ["is_loaded"] = SafeIntProperty(core, "ActiveEcotracerScenarioIndex") == index,
+            };
+        }
+
+        private JObject GetEcotracerRunState()
+        {
+            var core = RequireCore();
+            var sm = SafeGetProperty(core, "StateMonitor");
+            return new JObject
+            {
+                ["has_ecotracer_loaded"] = sm != null && SafeInvokeBool(sm, "HasEcotracerLoaded"),
+                ["has_ecotracer_ran_for_ecosim"] = sm != null && SafeInvokeBool(sm, "HasEcotracerRanForEcosim"),
+                ["has_ecotracer_ran_for_ecospace"] = sm != null && SafeInvokeBool(sm, "HasEcotracerRanForEcospace"),
+                ["is_ecotracer_modified"] = sm != null && SafeInvokeBool(sm, "IsEcotracerModified"),
+                ["active_scenario_index"] = SafeIntProperty(core, "ActiveEcotracerScenarioIndex"),
+            };
+        }
+
+        private JObject GetEcotracerModelParameters()
+        {
+            var core = RequireCore();
+            var parameters = SafeGetProperty(core, "EcotracerModelParameters");
+            if (parameters == null) throw new EwEMcpException("core_unavailable", "Ecotracer model parameters not available");
+            return ReadScalarValues(parameters, null, false, "ecotracer_model_parameters");
+        }
+
+        private JObject ListEcotracerGroupInputs()
+        {
+            var core = RequireCore();
+            int nGroups = SafeIntProperty(core, "nGroups");
+            var items = new JArray();
+            for (var i = 1; i <= nGroups; i++)
+            {
+                var group = SafeGetIndexedProperty(core, "EcotracerGroupInputs", i);
+                if (group == null) continue;
+                items.Add(new JObject { ["index"] = i, ["name"] = SafeStringProperty(group, "Name") });
+            }
+            return new JObject { ["items"] = items, ["total_count"] = nGroups };
+        }
+
+        private JObject GetEcotracerGroupInput(JObject parameters)
+        {
+            var core = RequireCore();
+            int index = RequiredInt(parameters, "index");
+            var group = SafeGetIndexedProperty(core, "EcotracerGroupInputs", index);
+            if (group == null) throw new EwEMcpException("index_out_of_range", $"Ecotracer group input index {index} out of range");
+            return new JObject { ["index"] = index, ["name"] = SafeStringProperty(group, "Name"), ["values"] = ReadScalarValues(group, null, false, "ecotracer_group_inputs") };
+        }
+
+        private JObject GetEcotracerGroupResults(JObject parameters)
+        {
+            var core = RequireCore();
+            int index = RequiredInt(parameters, "index");
+            var results = SafeGetProperty(core, "EcotracerGroupResults");
+            if (results == null) throw new EwEMcpException("core_unavailable", "Ecotracer group results not available. Run Ecosim/Ecospace with Ecotracer enabled first.");
+            int nTimeSteps = SafeIntProperty(core, "nEcosimTimeSteps");
+            if (nTimeSteps < 1) nTimeSteps = SafeIntProperty(core, "nEcospaceTimeSteps");
+            var start = OptionalInt(parameters, "start_time") ?? 1;
+            var end = OptionalInt(parameters, "end_time") ?? Math.Max(nTimeSteps, 1);
+            if (nTimeSteps < 1) throw new EwEMcpException("ecotracer_results_unavailable", "No time steps available for Ecotracer results.");
+            if (start < 1 || start > nTimeSteps || end < start || end > nTimeSteps)
+                throw new EwEMcpException("time_range_out_of_range", $"Time range {start}..{end} outside 1..{nTimeSteps}");
+            var variables = OptionalStringArray(parameters, "variables") ?? new[] { "concentration", "conbio" };
+            var series = new JObject();
+            foreach (var variable in variables)
+            {
+                var arr = new JArray();
+                for (var t = start; t <= end; t++)
+                {
+                    object val = null;
+                    switch ((variable ?? string.Empty).Trim().ToLowerInvariant())
+                    {
+                        case "concentration": val = SafeGetIndexedProperty(results, "Concentration", index, t); break;
+                        case "conbio": val = SafeGetIndexedProperty(results, "ConBio", index, t); break;
+                        default: break;
+                    }
+                    arr.Add(new JObject { ["time"] = t, ["value"] = ToJToken(val) });
+                }
+                series[variable] = arr;
+            }
+            return new JObject { ["index"] = index, ["time_start"] = start, ["time_end"] = end, ["series"] = series };
+        }
+
+        private JObject CreateEcotracerScenario(JObject parameters)
+        {
+            var core = RequireCore();
+            var name = RequiredString(parameters, "name");
+            var description = parameters?["description"]?.ToString() ?? string.Empty;
+            var author = parameters?["author"]?.ToString() ?? string.Empty;
+            var contact = parameters?["contact"]?.ToString() ?? string.Empty;
+            var method = core.GetType().GetMethod("NewEcotracerScenario", new[] { typeof(string), typeof(string), typeof(string), typeof(string) });
+            if (method == null) throw new EwEMcpException("unsupported_operation", "NewEcotracerScenario not available in this EwE build");
+            bool ok = Convert.ToBoolean(method.Invoke(core, new object[] { name, description, author, contact }));
+            if (!ok) throw new EwEMcpException("create_failed", "Failed to create Ecotracer scenario");
+            return new JObject { ["created"] = true, ["index"] = SafeIntProperty(core, "ActiveEcotracerScenarioIndex") };
+        }
+
+        private JObject CopyEcotracerScenario(JObject parameters)
+        {
+            var core = RequireCore();
+            var name = RequiredString(parameters, "name");
+            var description = parameters?["description"]?.ToString() ?? string.Empty;
+            if (SafeIntProperty(core, "ActiveEcotracerScenarioIndex") < 1)
+                throw new EwEMcpException("ecotracer_scenario_not_loaded", "Load an Ecotracer scenario before copying it.");
+            var method = core.GetType().GetMethod("SaveEcotracerScenarioAs", new[] { typeof(string), typeof(string) });
+            if (method == null) throw new EwEMcpException("unsupported_operation", "SaveEcotracerScenarioAs not available in this EwE build");
+            bool ok = Convert.ToBoolean(method.Invoke(core, new object[] { name, description }));
+            if (!ok) throw new EwEMcpException("copy_failed", "Failed to copy Ecotracer scenario");
+            return new JObject { ["copied"] = true, ["index"] = SafeIntProperty(core, "ActiveEcotracerScenarioIndex") };
+        }
+
+        private JObject DeleteEcotracerScenario(JObject parameters)
+        {
+            var core = RequireCore();
+            int index = RequiredInt(parameters, "index");
+            var activeIndex = SafeIntProperty(core, "ActiveEcotracerScenarioIndex");
+            if (index == activeIndex)
+                throw new EwEMcpException("cannot_delete_active_scenario", "Close or load a different Ecotracer scenario before deleting this one.");
+            var method = core.GetType().GetMethod("RemoveEcotracerScenario", new[] { typeof(int) });
+            if (method == null) throw new EwEMcpException("unsupported_operation", "Ecotracer scenario deletion not supported by this EwE build");
+            bool ok = Convert.ToBoolean(method.Invoke(core, new object[] { index }));
+            return new JObject { ["deleted"] = ok, ["index"] = index };
+        }
+
+        private JObject SaveEcotracerScenario()
+        {
+            var core = RequireCore();
+            var method = core.GetType().GetMethod("SaveEcotracerScenario", new Type[0]);
+            if (method == null) throw new EwEMcpException("unsupported_operation", "SaveEcotracerScenario not available in this EwE build");
+            bool ok = Convert.ToBoolean(method.Invoke(core, null));
+            return new JObject { ["saved"] = ok };
+        }
+
+        private JObject CloseEcotracerScenario()
+        {
+            var core = RequireCore();
+            core.GetType().GetMethod("CloseEcotracerScenario")?.Invoke(core, null);
+            return new JObject { ["closed"] = true };
+        }
+
+        // ── MSE Handlers ────────────────────────────────────────────────
+
+        private object SafeGetSubProperty(object parent, string propertyName)
+        {
+            if (parent == null) return null;
+            try
+            {
+                var prop = parent.GetType().GetProperty(propertyName, BindingFlags.Instance | BindingFlags.Public);
+                return prop?.GetValue(parent);
+            }
+            catch { return null; }
+        }
+
+        private JObject RequireMseManager()
+        {
+            var manager = SafeGetProperty(RequireCore(), "MSEManager");
+            if (manager == null) throw new EwEMcpException("core_unavailable", "MSE not available");
+            return JObject.FromObject(new { mse_available = true });
+        }
+
+        private JObject GetMseParameters()
+        {
+            var core = RequireCore();
+            var manager = SafeGetProperty(core, "MSEManager");
+            if (manager == null) throw new EwEMcpException("core_unavailable", "MSE not available");
+            var modelParams = SafeGetProperty(manager, "ModelParameters");
+            if (modelParams == null) throw new EwEMcpException("core_unavailable", "MSE model parameters not available");
+            return ReadScalarValues(modelParams, null, false, "mse_parameters");
+        }
+
+        private JObject ListMseGroupInputs()
+        {
+            var core = RequireCore();
+            var manager = SafeGetProperty(core, "MSEManager");
+            if (manager == null) throw new EwEMcpException("core_unavailable", "MSE not available");
+            int nGroups = SafeIntProperty(core, "nGroups");
+            var items = new JArray();
+            for (var i = 1; i <= nGroups; i++)
+            {
+                var inputCollection = SafeGetProperty(manager, "GroupInputs");
+                var group = SafeGetIndexedProperty(inputCollection, "Item", i);
+                if (group == null) continue;
+                items.Add(new JObject { ["index"] = i, ["name"] = SafeStringProperty(group, "Name") });
+            }
+            return new JObject { ["items"] = items, ["total_count"] = nGroups };
+        }
+
+        private JObject GetMseGroupInput(JObject parameters)
+        {
+            var core = RequireCore();
+            var manager = SafeGetProperty(core, "MSEManager");
+            if (manager == null) throw new EwEMcpException("core_unavailable", "MSE not available");
+            int index = RequiredInt(parameters, "index");
+            var inputCollection = SafeGetProperty(manager, "GroupInputs");
+            var group = SafeGetIndexedProperty(inputCollection, "Item", index);
+            if (group == null) throw new EwEMcpException("index_out_of_range", $"MSE group input index {index} out of range");
+            return new JObject { ["index"] = index, ["name"] = SafeStringProperty(group, "Name"), ["values"] = ReadScalarValues(group, null, false, "mse_group_inputs") };
+        }
+
+        private JObject ListMseFleetInputs()
+        {
+            var core = RequireCore();
+            var manager = SafeGetProperty(core, "MSEManager");
+            if (manager == null) throw new EwEMcpException("core_unavailable", "MSE not available");
+            int nFleets = SafeIntProperty(core, "nFleets");
+            var items = new JArray();
+            for (var i = 1; i <= nFleets; i++)
+            {
+                var inputCollection = SafeGetProperty(manager, "EcopathFleetInputs");
+                var fleet = SafeGetIndexedProperty(inputCollection, "Item", i);
+                if (fleet == null) continue;
+                items.Add(new JObject { ["index"] = i, ["name"] = SafeStringProperty(fleet, "Name") });
+            }
+            return new JObject { ["items"] = items, ["total_count"] = nFleets };
+        }
+
+        private JObject GetMseFleetInput(JObject parameters)
+        {
+            var core = RequireCore();
+            var manager = SafeGetProperty(core, "MSEManager");
+            if (manager == null) throw new EwEMcpException("core_unavailable", "MSE not available");
+            int index = RequiredInt(parameters, "index");
+            var inputCollection = SafeGetProperty(manager, "EcopathFleetInputs");
+            var fleet = SafeGetIndexedProperty(inputCollection, "Item", index);
+            if (fleet == null) throw new EwEMcpException("index_out_of_range", $"MSE fleet input index {index} out of range");
+            return new JObject { ["index"] = index, ["name"] = SafeStringProperty(fleet, "Name"), ["values"] = ReadScalarValues(fleet, null, false, "mse_fleet_inputs") };
+        }
+
+        private JObject GetMseRunState()
+        {
+            var core = RequireCore();
+            var manager = SafeGetProperty(core, "MSEManager");
+            var sm = SafeGetProperty(core, "StateMonitor");
+            string searchMode = "not_in_search";
+            if (sm != null)
+            {
+                var mode = SafeInvoke(sm, "SearchMode");
+                if (mode != null) searchMode = mode.ToString();
+            }
+            return new JObject
+            {
+                ["mse_available"] = manager != null,
+                ["is_running"] = manager != null && SafeBoolProperty(manager, "IsRunning"),
+                ["is_connected"] = manager != null && SafeBoolProperty(manager, "isConnected"),
+                ["search_mode"] = searchMode,
+            };
+        }
+
+        private JObject RunMse()
+        {
+            var core = RequireCore();
+            var manager = SafeGetProperty(core, "MSEManager");
+            if (manager == null) throw new EwEMcpException("core_unavailable", "MSE not available");
+            var method = manager.GetType().GetMethod("Run", new Type[0]);
+            if (method == null) throw new EwEMcpException("core_unavailable", "MSE Run method not available");
+            bool ok = Convert.ToBoolean(method.Invoke(manager, null));
+            return new JObject { ["started"] = ok };
+        }
+
+        private JObject StopMse()
+        {
+            var core = RequireCore();
+            var manager = SafeGetProperty(core, "MSEManager");
+            if (manager == null) throw new EwEMcpException("core_unavailable", "MSE not available");
+            manager.GetType().GetMethod("StopRun")?.Invoke(manager, null);
+            return new JObject { ["stopped"] = true };
+        }
+
+        private JObject GetMseGroupResults(JObject parameters)
+        {
+            var core = RequireCore();
+            var manager = SafeGetProperty(core, "MSEManager");
+            if (manager == null) throw new EwEMcpException("core_unavailable", "MSE not available");
+            int index = RequiredInt(parameters, "index");
+            var outputCollection = SafeGetProperty(manager, "GroupOutputs");
+            if (outputCollection == null) throw new EwEMcpException("core_unavailable", "MSE group outputs not available. Run MSE first.");
+            var groupOutput = SafeGetIndexedProperty(outputCollection, "Item", index);
+            if (groupOutput == null) throw new EwEMcpException("index_out_of_range", $"MSE group output index {index} out of range");
+            return new JObject { ["index"] = index, ["values"] = ReadScalarValues(groupOutput, null, false, "mse_group_outputs") };
+        }
+
+        private JObject GetMseFleetResults(JObject parameters)
+        {
+            var core = RequireCore();
+            var manager = SafeGetProperty(core, "MSEManager");
+            if (manager == null) throw new EwEMcpException("core_unavailable", "MSE not available");
+            int index = RequiredInt(parameters, "index");
+            var outputCollection = SafeGetProperty(manager, "FleetOutputs");
+            if (outputCollection == null) throw new EwEMcpException("core_unavailable", "MSE fleet outputs not available. Run MSE first.");
+            var fleetOutput = SafeGetIndexedProperty(outputCollection, "Item", index);
+            if (fleetOutput == null) throw new EwEMcpException("index_out_of_range", $"MSE fleet output index {index} out of range");
+            return new JObject { ["index"] = index, ["values"] = ReadScalarValues(fleetOutput, null, false, "mse_fleet_outputs") };
+        }
+
+        // ── Monte Carlo Handlers ────────────────────────────────────────
+
+        private JObject GetMonteCarloParameters()
+        {
+            var core = RequireCore();
+            var mc = SafeGetProperty(core, "EcosimMonteCarlo");
+            if (mc == null) throw new EwEMcpException("core_unavailable", "Monte Carlo not available");
+            return new JObject
+            {
+                ["n_trials"] = SafeIntProperty(mc, "nTrials"),
+                ["is_best_fit"] = SafeBoolProperty(mc, "IsBestFit"),
+                ["retain_fits"] = SafeBoolProperty(mc, "RetainFits"),
+                ["include_fpenalty"] = SafeBoolProperty(mc, "IncludeFpenalty"),
+                ["is_running"] = SafeBoolProperty(mc, "IsRunning"),
+            };
+        }
+
+        private JObject ListMonteCarloGroups()
+        {
+            var core = RequireCore();
+            var mc = SafeGetProperty(core, "EcosimMonteCarlo");
+            if (mc == null) throw new EwEMcpException("core_unavailable", "Monte Carlo not available");
+            int nGroups = SafeIntProperty(core, "nGroups");
+            var items = new JArray();
+            var groups = SafeGetProperty(mc, "Groups");
+            for (var i = 1; i <= nGroups; i++)
+            {
+                var group = SafeGetIndexedProperty(groups, "Item", i);
+                if (group == null) continue;
+                items.Add(new JObject { ["index"] = i, ["name"] = SafeStringProperty(group, "Name") });
+            }
+            return new JObject { ["items"] = items, ["total_count"] = nGroups };
+        }
+
+        private JObject GetMonteCarloGroup(JObject parameters)
+        {
+            var core = RequireCore();
+            var mc = SafeGetProperty(core, "EcosimMonteCarlo");
+            if (mc == null) throw new EwEMcpException("core_unavailable", "Monte Carlo not available");
+            int index = RequiredInt(parameters, "index");
+            var groups = SafeGetProperty(mc, "Groups");
+            var group = SafeGetIndexedProperty(groups, "Item", index);
+            if (group == null) throw new EwEMcpException("index_out_of_range", $"Monte Carlo group index {index} out of range");
+            return new JObject { ["index"] = index, ["name"] = SafeStringProperty(group, "Name"), ["values"] = ReadScalarValues(group, null, false, "monte_carlo_groups") };
+        }
+
+        private JObject GetMonteCarloRunState()
+        {
+            var core = RequireCore();
+            var mc = SafeGetProperty(core, "EcosimMonteCarlo");
+            var sm = SafeGetProperty(core, "StateMonitor");
+            string searchMode = "not_in_search";
+            if (sm != null)
+            {
+                var mode = SafeInvoke(sm, "SearchMode");
+                if (mode != null) searchMode = mode.ToString();
+            }
+            return new JObject
+            {
+                ["monte_carlo_available"] = mc != null,
+                ["is_running"] = mc != null && SafeBoolProperty(mc, "IsRunning"),
+                ["is_best_fit"] = mc != null && SafeBoolProperty(mc, "IsBestFit"),
+                ["search_mode"] = searchMode,
+            };
+        }
+
+        private JObject RunMonteCarlo()
+        {
+            var core = RequireCore();
+            var mc = SafeGetProperty(core, "EcosimMonteCarlo");
+            if (mc == null) throw new EwEMcpException("core_unavailable", "Monte Carlo not available");
+            var method = mc.GetType().GetMethod("Run", new Type[0]);
+            if (method == null) throw new EwEMcpException("core_unavailable", "Monte Carlo Run method not available");
+            bool ok = Convert.ToBoolean(method.Invoke(mc, null));
+            return new JObject { ["started"] = ok };
+        }
+
+        private JObject StopMonteCarlo()
+        {
+            var core = RequireCore();
+            var mc = SafeGetProperty(core, "EcosimMonteCarlo");
+            if (mc == null) throw new EwEMcpException("core_unavailable", "Monte Carlo not available");
+            var innerModel = SafeGetProperty(mc, "m_mc");
+            if (innerModel != null)
+            {
+                innerModel.GetType().GetProperty("StopTrial")?.SetValue(innerModel, true);
+            }
+            else
+            {
+                mc.GetType().GetMethod("StopRun", new[] { typeof(int) })?.Invoke(mc, new object[] { -1 });
+            }
+            return new JObject { ["stopped"] = true };
+        }
+
+        // ── Plugin Diagnostics ───────────────────────────────────────────
+
+        private JObject GetInstalledPlugins()
+        {
+            var core = RequireCore();
+            var pluginManager = SafeGetProperty(core, "PluginManager");
+            if (pluginManager == null) throw new EwEMcpException("core_unavailable", "Plugin manager not available");
+            var plugins = new JArray();
+            try
+            {
+                var getPluginsMethod = pluginManager.GetType().GetMethod("GetPlugins");
+                if (getPluginsMethod != null)
+                {
+                    var iPluginType = getPluginsMethod.ReturnType.IsGenericType
+                        ? getPluginsMethod.ReturnType.GetGenericArguments().FirstOrDefault()
+                        : null;
+                    if (iPluginType == null)
+                    {
+                        var asm = pluginManager.GetType().Assembly;
+                        iPluginType = asm.GetTypes().FirstOrDefault(t => t.Name == "IPlugin");
+                    }
+                    if (iPluginType != null)
+                    {
+                        var pluginCollection = getPluginsMethod.Invoke(pluginManager, new object[] { iPluginType });
+                        if (pluginCollection is System.Collections.IEnumerable enumerable)
+                        {
+                            foreach (var plugin in enumerable)
+                            {
+                                plugins.Add(new JObject
+                                {
+                                    ["name"] = SafeStringProperty(plugin, "Name"),
+                                    ["description"] = SafeStringProperty(plugin, "Description"),
+                                    ["author"] = SafeStringProperty(plugin, "Author"),
+                                    ["contact"] = SafeStringProperty(plugin, "Contact"),
+                                    ["type"] = plugin.GetType().Name,
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+            catch { }
+            return new JObject { ["plugins"] = plugins, ["total_count"] = plugins.Count };
         }
 
         private JObject CreateEcosimScenario(JObject parameters)
@@ -2069,7 +2963,22 @@ namespace EwE_MCP_Plugin
                     string.Equals(type, "capture_view", StringComparison.OrdinalIgnoreCase) ||
                     string.Equals(type, "create_ecosim_scenario", StringComparison.OrdinalIgnoreCase) ||
                     string.Equals(type, "copy_ecosim_scenario", StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(type, "delete_ecosim_scenario", StringComparison.OrdinalIgnoreCase))
+                    string.Equals(type, "delete_ecosim_scenario", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(type, "run_ecospace", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(type, "stop_ecospace", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(type, "create_ecospace_scenario", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(type, "copy_ecospace_scenario", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(type, "delete_ecospace_scenario", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(type, "save_ecospace_scenario", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(type, "create_ecotracer_scenario", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(type, "copy_ecotracer_scenario", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(type, "delete_ecotracer_scenario", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(type, "save_ecotracer_scenario", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(type, "close_ecotracer_scenario", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(type, "run_mse", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(type, "stop_mse", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(type, "run_monte_carlo", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(type, "stop_monte_carlo", StringComparison.OrdinalIgnoreCase))
                 {
                     throw new EwEMcpException("blocked_batch_command", $"{type} is not allowed in batch");
                 }
@@ -2632,6 +3541,30 @@ namespace EwE_MCP_Plugin
                 case "ecotracer_group_input":
                 case "ecotracer_group_inputs":
                     return "ecotracer_group_inputs";
+                case "ecotracer_model_parameter":
+                case "ecotracer_model_parameters":
+                    return "ecotracer_model_parameters";
+                case "ecotracer_group_output":
+                case "ecotracer_group_outputs":
+                    return "ecotracer_group_outputs";
+                case "mse_parameter":
+                case "mse_parameters":
+                    return "mse_parameters";
+                case "mse_group_input":
+                case "mse_group_inputs":
+                    return "mse_group_inputs";
+                case "mse_fleet_input":
+                case "mse_fleet_inputs":
+                    return "mse_fleet_inputs";
+                case "mse_group_output":
+                case "mse_group_outputs":
+                    return "mse_group_outputs";
+                case "mse_fleet_output":
+                case "mse_fleet_outputs":
+                    return "mse_fleet_outputs";
+                case "monte_carlo_group":
+                case "monte_carlo_groups":
+                    return "monte_carlo_groups";
                 case "taxon":
                 case "taxa":
                     return "taxa";
@@ -2674,6 +3607,20 @@ namespace EwE_MCP_Plugin
                     return SafeIntProperty(core, "nRegions");
                 case "ecotracer_scenarios":
                     return SafeIntProperty(core, "nEcotracerScenarios");
+                case "ecotracer_model_parameters":
+                    return 1;
+                case "ecotracer_group_outputs":
+                    return SafeIntProperty(core, "nGroups");
+                case "mse_parameters":
+                    return 1;
+                case "mse_group_inputs":
+                case "mse_group_outputs":
+                    return SafeIntProperty(core, "nGroups");
+                case "mse_fleet_inputs":
+                case "mse_fleet_outputs":
+                    return SafeIntProperty(core, "nFleets");
+                case "monte_carlo_groups":
+                    return SafeIntProperty(core, "nGroups");
                 case "taxa":
                     return SafeIntProperty(core, "nTaxon");
                 default:
@@ -2725,6 +3672,22 @@ namespace EwE_MCP_Plugin
                     return "EcotracerScenarios";
                 case "ecotracer_group_inputs":
                     return "EcotracerGroupInputs";
+                case "ecotracer_model_parameters":
+                    return "EcotracerModelParameters";
+                case "ecotracer_group_outputs":
+                    return "EcotracerGroupResults";
+                case "mse_parameters":
+                    return "MSEManager.ModelParameters";
+                case "mse_group_inputs":
+                    return "MSEManager.GroupInputs";
+                case "mse_fleet_inputs":
+                    return "MSEManager.EcopathFleetInputs";
+                case "mse_group_outputs":
+                    return "MSEManager.GroupOutputs";
+                case "mse_fleet_outputs":
+                    return "MSEManager.FleetOutputs";
+                case "monte_carlo_groups":
+                    return "EcosimMonteCarlo.Groups";
                 case "taxa":
                     return "Taxon";
                 default:

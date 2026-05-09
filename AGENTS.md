@@ -123,7 +123,20 @@ EWE_MCP_TOKEN=ewe-mcp-local-dev \
 uv run ewe-mcp
 ```
 
-The MCP server exposes tools backed by the running EwE plugin. Current main-branch tools include diagnostics, model load/save_as/close, full database metadata via `get_model_info`, change-state utilities (`has_changes`, `discard_changes`), Ecopath group/fleet reads, Ecopath control tools (`run_ecopath` with balancing state, `get_ecopath_run_state`, `get_ecopath_stats`, `get_ecopath_group_diagnostics`, `get_ecopath_fleet_diagnostics`, `export_ecopath_results`), generic entity/value reads (which seamlessly expose stanzas, full diet matrices, detritus fate, and Ecopath balancing diagnostics), indexed value reads/writes such as `DietComp(prey)` and `Landings(group)`, Ecosim scenario load/create/copy/delete/save, Ecosim run state and `wait_for_ecosim_completion` polling, Ecosim group/fleet inputs, Ecosim group/fleet result time-series, generic `set_values` across all domains, UI command invocation, navigation through `list_navigation_nodes`/`navigate_to_node`/`get_active_view`, view capture through `capture_view`/`save_screenshot`, batching, and a disabled-by-default eval helper.
+The MCP server exposes tools backed by the running EwE plugin. Current tools include:
+
+- **Diagnostics:** `ping`, `diagnose`, `get_ewe_info`, `get_runtime_state`, `get_message_log`, `get_core_counters`, `get_installed_plugins`
+- **Model lifecycle:** `load_model`, `save_model`, `save_model_as`, `close_model`, `get_model_info`, `has_changes`, `discard_changes`
+- **Ecopath:** `run_ecopath`, `get_ecopath_run_state`, `get_ecopath_stats`, `get_ecopath_group_diagnostics`, `get_ecopath_fleet_diagnostics`, `export_ecopath_results`, `list_ecopath_groups`, `get_ecopath_group`, `list_ecopath_fleets`, `get_ecopath_fleet`
+- **Ecosim:** `list_ecosim_scenarios`, `get_ecosim_scenario`, `load_ecosim_scenario`, `create_ecosim_scenario`, `copy_ecosim_scenario`, `delete_ecosim_scenario`, `save_ecosim_scenario`, `get_ecosim_run_state`, `wait_for_ecosim_completion`, `run_ecosim`, `stop_ecosim`, `list_ecosim_group_inputs`, `get_ecosim_group_input`, `list_ecosim_fleet_inputs`, `get_ecosim_fleet_input`, `get_ecosim_group_results`, `get_ecosim_fleet_results`, `export_ecosim_results`
+- **Ecospace:** `list_ecospace_scenarios`, `get_ecospace_scenario`, `load_ecospace_scenario`, `get_ecospace_run_state`, `run_ecospace`, `stop_ecospace`, `list_ecospace_group_inputs`, `get_ecospace_group_input`, `list_ecospace_fleet_inputs`, `get_ecospace_fleet_input`, `get_ecospace_group_results`, `get_ecospace_fleet_results`, `list_ecospace_habitats`, `get_ecospace_habitat`, `list_ecospace_mpas`, `get_ecospace_mpa`, `get_ecospace_basemap`, `get_ecospace_model_parameters`, `create_ecospace_scenario`, `copy_ecospace_scenario`, `delete_ecospace_scenario`, `save_ecospace_scenario`, `wait_for_ecospace_completion`
+- **Ecotracer:** `list_ecotracer_scenarios`, `get_ecotracer_scenario`, `load_ecotracer_scenario`, `get_ecotracer_run_state`, `get_ecotracer_model_parameters`, `list_ecotracer_group_inputs`, `get_ecotracer_group_input`, `get_ecotracer_group_results`, `create_ecotracer_scenario`, `copy_ecotracer_scenario`, `delete_ecotracer_scenario`, `save_ecotracer_scenario`, `close_ecotracer_scenario`
+- **MSE:** `get_mse_parameters`, `list_mse_group_inputs`, `get_mse_group_input`, `list_mse_fleet_inputs`, `get_mse_fleet_input`, `get_mse_run_state`, `run_mse`, `stop_mse`, `get_mse_group_results`, `get_mse_fleet_results`
+- **Monte Carlo:** `get_monte_carlo_parameters`, `list_monte_carlo_groups`, `get_monte_carlo_group`, `get_monte_carlo_run_state`, `run_monte_carlo`, `stop_monte_carlo`
+- **Generic entity/value:** `list_domains`, `list_entities`, `get_entity`, `list_variables`, `get_variable_metadata`, `get_values`, `validate_values`, `get_indexed_value`, `validate_indexed_value`, `set_values`, `set_indexed_value`
+- **Navigation/UI:** `list_navigation_nodes`, `navigate_to_node`, `get_active_view`, `invoke_ui_command`, `list_ui_commands`, `refresh_ui`, `capture_view`, `save_screenshot`
+- **Batching:** `batch_commands`
+- **Eval (disabled by default):** `execute_ewe_code`
 
 For view capture tools (`capture_view` and `save_screenshot`), prefer using data-reading tools to extract tabular data, and reserve view capture for graphs, charts, and spatial visualizations.
 
@@ -155,7 +168,7 @@ EWE_LIVE_TESTS=1 \
 uv run pytest
 ```
 
-Expected local baseline with live tests skipped is currently `20 passed, 42 skipped`.
+Expected local baseline with live tests skipped is currently `24 passed, 57 skipped`.
 
 The sample model (`tests/fixtures/Tampa_Bay.EwEmdb`) is bundled under the same GPL-3.0 license as EwE and does not require a separate `EWE_MODEL_PATH` environment variable.
 
@@ -165,12 +178,14 @@ Prefer testing mutations against copied models. If you mutate the shared sample 
 
 ## Safety Rules
 - Keep `execute_ewe_code` disabled unless the user explicitly asks for it and understands the risk.
-- Do not batch `execute_ewe_code`, model-closing operations, or destructive Ecosim scenario management.
+- Do not batch `execute_ewe_code`, model-closing operations, or destructive scenario management (Ecosim, Ecospace, Ecotracer).
 - Use `validate_values` before `set_values` when possible.
 - Value reads/writes navigate by default through `get_values`, `get_indexed_value`, `set_values`, and `set_indexed_value`; pass `navigate=False` for quiet/background access, batches, or batch-like workflows to avoid UI flicker.
 - Use `discard_changes` only as an explicit cleanup step after test mutations have been restored; it clears EwE's dirty flag but does not physically revert values.
 - For model-changing workflows, prefer `save_model_as` to a temporary/copy path instead of overwriting the shared model.
 - `export_ecopath_results` validates that the path has a `.csv` or `.txt` extension and rejects directory traversal (`..`).
+- Ecotracer runs as part of Ecosim/Ecospace when `ContaminantTracing` is enabled — there is no standalone `run_ecotracer` command.
+- MSE and Monte Carlo are configured within the Ecosim scenario context; there are no scenario management commands for them.
 - Record what you changed and what you restored in your final message.
 
 ## Troubleshooting
