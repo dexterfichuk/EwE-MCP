@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "ewe-mcp": {
+      "command": "uv",
+      "args": ["run", "ewe-mcp"],
+      "env": {
+        "EWE_MCP_TOKEN": "ewe-mcp-local-dev",
+        "EWE_MCP_HOST": "127.0.0.1",
+        "EWE_MCP_PORT": "19877"
+      },
+      "cwd": "/Users/dexterfichuk/Projects/EwE-MCP",
+      "trust": true
+    }
+  }
+}
