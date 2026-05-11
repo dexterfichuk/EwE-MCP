@@ -208,7 +208,7 @@ SSHPASS=... ./scripts/vm-live-smoke.sh
 Current local test expectation:
 
 ```text
-24 passed, 57 skipped
+29 passed, 61 skipped
 ```
 
 The skipped tests are live EwE integration tests. Run them only when the VM plugin is deployed, EwE is launched, and a tunnel or direct connection is configured.
@@ -260,7 +260,7 @@ uv run pytest
 Expected baseline at the time of this update:
 
 ```text
-24 passed, 57 skipped
+29 passed, 61 skipped
 ```
 
 ### 3. VM Environment Variables
@@ -504,9 +504,9 @@ PY
 - Implemented view capture:
   - `capture_view` (returns inline image)
   - `save_screenshot` (saves to host)
-  - `export_active_plot` (pending) ([#35](https://github.com/dexterfichuk/EwE-MCP/issues/35))
-- Improve command catalog with command grouping, enabled state, checked state, and descriptions. ([#36](https://github.com/dexterfichuk/EwE-MCP/issues/36))
-- Add prompt templates for common workflows. ([#37](https://github.com/dexterfichuk/EwE-MCP/issues/37))
+  - `export_active_plot` ✓ — extracts chart data (series names, X/Y data points, axis labels) from ZedGraph controls via reflection ([#35](https://github.com/dexterfichuk/EwE-MCP/issues/35))
+- ~~Improve command catalog with command grouping, enabled state, checked state, and descriptions.~~ ✓ Added `is_available`, `status`, `is_invoking` fields to `list_ui_commands` ([#36](https://github.com/dexterfichuk/EwE-MCP/issues/36))
+- ~~Add prompt templates for common workflows.~~ ✓ Added `balance_model`, `run_ecosim_scenario`, `compare_scenarios`, `export_report` prompts ([#37](https://github.com/dexterfichuk/EwE-MCP/issues/37))
   - balance a model
   - run Ecosim scenario
   - compare scenarios

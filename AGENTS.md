@@ -62,8 +62,10 @@ Build the plugin on the Windows VM, deploy it into EwE's plugin folder, and laun
 Important details:
 - `deploy-built-plugin-vm.sh` stops `ewe6.exe` by default so Windows releases the plugin DLL.
 - Do not launch EwE directly with SSH `Start-Process`; it can start in the SSH service session and exit before the socket stays available.
+- `launch-ewe-vm.sh` also starts an interactive dialog sweeper for a short window (`EWE_VM_DIALOG_WATCH_SECONDS`, default `300`) so EwE modal error dialogs with an `OK` button do not block live tests.
 - A good launch reports `TcpTestSucceeded True` for `127.0.0.1:9877`.
 - Plugin logs are on the VM at `%APPDATA%\Ecopath with Ecosim\EwE_MCP_Plugin.log`.
+- Dialog sweeper dismissals are logged at `%APPDATA%\Ecopath with Ecosim\EwE_MCP_DialogSweeper.log`.
 
 ## Connect Through A Tunnel
 The plugin binds to VM localhost, so connect from macOS with an SSH tunnel:
@@ -125,7 +127,7 @@ uv run ewe-mcp
 
 The MCP server exposes tools backed by the running EwE plugin. Current tools include:
 
-- **Diagnostics:** `ping`, `diagnose`, `get_ewe_info`, `get_runtime_state`, `get_message_log`, `get_core_counters`, `get_installed_plugins`
+- **Diagnostics:** `ping`, `diagnose`, `get_ewe_info`, `get_runtime_state`, `get_message_log`, `get_core_counters`, `get_installed_plugins`, `export_active_plot`
 - **Model lifecycle:** `load_model`, `save_model`, `save_model_as`, `close_model`, `get_model_info`, `has_changes`, `discard_changes`
 - **Ecopath:** `run_ecopath`, `get_ecopath_run_state`, `get_ecopath_stats`, `get_ecopath_group_diagnostics`, `get_ecopath_fleet_diagnostics`, `export_ecopath_results`, `list_ecopath_groups`, `get_ecopath_group`, `list_ecopath_fleets`, `get_ecopath_fleet`
 - **Ecosim:** `list_ecosim_scenarios`, `get_ecosim_scenario`, `load_ecosim_scenario`, `create_ecosim_scenario`, `copy_ecosim_scenario`, `delete_ecosim_scenario`, `save_ecosim_scenario`, `get_ecosim_run_state`, `wait_for_ecosim_completion`, `run_ecosim`, `stop_ecosim`, `list_ecosim_group_inputs`, `get_ecosim_group_input`, `list_ecosim_fleet_inputs`, `get_ecosim_fleet_input`, `get_ecosim_group_results`, `get_ecosim_fleet_results`, `export_ecosim_results`
@@ -137,8 +139,9 @@ The MCP server exposes tools backed by the running EwE plugin. Current tools inc
 - **Navigation/UI:** `list_navigation_nodes`, `navigate_to_node`, `get_active_view`, `invoke_ui_command`, `list_ui_commands`, `refresh_ui`, `capture_view`, `save_screenshot`
 - **Batching:** `batch_commands`
 - **Eval (disabled by default):** `execute_ewe_code`
+- **Prompt templates:** `balance_model`, `run_ecosim_scenario`, `compare_scenarios`, `export_report`
 
-For view capture tools (`capture_view` and `save_screenshot`), prefer using data-reading tools to extract tabular data, and reserve view capture for graphs, charts, and spatial visualizations.
+For view capture tools (`capture_view` and `save_screenshot`), prefer using data-reading tools to extract tabular data, and reserve view capture for graphs, charts, and spatial visualizations. For extracting numerical data from charts, use `export_active_plot` which returns series names, X/Y data points, and axis labels as structured JSON.
 
 Value tools navigate EwE's GUI by default so humans can see what the agent is inspecting or editing:
 
@@ -172,7 +175,7 @@ Expected local baseline with live tests skipped is currently `24 passed, 57 skip
 
 The sample model (`tests/fixtures/Tampa_Bay.EwEmdb`) is bundled under the same GPL-3.0 license as EwE and does not require a separate `EWE_MODEL_PATH` environment variable.
 
-Expected full live result on current `main` is `61 passed, 1 skipped`.
+Expected full live result on current `main` is `83 passed, 5 skipped`.
 
 Prefer testing mutations against copied models. If you mutate the shared sample model, restore the original value in a `finally` block and call `discard_changes` so EwE clears the unsaved-change flag without saving over the sample model. `discard_changes` only clears dirty flags; it does not physically revert values.
 
@@ -191,6 +194,7 @@ Prefer testing mutations against copied models. If you mutate the shared sample 
 ## Troubleshooting
 - DLL copy fails: EwE is probably still running; rerun `./scripts/deploy-built-plugin-vm.sh`.
 - Port is closed after launch: inspect `%APPDATA%\Ecopath with Ecosim\EwE_MCP_Plugin.log` on the VM.
+- EwE modal dialog blocks live tests: run `./scripts/dismiss-ewe-dialogs-vm.sh` or relaunch with `./scripts/launch-ewe-vm.sh`; the launch helper starts the same sweeper automatically.
 - Python cannot connect: confirm the tunnel, `EWE_MCP_HOST`, `EWE_MCP_PORT`, and token.
 - EwE exits after launch: use `./scripts/launch-ewe-vm.sh`, not direct SSH GUI launch.
 - SSH password auth flakes: retry with explicit options: `-o PreferredAuthentications=password -o PubkeyAuthentication=no`.

@@ -89,7 +89,13 @@ Launch EwE in the VM's interactive desktop session, then smoke-test the live plu
 ./scripts/vm-live-smoke.sh
 ```
 
-Launching through an interactive scheduled task is intentional: starting the GUI directly from the SSH service session can exit before the socket stays available.
+Launching through an interactive scheduled task is intentional: starting the GUI directly from the SSH service session can exit before the socket stays available. The launch helper also starts a short-lived EwE dialog sweeper so modal EwE error dialogs with an `OK` button do not block live tests. If a dialog is already blocking the VM, run:
+
+```bash
+./scripts/dismiss-ewe-dialogs-vm.sh
+```
+
+Set `EWE_VM_DIALOG_WATCH_SECONDS` to change how long the sweeper watches. Dismissals are logged at `%APPDATA%\Ecopath with Ecosim\EwE_MCP_DialogSweeper.log` on the VM.
 
 The live Ecopath read-only smoke path has been verified with:
 

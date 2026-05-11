@@ -426,6 +426,8 @@ namespace EwE_MCP_Plugin
                     return OnUiThread(RefreshUI);
                 case "capture_view":
                     return OnUiThread(() => CaptureView(request.Params));
+                case "export_active_plot":
+                    return OnUiThread(() => ExportActivePlot(request.Params));
                 case "set_values":
                     return OnUiThread(() => SetValues(request.Params));
                 case "set_indexed_value":
@@ -2333,7 +2335,10 @@ namespace EwE_MCP_Plugin
                         ["name"] = cmd.Name,
                         ["description"] = cmd.Description,
                         ["enabled"] = cmd.Enabled,
-                        ["checked"] = cmd.Checked
+                        ["checked"] = cmd.Checked,
+                        ["is_available"] = cmd.IsAvailable,
+                        ["status"] = cmd.Status,
+                        ["is_invoking"] = SafeBoolProperty(cmd, "IsInvoking")
                     });
                 }
             }
@@ -4218,7 +4223,15 @@ namespace EwE_MCP_Plugin
                 var property = obj.GetType()
                     .GetProperties(BindingFlags.Instance | BindingFlags.Public)
                     .FirstOrDefault(p => p.Name == propertyName && p.GetIndexParameters().Length == 0);
-                return property?.GetValue(obj, null);
+                if (property != null)
+                {
+                    return property.GetValue(obj, null);
+                }
+
+                var field = obj.GetType()
+                    .GetFields(BindingFlags.Instance | BindingFlags.Public)
+                    .FirstOrDefault(f => f.Name == propertyName);
+                return field?.GetValue(obj);
             }
             catch
             {
@@ -4231,7 +4244,14 @@ namespace EwE_MCP_Plugin
             if (obj == null) return null;
             try
             {
-                var prop = obj.GetType().GetProperty(propertyName, BindingFlags.Instance | BindingFlags.Public);
+                var prop = obj.GetType()
+                    .GetProperties(BindingFlags.Instance | BindingFlags.Public)
+                    .FirstOrDefault(p =>
+                    {
+                        if (p.Name != propertyName) return false;
+                        var parameters = p.GetIndexParameters();
+                        return parameters.Length == 1 && parameters[0].ParameterType == typeof(int);
+                    });
                 if (prop == null) return null;
                 return prop.GetValue(obj, new object[] { index });
             }
@@ -4410,6 +4430,245 @@ namespace EwE_MCP_Plugin
             try
             {
                 return Math.Abs(Convert.ToDouble(value)) > 0.0000001;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private JObject ExportActivePlot(JObject parameters)
+        {
+            var target = OptionalString(parameters, "target") ?? "auto";
+            Control captureTarget = ResolveCaptureTarget(target);
+            if (captureTarget == null)
+            {
+                throw new EwEMcpException("capture_unavailable", "No EwE window is available for plot export. Ensure EwE is running with a model loaded.");
+            }
+
+            var charts = FindZedGraphControls(captureTarget);
+            if (charts.Count == 0)
+            {
+                return new JObject
+                {
+                    ["found"] = false,
+                    ["suggestion"] = "No ZedGraph chart control found in the active view. Use capture_view for maps and other visuals."
+                };
+            }
+
+            return ExtractChartData(charts);
+        }
+
+        private static List<object> FindZedGraphControls(Control root)
+        {
+            var charts = new List<object>();
+            FindZedGraphControls(root, charts);
+            return charts;
+        }
+
+        private static void FindZedGraphControls(Control root, List<object> charts)
+        {
+            if (root == null) return;
+
+            if (root.GetType().Name.Contains("ZedGraphControl"))
+            {
+                charts.Add(root);
+            }
+
+            foreach (Control child in root.Controls)
+            {
+                FindZedGraphControls(child, charts);
+            }
+        }
+
+        private JObject ExtractChartData(List<object> charts)
+        {
+            var panesToInspect = new List<Tuple<int, object>>();
+            for (int chartIndex = 0; chartIndex < charts.Count; chartIndex++)
+            {
+                foreach (var pane in GetZedGraphPanes(charts[chartIndex]))
+                {
+                    panesToInspect.Add(Tuple.Create(chartIndex, pane));
+                }
+            }
+
+            if (panesToInspect.Count == 0)
+            {
+                return new JObject
+                {
+                    ["found"] = true,
+                    ["error"] = "Could not access any GraphPane on the chart control."
+                };
+            }
+
+            var panes = new JArray();
+            var series = new JArray();
+
+            for (int paneIndex = 0; paneIndex < panesToInspect.Count; paneIndex++)
+            {
+                panes.Add(ExtractPaneData(panesToInspect[paneIndex].Item2, paneIndex, panesToInspect[paneIndex].Item1, series));
+            }
+
+            var firstPane = panes.Count > 0 ? panes[0] as JObject : null;
+            if (series.Count == 0)
+            {
+                return new JObject
+                {
+                    ["found"] = false,
+                    ["suggestion"] = "A ZedGraph chart control was found, but no extractable curve series were present. Use capture_view for visual-only charts.",
+                    ["chart_count"] = charts.Count,
+                    ["pane_count"] = panes.Count,
+                    ["panes"] = panes
+                };
+            }
+
+            return new JObject
+            {
+                ["found"] = true,
+                ["title"] = firstPane?["title"] ?? "",
+                ["x_label"] = firstPane?["x_label"] ?? "",
+                ["y_label"] = firstPane?["y_label"] ?? "",
+                ["chart_count"] = charts.Count,
+                ["pane_count"] = panes.Count,
+                ["panes"] = panes,
+                ["series_count"] = series.Count,
+                ["series"] = series
+            };
+        }
+
+        private static List<object> GetZedGraphPanes(object zgc)
+        {
+            var panes = new List<object>();
+            var seen = new HashSet<object>();
+
+            var masterPane = SafeGetProperty(zgc, "MasterPane");
+            var paneList = SafeGetProperty(masterPane, "PaneList");
+            int paneCount = SafeCount(paneList);
+            for (int i = 0; i < paneCount; i++)
+            {
+                AddPaneIfNew(panes, seen, SafeGetPropertyWithIndex(paneList, "Item", i));
+            }
+
+            AddPaneIfNew(panes, seen, SafeGetProperty(zgc, "GraphPane"));
+            return panes;
+        }
+
+        private static void AddPaneIfNew(List<object> panes, HashSet<object> seen, object pane)
+        {
+            if (pane != null && seen.Add(pane))
+            {
+                panes.Add(pane);
+            }
+        }
+
+        private static JObject ExtractPaneData(object pane, int paneIndex, int chartIndex, JArray allSeries)
+        {
+            var titleText = SafeGetProperty(SafeGetProperty(pane, "Title"), "Text")?.ToString() ?? "";
+            var xAxis = SafeGetProperty(pane, "XAxis");
+            var yAxis = SafeGetProperty(pane, "YAxis");
+            var xLabel = SafeGetProperty(SafeGetProperty(xAxis, "Title"), "Text")?.ToString() ?? "";
+            var yLabel = SafeGetProperty(SafeGetProperty(yAxis, "Title"), "Text")?.ToString() ?? "";
+
+            var paneSeries = new JArray();
+            var curveList = SafeGetProperty(pane, "CurveList");
+            int curveCount = SafeCount(curveList);
+            for (int i = 0; i < curveCount; i++)
+            {
+                var curve = SafeGetPropertyWithIndex(curveList, "Item", i);
+                if (curve == null) continue;
+
+                var series = ExtractCurveData(curve, paneIndex, chartIndex, titleText, i);
+                paneSeries.Add(series);
+                allSeries.Add(series);
+            }
+
+            return new JObject
+            {
+                ["index"] = paneIndex,
+                ["chart_index"] = chartIndex,
+                ["title"] = titleText,
+                ["x_label"] = xLabel,
+                ["y_label"] = yLabel,
+                ["series_count"] = paneSeries.Count,
+                ["series"] = paneSeries
+            };
+        }
+
+        private static JObject ExtractCurveData(object curve, int paneIndex, int chartIndex, string paneTitle, int curveIndex)
+        {
+            var labelObj = SafeGetProperty(curve, "Label");
+            var label = SafeGetProperty(labelObj, "Text")?.ToString();
+            if (string.IsNullOrWhiteSpace(label))
+            {
+                label = !string.IsNullOrWhiteSpace(paneTitle) ? paneTitle : $"Series {curveIndex}";
+            }
+
+            var points = SafeGetProperty(curve, "Points");
+            var pointCount = SafeCount(points);
+
+            var xVals = new JArray();
+            var yVals = new JArray();
+
+            System.Reflection.PropertyInfo xProp = null;
+            System.Reflection.PropertyInfo yProp = null;
+
+            for (int j = 0; j < pointCount; j++)
+            {
+                var point = SafeGetPropertyWithIndex(points, "Item", j);
+                if (point == null) continue;
+
+                if (j == 0)
+                {
+                    var pointType = point.GetType();
+                    xProp = pointType.GetProperty("X");
+                    yProp = pointType.GetProperty("Y");
+                }
+
+                var x = xProp != null ? xProp.GetValue(point) : SafeGetProperty(point, "X");
+                var y = yProp != null ? yProp.GetValue(point) : SafeGetProperty(point, "Y");
+
+                if (TryConvertFiniteDouble(x, out var xValue) && TryConvertFiniteDouble(y, out var yValue))
+                {
+                    xVals.Add(xValue);
+                    yVals.Add(yValue);
+                }
+            }
+
+            return new JObject
+            {
+                ["name"] = label,
+                ["chart_index"] = chartIndex,
+                ["pane_index"] = paneIndex,
+                ["pane_title"] = paneTitle,
+                ["curve_index"] = curveIndex,
+                ["x_values"] = xVals,
+                ["y_values"] = yVals,
+                ["point_count"] = xVals.Count
+            };
+        }
+
+        private static int SafeCount(object collection)
+        {
+            if (collection == null) return 0;
+            try
+            {
+                var count = SafeGetProperty(collection, "Count");
+                return count != null ? Convert.ToInt32(count) : 0;
+            }
+            catch
+            {
+                return 0;
+            }
+        }
+
+        private static bool TryConvertFiniteDouble(object value, out double result)
+        {
+            result = 0.0;
+            if (value == null) return false;
+            try
+            {
+                result = Convert.ToDouble(value);
+                return !double.IsNaN(result) && !double.IsInfinity(result);
             }
             catch
             {

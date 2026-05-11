@@ -1099,6 +1099,27 @@ def _save_screenshot_to_host(path: str, data: bytes) -> None:
     out.write_bytes(data)
 
 
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+async def export_active_plot(target: str = "auto") -> dict[str, Any]:
+    """Extract chart data from the active EwE plot as structured JSON.
+
+    Finds the first ZedGraph chart control in the active view and extracts
+    series names, X/Y data points, and axis labels. Returns structured data
+    suitable for analysis. If no chart is found, suggests using capture_view
+    for maps and other visuals.
+
+    NOTE: Prefer this tool for extracting numerical data from charts and graphs.
+    Use capture_view for visual screenshots when data extraction is not needed.
+
+    Args:
+        target: What to search for the chart — "auto" (content panel preferred),
+                "main" (full window), "active" (active form), or "content" (content panel only).
+    """
+    params: dict[str, Any] = {"target": target}
+    result = await _send("export_active_plot", params)
+    return result
+
+
 @mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
 async def set_values(domain: str, values: dict[str, Any], index: int | None = None, navigate: bool = True) -> dict[str, Any]:
     """Set values for an EwE entity and refresh the UI. Pass navigate=False to avoid changing the visible EwE screen."""
@@ -1172,6 +1193,92 @@ async def ecopath_groups_resource() -> str:
 @mcp.resource("ewe://entities/ecopath_fleets")
 async def ecopath_fleets_resource() -> str:
     return str(await _send("list_ecopath_fleets"))
+
+
+# ── Prompt templates ──────────────────────────────────────────────
+
+
+@mcp.prompt()
+async def balance_model(path: str) -> list[dict[str, str]]:
+    """Guide through loading an EwE model, running Ecopath, and checking balancing diagnostics."""
+    return [
+        {
+            "role": "user",
+            "content": (
+                f"Load the EwE model at {path!r}, run Ecopath, and report the balancing "
+                "diagnostics. Steps:\n"
+                "1. Call load_model with this path\n"
+                "2. Call run_ecopath to balance the model\n"
+                "3. Call get_ecopath_run_state to check the result\n"
+                "4. Call get_ecopath_stats for overall statistics\n"
+                "5. Call get_ecopath_group_diagnostics to see which groups have issues\n"
+                "Be thorough: report which groups are unbalanced and what their EE values are."
+            ),
+        }
+    ]
+
+
+@mcp.prompt()
+async def run_ecosim_scenario(path: str, scenario_index: int = 1) -> list[dict[str, str]]:
+    """Guide through loading a model and running an Ecosim scenario."""
+    return [
+        {
+            "role": "user",
+            "content": (
+                f"Run Ecosim scenario {scenario_index} from the model at {path!r}. Steps:\n"
+                "1. Call load_model with this path\n"
+                "2. Call list_ecosim_scenarios to see available scenarios\n"
+                f"3. Call load_ecosim_scenario with index {scenario_index}\n"
+                "4. Call run_ecosim to start the simulation\n"
+                "5. Call wait_for_ecosim_completion to wait for it to finish\n"
+                "6. Call get_ecosim_group_results to fetch biomass time series\n"
+                "Report the time-series results."
+            ),
+        }
+    ]
+
+
+@mcp.prompt()
+async def compare_scenarios(path: str, indices: str = "1,2") -> list[dict[str, str]]:
+    """Guide through running and comparing multiple Ecosim scenarios."""
+    return [
+        {
+            "role": "user",
+            "content": (
+                f"Compare Ecosim scenarios [{indices}] from the model at {path!r}. Steps:\n"
+                "1. Call load_model with this path\n"
+                "2. Call list_ecosim_scenarios to see available scenarios\n"
+                f"3. For each scenario index in [{indices}]:\n"
+                "   a. Call load_ecosim_scenario with that index\n"
+                "   b. Call run_ecosim\n"
+                "   c. Call wait_for_ecosim_completion\n"
+                "   d. Call get_ecosim_group_results to collect biomass over time\n"
+                "4. Compare the biomass trajectories across scenarios, highlighting differences.\n"
+                "Use navigate=False for all value reads to avoid UI flicker during batch operations."
+            ),
+        }
+    ]
+
+
+@mcp.prompt()
+async def export_report(path: str) -> list[dict[str, str]]:
+    """Guide through exporting Ecopath and Ecosim results for reporting."""
+    return [
+        {
+            "role": "user",
+            "content": (
+                f"Export EwE model results from {path!r}. Steps:\n"
+                "1. Call load_model with this path\n"
+                "2. Call get_model_info to get the model name and metadata\n"
+                "3. Call get_ecopath_stats for summary statistics\n"
+                "4. Call get_ecopath_group_diagnostics for group-level detail\n"
+                "5. Call get_ecopath_fleet_diagnostics for fleet-level detail\n"
+                "6. Call list_ecosim_scenarios to show available scenarios\n"
+                "7. Call export_ecopath_results to export CSV data\n"
+                "Compile the results into a readable summary."
+            ),
+        }
+    ]
 
 
 def main() -> None:
