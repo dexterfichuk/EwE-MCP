@@ -25,7 +25,7 @@ SPATIAL_MODEL = os.path.join(
 @pytest.fixture
 def spatial_model_path():
     """Path to an EwE model with Ecospace scenarios (.eweaccdb format)."""
-    if os.environ.get("EWE_LIVE_TESTS") == "1":
+    if os.environ.get("EWE_LIVE_TESTS"):
         remote_root = os.environ.get("EWE_VM_REMOTE_ROOT")
         if not remote_root:
             remote_root = f"C:/Users/dexter/{Path(__file__).resolve().parents[1].name}"
