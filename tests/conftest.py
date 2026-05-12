@@ -18,6 +18,20 @@ def sample_model_path():
         return f"{remote_root.rstrip('/\\\\')}\\tests\\fixtures\\Tampa_Bay.EwEmdb"
     return FIXTURE_MODEL
 
+SPATIAL_MODEL = os.path.join(
+    os.path.dirname(__file__), "fixtures", "Anchovy_Bay_Spatial_Mosaic.eweaccdb"
+)
+
+@pytest.fixture
+def spatial_model_path():
+    """Path to an EwE model with Ecospace scenarios (.eweaccdb format)."""
+    if os.environ.get("EWE_LIVE_TESTS"):
+        remote_root = os.environ.get("EWE_VM_REMOTE_ROOT")
+        if not remote_root:
+            remote_root = f"C:/Users/dexter/{Path(__file__).resolve().parents[1].name}"
+        return f"{remote_root.rstrip('/\\\\')}\\tests\\fixtures\\Anchovy_Bay_Spatial_Mosaic.eweaccdb"
+    return SPATIAL_MODEL
+
 @pytest.fixture
 def live_client():
     """Provides a connected synchronous client for live tests, skipping if disabled.
