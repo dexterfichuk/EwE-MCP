@@ -9,7 +9,7 @@ FIXTURE_MODEL = os.path.join(os.path.dirname(__file__), "fixtures", "Tampa_Bay.E
 @pytest.fixture
 def sample_model_path():
     """Path to the sample EwE model included in the test fixtures."""
-    if os.environ.get("EWE_LIVE_TESTS"):
+    if os.environ.get("EWE_LIVE_TESTS") == "1":
         if os.environ.get("EWE_MODEL_PATH"):
             return os.environ["EWE_MODEL_PATH"]
         remote_root = os.environ.get("EWE_VM_REMOTE_ROOT")
@@ -25,7 +25,7 @@ SPATIAL_MODEL = os.path.join(
 @pytest.fixture
 def spatial_model_path():
     """Path to an EwE model with Ecospace scenarios (.eweaccdb format)."""
-    if os.environ.get("EWE_LIVE_TESTS"):
+    if os.environ.get("EWE_LIVE_TESTS") == "1":
         remote_root = os.environ.get("EWE_VM_REMOTE_ROOT")
         if not remote_root:
             remote_root = f"C:/Users/dexter/{Path(__file__).resolve().parents[1].name}"
@@ -36,7 +36,7 @@ def spatial_model_path():
 def live_client():
     """Provides a connected synchronous client for live tests, skipping if disabled.
     Starts with a clean slate (model closed)."""
-    if not os.environ.get("EWE_LIVE_TESTS"):
+    if os.environ.get("EWE_LIVE_TESTS") != "1":
         pytest.skip("Skipping live tests")
     
     client = EwEMCPClient()
