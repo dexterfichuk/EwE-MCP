@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using Newtonsoft.Json.Linq;
 
 namespace EwE_MCP_Plugin
@@ -17,27 +18,166 @@ namespace EwE_MCP_Plugin
         public bool Enabled { get; private set; }
         public bool EnableEval { get; private set; }
         public int MaxMessageBytes { get; private set; }
+        public string ConfigFilePath { get; private set; }
+        public bool ConfigFileExists { get; private set; }
 
         public static EwEMcpConfig FromEnvironment()
         {
-            var token = Environment.GetEnvironmentVariable("EWE_MCP_TOKEN");
-            var portRaw = Environment.GetEnvironmentVariable("EWE_MCP_PORT");
+            var fileValues = ReadConfigFile();
+            var configFilePath = GetConfigFilePath();
+            var configFileExists = File.Exists(configFilePath);
+
+            var envHost = Environment.GetEnvironmentVariable("EWE_MCP_HOST");
+            var envPort = Environment.GetEnvironmentVariable("EWE_MCP_PORT");
+            var envToken = Environment.GetEnvironmentVariable("EWE_MCP_TOKEN");
+            var envEnabled = Environment.GetEnvironmentVariable("EWE_MCP_ENABLED");
+            var envEnableEval = Environment.GetEnvironmentVariable("EWE_MCP_ENABLE_EVAL");
+
+            string host;
+            if (envHost != null)
+            {
+                host = envHost;
+            }
+            else if (fileValues.ContainsKey("host"))
+            {
+                host = fileValues["host"];
+            }
+            else
+            {
+                host = DefaultHost;
+            }
+
             int port;
-            if (!int.TryParse(portRaw, out port) || port < 1 || port > 65535)
+            if (envPort != null)
+            {
+                if (!int.TryParse(envPort, out port) || port < 1 || port > 65535)
+                    port = DefaultPort;
+            }
+            else if (fileValues.ContainsKey("port"))
+            {
+                if (!int.TryParse(fileValues["port"], out port) || port < 1 || port > 65535)
+                    port = DefaultPort;
+            }
+            else
             {
                 port = DefaultPort;
             }
 
+            string token;
+            bool usingDefaultToken;
+            if (!string.IsNullOrWhiteSpace(envToken))
+            {
+                token = envToken;
+                usingDefaultToken = false;
+            }
+            else if (fileValues.ContainsKey("token") && !string.IsNullOrWhiteSpace(fileValues["token"]))
+            {
+                token = fileValues["token"];
+                usingDefaultToken = false;
+            }
+            else
+            {
+                token = DefaultToken;
+                usingDefaultToken = true;
+            }
+
+            bool enabled;
+            if (envEnabled != null)
+            {
+                enabled = !string.Equals(envEnabled, "0", StringComparison.OrdinalIgnoreCase);
+            }
+            else if (fileValues.ContainsKey("enabled"))
+            {
+                enabled = !string.Equals(fileValues["enabled"], "false", StringComparison.OrdinalIgnoreCase)
+                          && !string.Equals(fileValues["enabled"], "0", StringComparison.OrdinalIgnoreCase);
+            }
+            else
+            {
+                enabled = true;
+            }
+
+            bool enableEval;
+            if (envEnableEval != null)
+            {
+                enableEval = string.Equals(envEnableEval, "1", StringComparison.OrdinalIgnoreCase);
+            }
+            else if (fileValues.ContainsKey("enable_eval"))
+            {
+                enableEval = string.Equals(fileValues["enable_eval"], "true", StringComparison.OrdinalIgnoreCase)
+                             || string.Equals(fileValues["enable_eval"], "1", StringComparison.OrdinalIgnoreCase);
+            }
+            else
+            {
+                enableEval = false;
+            }
+
             return new EwEMcpConfig
             {
-                Enabled = !string.Equals(Environment.GetEnvironmentVariable("EWE_MCP_ENABLED"), "0", StringComparison.OrdinalIgnoreCase),
-                Host = Environment.GetEnvironmentVariable("EWE_MCP_HOST") ?? DefaultHost,
+                Enabled = enabled,
+                Host = host,
                 Port = port,
-                Token = string.IsNullOrWhiteSpace(token) ? DefaultToken : token,
-                UsingDefaultToken = string.IsNullOrWhiteSpace(token),
-                EnableEval = string.Equals(Environment.GetEnvironmentVariable("EWE_MCP_ENABLE_EVAL"), "1", StringComparison.OrdinalIgnoreCase),
-                MaxMessageBytes = 10 * 1024 * 1024
+                Token = token,
+                UsingDefaultToken = usingDefaultToken,
+                EnableEval = enableEval,
+                MaxMessageBytes = 10 * 1024 * 1024,
+                ConfigFilePath = configFilePath,
+                ConfigFileExists = configFileExists
             };
+        }
+
+        private static string GetConfigFilePath()
+        {
+            var root = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+            if (string.IsNullOrWhiteSpace(root))
+            {
+                root = Path.GetTempPath();
+            }
+            return Path.Combine(root, "Ecopath with Ecosim", "EwE_MCP_Plugin.cfg");
+        }
+
+        private static Dictionary<string, string> ReadConfigFile()
+        {
+            var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            var path = GetConfigFilePath();
+            if (!File.Exists(path))
+            {
+                return result;
+            }
+
+            try
+            {
+                var inSection = false;
+                foreach (var rawLine in File.ReadAllLines(path))
+                {
+                    var line = rawLine.Trim();
+                    if (string.IsNullOrEmpty(line) || line.StartsWith("#", StringComparison.Ordinal) || line.StartsWith(";", StringComparison.Ordinal))
+                    {
+                        continue;
+                    }
+                    if (line.StartsWith("[", StringComparison.Ordinal))
+                    {
+                        inSection = line.Equals("[EwE_MCP]", StringComparison.OrdinalIgnoreCase);
+                        continue;
+                    }
+                    if (!inSection)
+                    {
+                        continue;
+                    }
+                    var eq = line.IndexOf('=');
+                    if (eq < 1)
+                    {
+                        continue;
+                    }
+                    var key = line.Substring(0, eq).Trim();
+                    var val = line.Substring(eq + 1).Trim();
+                    result[key] = val;
+                }
+            }
+            catch (Exception ex)
+            {
+                EwEMcpFileLog.Warn($"Could not read config file {path}: {ex.Message}");
+            }
+            return result;
         }
     }
 

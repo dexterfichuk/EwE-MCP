@@ -25,10 +25,14 @@ Implemented now:
 - Value tools: `get_values`, `get_indexed_value`, `set_values`, and `set_indexed_value` navigate EwE to the relevant screen by default; pass `navigate=False` for quiet/background access, especially in batches to avoid UI flicker. `set_values` is generic and works across all domains (Ecopath, Ecosim, Ecospace, Ecotracer, taxa, core); `set_indexed_value` supports targeted indexed cells.
 - Expanded generic domains now include Ecopath, Ecosim, Ecospace, Ecotracer, taxa, `core`, and UI commands. Some subsystem entity collections remain unavailable until EwE initializes or loads the relevant scenario.
 - UI command/navigation tools: `list_ui_commands`, `invoke_ui_command`, `list_navigation_nodes`, `navigate_to_node`, `get_active_view`.
-- View capture tools: `capture_view` and `save_screenshot` (primarily for graphs and spatial visualizations; prefer data-reading tools for tables).
+- View capture tools: `capture_view` and `save_screenshot` (primarily for graphs and spatial visualizations; prefer data-reading tools for tables). `export_active_plot` extracts chart data (series names, X/Y data points, axis labels) from ZedGraph controls.
+- Ecospace tools: scenario list/get/load/create/copy/delete/save, `get_ecospace_run_state`, `run_ecospace`, `stop_ecospace`, `wait_for_ecospace_completion`, group/fleet input inspection, group/fleet result time-series, habitat/MPA list/get, `get_ecospace_basemap`, `get_ecospace_model_parameters`.
+- Ecotracer tools: scenario list/get/load/create/copy/delete/save/close, `get_ecotracer_run_state`, `get_ecotracer_model_parameters`, group input list/get, group result time-series. No `run_ecotracer` — Ecotracer runs within Ecosim/Ecospace when `ContaminantTracing` is enabled.
+- MSE tools: `get_mse_parameters`, group/fleet input list/get, `get_mse_run_state`, `run_mse`, `stop_mse`, group/fleet result time-series.
+- Monte Carlo tools: `get_monte_carlo_parameters`, group list/get, `get_monte_carlo_run_state`, `run_monte_carlo`, `stop_monte_carlo`.
+- Server control: `shutdown_server` (gated behind `EWE_MCP_ENABLE_EVAL=1`).
+- Prompt templates: `balance_model`, `run_ecosim_scenario`, `compare_scenarios`, `export_report`.
 - Python MCP server, socket client, batch command guard, and protocol tests.
-
-The broad Ecospace/Ecotracer/MSE/Monte Carlo object model and Ecosim progress event subscription are intentionally not fully filled in yet; the bridge spine and first Ecosim scenario/run/results loop are ready for expansion.
 
 ## Local Configuration
 
@@ -51,6 +55,34 @@ export EWE_MCP_ENABLED=0
 When disabled, the plugin logs the disabled state and does not bind the socket. Leave `EWE_MCP_ENABLED` unset, or set it to any value other than `0`, for normal operation.
 
 Client calls include a timeout value in the socket request. If a command times out or an in-flight socket operation fails, the Python client closes that socket before re-raising so a late response cannot be read by the next command.
+
+## Plugin Configuration File
+
+The plugin reads `EwE_MCP_Plugin.cfg` from `%APPDATA%\Ecopath with Ecosim\` on the Windows VM. The file is INI-style and requires a `[EwE_MCP]` section header — key=value lines outside this section are silently ignored. Example:
+
+```ini
+[EwE_MCP]
+host=127.0.0.1
+port=9877
+token=ewe-mcp-local-dev
+log_level=INFO
+```
+
+It supports `host`, `port`, `token`, `enabled`, and `enable_eval` config keys. Configuration precedence: environment variables > config file > compiled defaults. The `diagnose` command reports `config_file_path` and `config_file_exists` to help verify which file is loaded.
+
+## Escape Hatch
+
+`execute_ewe_code` provides a limited reflection escape hatch for ad-hoc EwE runtime inspection. It is **disabled by default** and must be explicitly enabled:
+
+- Set `EWE_MCP_ENABLE_EVAL=1` (environment variable) or `enable_eval=1` (config file).
+- Supports `Core.Property`, `Core.Property = Value`, and `Core.Method()` expressions.
+- Expressions matching deny patterns are rejected: `System.IO`, `System.Diagnostics.Process`, `System.Reflection.Assembly.Load`, `File.Delete`, `File.Write`, `Directory.Delete`, `System.Net`, `WebClient`, `HttpClient`, `Process.Start`.
+- Blocked from `batch_commands`.
+- Every eval request is audit-logged with outcome (`denied`/`executed`).
+
+`shutdown_server` uses the same `EWE_MCP_ENABLE_EVAL=1` gate, is blocked from batches, and is audit-logged. It stops the plugin socket server (500ms delayed shutdown).
+
+The plugin enforces the batch-command guard on the socket server side, so direct protocol clients cannot batch model lifecycle, simulation run/stop, export, capture, eval, shutdown, scenario load, or scenario mutation commands.
 
 ## Build Plugin
 
@@ -153,6 +185,36 @@ await set_values(
 ```
 
 `discard_changes` is available for test cleanup after restored mutations. It clears EwE's unsaved-change flag; it does not physically revert values.
+
+## Distribution
+
+Build a wheel and source distribution:
+
+```bash
+uv build
+```
+
+This produces `dist/ewe_mcp-X.Y.Z-py3-none-any.whl` and `dist/ewe_mcp-X.Y.Z.tar.gz`.
+
+Install into any virtual environment:
+
+```bash
+pip install dist/ewe_mcp-0.1.0-py3-none-any.whl
+```
+
+Set the required environment variables before running:
+
+```bash
+export EWE_MCP_HOST=127.0.0.1
+export EWE_MCP_PORT=19877
+export EWE_MCP_TOKEN=ewe-mcp-local-dev
+```
+
+Then start the MCP server:
+
+```bash
+ewe-mcp
+```
 
 ## Tests
 

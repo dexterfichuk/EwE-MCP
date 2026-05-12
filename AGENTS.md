@@ -51,6 +51,11 @@ export EWE_VM_REMOTE_ROOT="C:/Users/dexter/$(basename "$PWD")"
 ```
 
 ## Build, Deploy, Launch
+
+The plugin reads configuration from `EwE_MCP_Plugin.cfg` at `%APPDATA%\Ecopath with Ecosim\` (INI-style with a required `[EwE_MCP]` section header; key=value lines outside this section are ignored). Configuration precedence: environment variables > config file > compiled defaults. The `diagnose` command reports `config_file_path` and `config_file_exists` so you can verify which file is loaded.
+
+Supported config keys are `host`, `port`, `token`, `enabled`, and `enable_eval`.
+
 Build the plugin on the Windows VM, deploy it into EwE's plugin folder, and launch EwE through the interactive desktop session:
 
 ```bash
@@ -137,6 +142,7 @@ The MCP server exposes tools backed by the running EwE plugin. Current tools inc
 - **Monte Carlo:** `get_monte_carlo_parameters`, `list_monte_carlo_groups`, `get_monte_carlo_group`, `get_monte_carlo_run_state`, `run_monte_carlo`, `stop_monte_carlo`
 - **Generic entity/value:** `list_domains`, `list_entities`, `get_entity`, `list_variables`, `get_variable_metadata`, `get_values`, `validate_values`, `get_indexed_value`, `validate_indexed_value`, `set_values`, `set_indexed_value`
 - **Navigation/UI:** `list_navigation_nodes`, `navigate_to_node`, `get_active_view`, `invoke_ui_command`, `list_ui_commands`, `refresh_ui`, `capture_view`, `save_screenshot`
+- **Server control:** `shutdown_server`
 - **Batching:** `batch_commands`
 - **Eval (disabled by default):** `execute_ewe_code`
 - **Prompt templates:** `balance_model`, `run_ecosim_scenario`, `compare_scenarios`, `export_report`
@@ -171,17 +177,22 @@ EWE_LIVE_TESTS=1 \
 uv run pytest
 ```
 
-Expected local baseline with live tests skipped is currently `24 passed, 57 skipped`.
+Expected local baseline with live tests skipped is currently `53 passed, 80 skipped`.
 
 The sample model (`tests/fixtures/Tampa_Bay.EwEmdb`) is bundled under the same GPL-3.0 license as EwE and does not require a separate `EWE_MODEL_PATH` environment variable.
 
-Expected full live result on current `main` is `83 passed, 5 skipped`.
+Expected full live result on current `main` is `126 passed, 8 skipped`.
 
 Prefer testing mutations against copied models. If you mutate the shared sample model, restore the original value in a `finally` block and call `discard_changes` so EwE clears the unsaved-change flag without saving over the sample model. `discard_changes` only clears dirty flags; it does not physically revert values.
 
 ## Safety Rules
 - Keep `execute_ewe_code` disabled unless the user explicitly asks for it and understands the risk.
-- Do not batch `execute_ewe_code`, model-closing operations, or destructive scenario management (Ecosim, Ecospace, Ecotracer).
+  - Disabled by default; gated behind `EWE_MCP_ENABLE_EVAL=1`.
+  - Deny patterns block expressions containing: `System.IO`, `System.Diagnostics.Process`, `System.Reflection.Assembly.Load`, `File.Delete`, `File.Write`, `Directory.Delete`, `System.Net`, `WebClient`, `HttpClient`, `Process.Start`.
+  - Blocked from `batch_commands`.
+  - Every eval request is audit-logged with outcome (`denied`/`executed`).
+- `shutdown_server` is gated behind `EWE_MCP_ENABLE_EVAL=1` (same flag as `execute_ewe_code`), blocked from `batch_commands`, and audit-logged. It is destructive — it stops the plugin socket server.
+- Do not batch `execute_ewe_code`, `shutdown_server`, model lifecycle operations, simulation run/stop commands, export/capture commands, or scenario load/mutation operations. The plugin enforces this guard for direct socket clients as well as the Python MCP server.
 - Use `validate_values` before `set_values` when possible.
 - Value reads/writes navigate by default through `get_values`, `get_indexed_value`, `set_values`, and `set_indexed_value`; pass `navigate=False` for quiet/background access, batches, or batch-like workflows to avoid UI flicker.
 - Use `discard_changes` only as an explicit cleanup step after test mutations have been restored; it clears EwE's dirty flag but does not physically revert values.

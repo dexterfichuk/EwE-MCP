@@ -660,7 +660,11 @@ async def get_ecotracer_group_results(
     start_time: int | None = None,
     end_time: int | None = None,
 ) -> dict[str, Any]:
-    """Read Ecotracer group result time-series after a run."""
+    """Read Ecotracer group result time-series after a run.
+
+    Defaults to at most 120 timesteps (start_time..start_time+119) when
+    end_time is omitted, matching Ecosim/Ecospace result conventions.
+    """
     params: dict[str, Any] = {"index": index}
     if variables is not None:
         params["variables"] = variables
@@ -1171,8 +1175,24 @@ async def batch_commands(commands: list[dict[str, Any]]) -> dict[str, Any]:
 
 @mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
 async def execute_ewe_code(code: str) -> dict[str, Any]:
-    """Gated future escape hatch for in-process EwE code/reflection execution."""
+    """Gated escape hatch for in-process EwE Core reflection.
+
+    Disabled by default. Requires EWE_MCP_ENABLE_EVAL=1 on the EwE plugin side.
+    Blocked from batch_commands. Expressions matching dangerous patterns
+    (System.IO, Process, File operations, network access) are denied even when enabled.
+    Only simple Core.Property reads, Core.Property = Value sets, and Core.Method() calls are supported.
+    """
     return await _send("execute_ewe_code", {"code": code}, timeout=TIMEOUT_LONG)
+
+
+@mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
+async def shutdown_server() -> dict[str, Any]:
+    """Request the MCP plugin server to shut down.
+
+    Only available when EWE_MCP_ENABLE_EVAL=1 is set on the EwE side.
+    Blocked from batch_commands.
+    """
+    return await _send("shutdown_server", timeout=5)
 
 
 @mcp.resource("ewe://state")

@@ -102,6 +102,14 @@ namespace EwE_MCP_Plugin
                     () => _syncContext,
                     _auditLog,
                     config);
+                router.OnShutdownRequested = () =>
+                {
+                    lock (_gate)
+                    {
+                        _server?.Stop();
+                        _server = null;
+                    }
+                };
                 _server = new EwEMcpSocketServer(config, router, _auditLog);
                 _server.Start();
                 EwEMcpFileLog.Info("Socket server started");
@@ -130,6 +138,11 @@ namespace EwE_MCP_Plugin
         public static void Info(string message)
         {
             Write("INFO", message, null);
+        }
+
+        public static void Warn(string message)
+        {
+            Write("WARN", message, null);
         }
 
         public static void Error(string message, Exception exception)
@@ -184,6 +197,7 @@ namespace EwE_MCP_Plugin
         private readonly Func<SynchronizationContext> _syncContext;
         private readonly EwEMcpAuditLog _auditLog;
         private readonly EwEMcpConfig _config;
+        public Action OnShutdownRequested { get; set; }
 
         public EwEMcpCommandRouter(
             Func<cCore> core,
@@ -435,9 +449,11 @@ namespace EwE_MCP_Plugin
                 case "batch":
                 case "batch_commands":
                     return OnUiThread(() => Batch(request.Params));
-                case "execute_ewe_code":
-                    return OnUiThread(() => ExecuteEweCode(request.Params));
-                default:
+            case "execute_ewe_code":
+                return OnUiThread(() => ExecuteEweCode(request.Params));
+            case "shutdown_server":
+                return ShutdownServer();
+            default:
                     throw new EwEMcpException("unknown_command", $"Unknown command type: {request.Type}");
             }
         }
@@ -489,6 +505,8 @@ namespace EwE_MCP_Plugin
                 },
                 ["host"] = _config.Host,
                 ["port"] = _config.Port,
+                ["config_file_path"] = _config.ConfigFilePath,
+                ["config_file_exists"] = _config.ConfigFileExists,
                 ["plugin"] = GetPluginAssemblyInfo()
             };
         }
@@ -1574,9 +1592,9 @@ namespace EwE_MCP_Plugin
             if (results == null) throw new EwEMcpException("core_unavailable", "Ecotracer group results not available. Run Ecosim/Ecospace with Ecotracer enabled first.");
             int nTimeSteps = SafeIntProperty(core, "nEcosimTimeSteps");
             if (nTimeSteps < 1) nTimeSteps = SafeIntProperty(core, "nEcospaceTimeSteps");
-            var start = OptionalInt(parameters, "start_time") ?? 1;
-            var end = OptionalInt(parameters, "end_time") ?? Math.Max(nTimeSteps, 1);
-            if (nTimeSteps < 1) throw new EwEMcpException("ecotracer_results_unavailable", "No time steps available for Ecotracer results.");
+        var start = OptionalInt(parameters, "start_time") ?? 1;
+        if (nTimeSteps < 1) throw new EwEMcpException("ecotracer_results_unavailable", "No time steps available for Ecotracer results.");
+        var end = OptionalInt(parameters, "end_time") ?? Math.Min(nTimeSteps, start + 119);
             if (start < 1 || start > nTimeSteps || end < start || end > nTimeSteps)
                 throw new EwEMcpException("time_range_out_of_range", $"Time range {start}..{end} outside 1..{nTimeSteps}");
             var variables = OptionalStringArray(parameters, "variables") ?? new[] { "concentration", "conbio" };
@@ -2956,6 +2974,43 @@ namespace EwE_MCP_Plugin
             return new JObject { ["stopped"] = true, ["run_type"] = "ecosim" };
         }
 
+        private static readonly HashSet<string> BatchBlockedCommands = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "execute_ewe_code",
+            "close_model",
+            "load_model",
+            "save_model",
+            "save_model_as",
+            "run_ecopath",
+            "run_ecosim",
+            "stop_ecosim",
+            "capture_view",
+            "save_screenshot",
+            "create_ecosim_scenario",
+            "copy_ecosim_scenario",
+            "delete_ecosim_scenario",
+            "load_ecosim_scenario",
+            "load_ecospace_scenario",
+            "create_ecospace_scenario",
+            "copy_ecospace_scenario",
+            "delete_ecospace_scenario",
+            "save_ecospace_scenario",
+            "run_ecospace",
+            "stop_ecospace",
+            "load_ecotracer_scenario",
+            "create_ecotracer_scenario",
+            "copy_ecotracer_scenario",
+            "delete_ecotracer_scenario",
+            "save_ecotracer_scenario",
+            "close_ecotracer_scenario",
+            "run_mse",
+            "stop_mse",
+            "run_monte_carlo",
+            "stop_monte_carlo",
+            "export_ecopath_results",
+            "shutdown_server",
+        };
+
         private JObject Batch(JObject parameters)
         {
             var commands = parameters?["commands"] as JArray ?? new JArray();
@@ -2963,27 +3018,7 @@ namespace EwE_MCP_Plugin
             foreach (var item in commands)
             {
                 var type = item?["type"]?.ToString();
-                if (string.Equals(type, "execute_ewe_code", StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(type, "close_model", StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(type, "capture_view", StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(type, "create_ecosim_scenario", StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(type, "copy_ecosim_scenario", StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(type, "delete_ecosim_scenario", StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(type, "run_ecospace", StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(type, "stop_ecospace", StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(type, "create_ecospace_scenario", StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(type, "copy_ecospace_scenario", StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(type, "delete_ecospace_scenario", StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(type, "save_ecospace_scenario", StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(type, "create_ecotracer_scenario", StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(type, "copy_ecotracer_scenario", StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(type, "delete_ecotracer_scenario", StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(type, "save_ecotracer_scenario", StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(type, "close_ecotracer_scenario", StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(type, "run_mse", StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(type, "stop_mse", StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(type, "run_monte_carlo", StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(type, "stop_monte_carlo", StringComparison.OrdinalIgnoreCase))
+                if (BatchBlockedCommands.Contains(type ?? string.Empty))
                 {
                     throw new EwEMcpException("blocked_batch_command", $"{type} is not allowed in batch");
                 }
@@ -3967,14 +4002,48 @@ namespace EwE_MCP_Plugin
             return (Nullable.GetUnderlyingType(type) ?? type).Name;
         }
 
+        private JObject ShutdownServer()
+        {
+            if (!_config.EnableEval)
+            {
+                throw new EwEMcpException("shutdown_disabled", "shutdown_server is disabled. Set EWE_MCP_ENABLE_EVAL=1 or enable_eval=1 to opt in.");
+            }
+            _auditLog.Add("shutdown_server", "executed", "Server shutdown requested");
+            var callback = OnShutdownRequested;
+            if (callback != null)
+            {
+                System.Threading.ThreadPool.QueueUserWorkItem(_ =>
+                {
+                    System.Threading.Thread.Sleep(500);
+                    callback();
+                });
+            }
+            return new JObject
+            {
+                ["success"] = true,
+                ["message"] = "Server shutting down in 500ms"
+            };
+        }
+
         private JObject ExecuteEweCode(JObject parameters)
         {
             if (!_config.EnableEval)
             {
+                _auditLog.Add("execute_ewe_code", "denied", "eval_disabled");
                 throw new EwEMcpException("eval_disabled", "execute_ewe_code is disabled. Set EWE_MCP_ENABLE_EVAL=1 to opt in.");
             }
 
             var code = RequiredString(parameters, "code").Trim();
+
+            var dangerousPattern = IsDangerousExpression(code);
+            if (dangerousPattern != null)
+            {
+                var reason = $"Expression contains disallowed pattern: {dangerousPattern}";
+                _auditLog.Add("execute_ewe_code", "denied", reason);
+                throw new EwEMcpException("eval_denied", reason);
+            }
+
+            _auditLog.Add("execute_ewe_code", "executed", code.Substring(0, Math.Min(code.Length, 200)));
             var core = RequireCore();
 
             // Handle "Core.Property = Value"
@@ -4034,6 +4103,33 @@ namespace EwE_MCP_Plugin
             }
 
             throw new EwEMcpException("not_implemented", "Complex execute_ewe_code is not implemented. Use 'Core.Prop', 'Core.Prop = Val', or 'Core.Method()'.");
+        }
+
+        private static readonly string[] _evalDenyPatterns = new[]
+        {
+            "System.IO",
+            "System.Diagnostics.Process",
+            "System.Reflection.Assembly.Load",
+            "File.Delete",
+            "File.Write",
+            "Directory.Delete",
+            "System.Net",
+            "WebClient",
+            "HttpClient",
+            "Process.Start",
+        };
+
+        private string IsDangerousExpression(string code)
+        {
+            if (string.IsNullOrEmpty(code)) return null;
+            foreach (var pattern in _evalDenyPatterns)
+            {
+                if (code.IndexOf(pattern, StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    return pattern;
+                }
+            }
+            return null;
         }
 
         private object SafeGetNestedProperty(object obj, IEnumerable<string> path)

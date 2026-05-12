@@ -15,6 +15,19 @@ RECV_CHUNK_SIZE = 65_536
 MAX_RESPONSE_SIZE = 100 * 1024 * 1024
 HEADER_STRUCT = struct.Struct(">I")
 
+EVAL_DENY_PATTERNS = (
+    "System.IO",
+    "System.Diagnostics.Process",
+    "System.Reflection.Assembly.Load",
+    "File.Delete",
+    "File.Write",
+    "Directory.Delete",
+    "System.Net",
+    "WebClient",
+    "HttpClient",
+    "Process.Start",
+)
+
 BATCH_BLOCKED_COMMANDS = frozenset(
     {
         "execute_ewe_code",
@@ -49,6 +62,7 @@ BATCH_BLOCKED_COMMANDS = frozenset(
         "run_monte_carlo",
         "stop_monte_carlo",
         "export_ecopath_results",
+        "shutdown_server",
     }
 )
 

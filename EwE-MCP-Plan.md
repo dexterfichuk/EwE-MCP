@@ -143,6 +143,17 @@ Build EwE MCP as a separate plugin-first project in `/Users/dexterfichuk/Project
   - supports `Core.Property = Value`
   - supports `Core.Method()`
   - supports simple nested property/method paths
+  - deny patterns block expressions containing: `System.IO`, `System.Diagnostics.Process`, `System.Reflection.Assembly.Load`, `File.Delete`, `File.Write`, `Directory.Delete`, `System.Net`, `WebClient`, `HttpClient`, `Process.Start`
+  - blocked from `batch_commands`
+  - audit-logged with outcome (`denied`/`executed`)
+- Implemented `shutdown_server`:
+  - gated behind `EWE_MCP_ENABLE_EVAL=1`
+  - blocked from `batch_commands`
+  - audit-logged; stops socket server after 500ms delay
+- Implemented plugin config file support:
+  - reads `EwE_MCP_Plugin.cfg` from `%APPDATA%\Ecopath with Ecosim\` (INI-style key=value)
+  - precedence: environment variables > config file > compiled defaults
+  - `diagnose` reports `config_file_path` and `config_file_exists`
 - Implemented Python package in `src/ewe_mcp`.
 - Implemented Python socket client and FastMCP server skeleton.
 - Added structured Python client error type `EwEMCPError` with plugin error code/message preservation.
@@ -208,7 +219,7 @@ SSHPASS=... ./scripts/vm-live-smoke.sh
 Current local test expectation:
 
 ```text
-29 passed, 61 skipped
+54 passed, 80 skipped
 ```
 
 The skipped tests are live EwE integration tests. Run them only when the VM plugin is deployed, EwE is launched, and a tunnel or direct connection is configured.
@@ -260,7 +271,7 @@ uv run pytest
 Expected baseline at the time of this update:
 
 ```text
-29 passed, 61 skipped
+54 passed, 80 skipped
 ```
 
 ### 3. VM Environment Variables
@@ -402,11 +413,11 @@ PY
 
 ### Phase 1: Harden The Bridge
 - ~~Add a configurable plugin enabled/disabled flag.~~ Completed via `EWE_MCP_ENABLED=0` in PR #14. ([#15](https://github.com/dexterfichuk/EwE-MCP/issues/15))
-- Move token/host/port configuration beyond environment variables if EwE’s runtime environment makes env vars awkward. ([#16](https://github.com/dexterfichuk/EwE-MCP/issues/16))
+- ~~Move token/host/port configuration beyond environment variables if EwE’s runtime environment makes env vars awkward.~~ ✓ — implemented as `EwE_MCP_Plugin.cfg` at `%APPDATA%\Ecopath with Ecosim\`; precedence: env vars > config file > defaults. ([#16](https://github.com/dexterfichuk/EwE-MCP/issues/16))
 - ~~Add richer startup diagnostics.~~ Completed for plugin assembly version, EwE install path, plugin path, and port bind failures in PR #14. ([#17](https://github.com/dexterfichuk/EwE-MCP/issues/17))
 - ~~Add socket idle/client cleanup tests.~~ Completed for disconnect/idempotent cleanup and timeout cleanup behavior in PR #14. ([#18](https://github.com/dexterfichuk/EwE-MCP/issues/18))
 - ~~Add command timeout handling in the plugin and Python client.~~ Completed in PR #14, including client reconnect safety after timed-out requests. ([#19](https://github.com/dexterfichuk/EwE-MCP/issues/19))
-- Add a `shutdown_server` or `restart_server` development-only command if useful. ([#20](https://github.com/dexterfichuk/EwE-MCP/issues/20))
+- Add a `shutdown_server` or `restart_server` development-only command if useful. ([#20](https://github.com/dexterfichuk/EwE-MCP/issues/20)) ✓ — implemented as `shutdown_server`, gated behind `EWE_MCP_ENABLE_EVAL=1`, batch-blocked, audit-logged.
 
 ### Phase 2: Model Inspection And Safe Model Workflow (COMPLETED)
 - ~~Locate sample model files on the VM or in EwE install/source directories. Initial sample located and verified:~~
@@ -456,7 +467,7 @@ PY
   - fetch time-series outputs: initial group/fleet result series done
   - export results: initial reflected `dumpEcosimModelResults` wrapper done for installed-build compatibility
 
-### Phase 5: Full EwE Suite Coverage ✓
+### Phase 5: Full EwE Suite Coverage (COMPLETED)
 - Ecospace tools: ([#30](https://github.com/dexterfichuk/EwE-MCP/issues/30)) ✓
   - `list_ecospace_scenarios`, `get_ecospace_scenario`, `load_ecospace_scenario`
   - `create_ecospace_scenario`, `copy_ecospace_scenario`, `delete_ecospace_scenario`, `save_ecospace_scenario`
@@ -488,7 +499,7 @@ PY
 - Tool annotations: `readOnlyHint=True` for reads, `destructiveHint=True` for mutations/run/stop
 - Tests: offline batch-blocking for all 5 subsystems, live read-only tests for Ecospace/Ecotracer/MSE/Monte Carlo/Plugin Diagnostics
 
-### Phase 6: UI-Equivalent Ergonomics
+### Phase 6: UI-Equivalent Ergonomics (COMPLETED)
 - Navigation tools are implemented:
   - `list_navigation_nodes`
   - `navigate_to_node`
@@ -512,12 +523,20 @@ PY
   - compare scenarios
   - export report-ready outputs
 
-### Phase 7: Gated Power-User Escape Hatch
-- A limited `execute_ewe_code` exists now. Remaining work is hardening, not initial implementation. ([#38](https://github.com/dexterfichuk/EwE-MCP/issues/38))
-- Keep it disabled by default and require token auth plus `EWE_MCP_ENABLE_EVAL=1`.
-- Keep it blocked from batches.
-- Add stricter allow/deny rules before broadening beyond simple `Core.*` reflection.
-- Audit every eval request and document risk clearly.
+### Phase 7: Gated Power-User Escape Hatch And Server Control (COMPLETED)
+- `execute_ewe_code` hardening: ([#38](https://github.com/dexterfichuk/EwE-MCP/issues/38)) ✓
+  - Disabled by default; gated behind `EWE_MCP_ENABLE_EVAL=1`.
+  - Deny patterns block expressions containing: `System.IO`, `System.Diagnostics.Process`, `System.Reflection.Assembly.Load`, `File.Delete`, `File.Write`, `Directory.Delete`, `System.Net`, `WebClient`, `HttpClient`, `Process.Start`.
+  - Blocked from `batch_commands`.
+  - Every eval request is audit-logged with outcome (`denied`/`executed`).
+- `shutdown_server` command: ([#20](https://github.com/dexterfichuk/EwE-MCP/issues/20)) ✓
+  - Gated behind `EWE_MCP_ENABLE_EVAL=1` (same flag as `execute_ewe_code`).
+  - Blocked from `batch_commands`.
+  - Audit-logged. Stops the plugin socket server after a 500ms delay.
+- Config file support: ✓
+  - Plugin reads `EwE_MCP_Plugin.cfg` from `%APPDATA%\Ecopath with Ecosim\` (INI-style key=value).
+  - Precedence: environment variables > config file > compiled defaults.
+  - `diagnose` reports `config_file_path` and `config_file_exists` for verification.
 
 ## Test Plan
 
