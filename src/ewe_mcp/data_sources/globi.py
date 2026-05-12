@@ -12,6 +12,10 @@ logger = logging.getLogger("ewe_mcp")
 GLOBI_BASE_URL = "https://api.globalbioticinteractions.org"
 MAX_INTERACTIONS = 100
 HTTP_TIMEOUT = 15.0
+COMMON_INTERACTION_TYPES = {
+    "preysOn", "eatenBy", "parasiteOf", "hostOf",
+    "pollinates", "pollinatedBy", "symbiontOf", "kills",
+}
 
 EXTRACT_COLUMNS = [
     "source_taxon_name",
@@ -87,7 +91,13 @@ def query_globi(
         "interactions": capped,
         "count": total,
     }
+    if interaction_type not in COMMON_INTERACTION_TYPES:
+        result["note"] = (
+            f"Interaction type '{interaction_type}' is uncommon. "
+            f"Common types: {', '.join(sorted(COMMON_INTERACTION_TYPES))}"
+        )
     if total > MAX_INTERACTIONS:
-        result["note"] = f"Showing {MAX_INTERACTIONS} of {total} interactions"
+        cap_note = f"Showing {MAX_INTERACTIONS} of {total} interactions"
+        result["note"] = f"{result.get('note', '')} {cap_note}".strip()
 
     return result

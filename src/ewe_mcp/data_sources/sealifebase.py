@@ -5,13 +5,13 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-import duckdb
-
 from ewe_mcp.data_sources.fishbase import (
     DEFAULT_VERSION,
     _query_diet,
     _query_ecology,
     _query_popgrowth,
+    _resolve_spec_codes,
+    _validate_taxon_name,
     VALID_TABLES,
 )
 
@@ -45,6 +45,9 @@ def query_sealifebase(
     Returns:
         Dict keyed by table name with list of row dicts, or {"error": "..."} on failure.
     """
+    _validate_taxon_name(genus, "genus")
+    _validate_taxon_name(species, "species")
+
     if tables is None:
         tables = ["popgrowth", "ecology", "diet"]
 
@@ -55,12 +58,7 @@ def query_sealifebase(
     base = _base_url(version)
 
     try:
-        spec_sql = (
-            f"SELECT SpecCode FROM read_parquet('{base}/species.parquet') "
-            f"WHERE Genus = '{genus}' AND Species = '{species}'"
-        )
-        spec_result = duckdb.sql(spec_sql).fetchall()
-        spec_codes = [row[0] for row in spec_result]
+        spec_codes = _resolve_spec_codes(base, genus, species)
         if not spec_codes:
             return {t: [] for t in tables}
     except Exception as exc:

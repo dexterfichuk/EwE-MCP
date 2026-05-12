@@ -9,7 +9,7 @@ class TestQueryFishbase:
         species_row = [(1, "Gadus", "morhua", "Atlantic cod")]
         pg_rows = [(115.0, 0.1, None, 0.2, "tagging-recapture data")]
 
-        def fake_sql(query):
+        def fake_sql(query, params=None):
             m = MagicMock()
             if "popgrowth" in query.lower():
                 m.fetchall.return_value = pg_rows
@@ -32,7 +32,7 @@ class TestQueryFishbase:
         species_row = [(1, "Gadus", "morhua", "Atlantic cod")]
         eco_rows = [(4.09, 0.18, 4.29, 1.0, "hunting macrofauna (predator)")]
 
-        def fake_sql(query):
+        def fake_sql(query, params=None):
             m = MagicMock()
             if "ecology" in query.lower():
                 m.fetchall.return_value = eco_rows
@@ -57,7 +57,7 @@ class TestQueryFishbase:
             ("nekton", "finfish", "bony fish", "juv./adults", 18.1, "Trisopterus minutus"),
         ]
 
-        def fake_sql(query):
+        def fake_sql(query, params=None):
             m = MagicMock()
             if "diet_items" in query.lower():
                 m.fetchall.return_value = diet_item_rows
@@ -78,7 +78,7 @@ class TestQueryFishbase:
     def test_query_nonexistent_species(self):
         from ewe_mcp.data_sources.fishbase import query_fishbase
 
-        def fake_sql(query):
+        def fake_sql(query, params=None):
             m = MagicMock()
             m.fetchall.return_value = []
             return m
@@ -107,6 +107,51 @@ class TestQueryFishbase:
 
         assert "error" in result
 
+    def test_empty_genus_rejected(self):
+        from ewe_mcp.data_sources.fishbase import query_fishbase
+
+        with pytest.raises(ValueError, match="genus must be a non-empty string"):
+            query_fishbase("", "morhua")
+
+    def test_whitespace_genus_rejected(self):
+        from ewe_mcp.data_sources.fishbase import query_fishbase
+
+        with pytest.raises(ValueError, match="genus must be a non-empty string"):
+            query_fishbase("   ", "morhua")
+
+    def test_sql_injection_rejected(self):
+        from ewe_mcp.data_sources.fishbase import query_fishbase
+
+        with pytest.raises(ValueError, match="invalid characters"):
+            query_fishbase("'; DROP TABLE--", "morhua")
+
+    def test_parameterized_sql_used(self):
+        from ewe_mcp.data_sources.fishbase import query_fishbase
+
+        species_row = [(1, "Gadus", "morhua", "Atlantic cod")]
+        calls = []
+
+        def fake_sql(query, params=None):
+            calls.append((query, params))
+            m = MagicMock()
+            if "species" in query.lower():
+                m.fetchall.return_value = species_row
+            else:
+                m.fetchall.return_value = []
+            return m
+
+        with patch("ewe_mcp.data_sources.fishbase.duckdb") as mock_duckdb:
+            mock_duckdb.sql.side_effect = fake_sql
+            query_fishbase("Gadus", "morhua", tables=["popgrowth"])
+
+        species_call = [c for c in calls if "species" in c[0].lower()][0]
+        assert "$1" in species_call[0]
+        assert species_call[1] == ["Gadus", "morhua"]
+
+        pg_call = [c for c in calls if "popgrowth" in c[0].lower()][0]
+        assert "$1" in pg_call[0]
+        assert pg_call[1] == [1]
+
 
 class TestQuerySealifebase:
     def test_uses_slb_prefix(self):
@@ -116,7 +161,7 @@ class TestQuerySealifebase:
         eco_rows = [(3.5, 0.2, 3.8, 0.5, "predator")]
         queries_run = []
 
-        def fake_sql(query):
+        def fake_sql(query, params=None):
             queries_run.append(query)
             m = MagicMock()
             if "ecology" in query.lower():
@@ -125,12 +170,18 @@ class TestQuerySealifebase:
                 m.fetchall.return_value = species_row
             return m
 
-        with patch("ewe_mcp.data_sources.sealifebase.duckdb") as mock_duckdb:
+        with patch("ewe_mcp.data_sources.fishbase.duckdb") as mock_duckdb:
             mock_duckdb.sql.side_effect = fake_sql
             result = query_sealifebase("Abdopus", "horridus", tables=["ecology"])
 
         assert "ecology" in result
         assert any("slb/" in q for q in queries_run), f"Expected 'slb/' in queries: {queries_run}"
+
+    def test_empty_species_rejected(self):
+        from ewe_mcp.data_sources.sealifebase import query_sealifebase
+
+        with pytest.raises(ValueError, match="species must be a non-empty string"):
+            query_sealifebase("Octopus", "")
 
 
 class TestQueryGlobi:
@@ -251,3 +302,26 @@ class TestQueryGlobi:
 
         assert len(result["interactions"]) == 100
         assert "Showing 100 of 150" in result["note"]
+
+    def test_uncommon_interaction_type_note(self):
+        from ewe_mcp.data_sources.globi import query_globi
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "columns": [
+                "source_taxon_name",
+                "interaction_type",
+                "target_taxon_name",
+                "latitude",
+                "longitude",
+                "study_title",
+            ],
+            "data": [],
+        }
+
+        with patch("ewe_mcp.data_sources.globi.httpx") as mock_httpx:
+            mock_httpx.get.return_value = mock_response
+            result = query_globi("Gadus morhua", interaction_type="someObscureType")
+
+        assert "uncommon" in result["note"].lower()
