@@ -84,11 +84,13 @@ def test_ecospace_run_and_stop(live_client, spatial_model_path):
     live_client.command_result("run_ecopath")
     live_client.command_result("load_ecosim_scenario", {"index": 1})
     live_client.command_result("load_ecospace_scenario", {"index": 1})
-    result = live_client.command_result("run_ecospace")
-    assert result.get("started") is True
-    state = live_client.command_result("get_ecospace_run_state")
-    assert "has_ecospace_loaded" in state
-    live_client.command_result("stop_ecospace")
+    try:
+        result = live_client.command_result("run_ecospace")
+        assert result.get("started") is True
+        state = live_client.command_result("get_ecospace_run_state")
+        assert "has_ecospace_loaded" in state
+    finally:
+        live_client.command_result("stop_ecospace")
 
 
 @live
@@ -108,30 +110,33 @@ def test_ecospace_run_to_completion_with_results(live_client, spatial_model_path
     live_client.command_result("run_ecopath")
     live_client.command_result("load_ecosim_scenario", {"index": 1})
     live_client.command_result("load_ecospace_scenario", {"index": 1})
-    result = live_client.command_result("run_ecospace")
-    assert result.get("started") is True
+    try:
+        result = live_client.command_result("run_ecospace")
+        assert result.get("started") is True
 
-    deadline = time.monotonic() + 300
-    while time.monotonic() < deadline:
-        state = live_client.command_result("get_ecospace_run_state")
-        if not state.get("is_ecospace_running") and state.get("has_ecospace_ran"):
-            break
-        time.sleep(2)
-    else:
-        raise RuntimeError(
-            f"Ecospace did not complete within 300s. Last state: {state}"
+        deadline = time.monotonic() + 300
+        while time.monotonic() < deadline:
+            state = live_client.command_result("get_ecospace_run_state")
+            if not state.get("is_ecospace_running") and state.get("has_ecospace_ran"):
+                break
+            time.sleep(2)
+        else:
+            raise RuntimeError(
+                f"Ecospace did not complete within 300s. Last state: {state}"
+            )
+
+        assert state["has_ecospace_ran"] is True
+
+        groups = live_client.command_result(
+            "list_entities", {"domain": "ecospace_group_inputs"}
         )
-
-    assert state["has_ecospace_ran"] is True
-
-    groups = live_client.command_result(
-        "list_entities", {"domain": "ecospace_group_inputs"}
-    )
-    first_group_index = 1
-    results = live_client.command_result(
-        "get_ecospace_group_results",
-        {"index": first_group_index, "variables": ["biomass"]},
-    )
-    assert "series" in results
-    assert "biomass" in results["series"]
-    assert len(results["series"]["biomass"]) > 0
+        first_group_index = 1
+        results = live_client.command_result(
+            "get_ecospace_group_results",
+            {"index": first_group_index, "variables": ["biomass"]},
+        )
+        assert "series" in results
+        assert "biomass" in results["series"]
+        assert len(results["series"]["biomass"]) > 0
+    finally:
+        live_client.command_result("stop_ecospace")
