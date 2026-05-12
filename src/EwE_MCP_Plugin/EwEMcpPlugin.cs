@@ -1284,6 +1284,7 @@ namespace EwE_MCP_Plugin
                 for (var i = 0; i < ps.Length; i++)
                 {
                     if (ps[i].ParameterType == typeof(bool)) invokeArgs[i] = true;
+                    else if (ps[i].IsOptional) invokeArgs[i] = Type.Missing;
                     else invokeArgs[i] = null;
                 }
             }
