@@ -1261,16 +1261,43 @@ namespace EwE_MCP_Plugin
         private JObject RunEcospace()
         {
             var core = RequireCore();
-            var method = core.GetType().GetMethod("RunEcospace", new Type[0]);
-            if (method == null) throw new EwEMcpException("core_unavailable", "RunEcospace not available");
-            bool ok = Convert.ToBoolean(method.Invoke(core, null));
+            var delegateType = typeof(cCore.EcoSpaceInterfaceDelegate);
+            var method = core.GetType().GetMethod("RunEcospace", new[] { delegateType.MakeByRefType(), typeof(bool) });
+            object[] invokeArgs = new object[] { null, true };
+            if (method == null)
+            {
+                var candidates = core.GetType().GetMethods(BindingFlags.Instance | BindingFlags.Public)
+                    .Where(m => m.Name == "RunEcospace")
+                    .ToList();
+                if (candidates.Count == 0) throw new EwEMcpException("core_unavailable", "RunEcospace not available");
+                var candidate = candidates.FirstOrDefault(m => {
+                    var ps = m.GetParameters();
+                    return ps.Length == 2 && ps[0].ParameterType.HasElementType && ps[0].ParameterType.GetElementType() == delegateType && ps[1].ParameterType == typeof(bool);
+                }) ?? candidates.FirstOrDefault(m => {
+                    var ps = m.GetParameters();
+                    return ps.Length >= 1 && ps.Length <= 3 && ps.All(p => p.IsOptional);
+                });
+                if (candidate == null) throw new EwEMcpException("core_unavailable", $"RunEcospace not available (found {candidates.Count} overloads, none compatible)");
+                method = candidate;
+                var ps = method.GetParameters();
+                invokeArgs = new object[ps.Length];
+                for (var i = 0; i < ps.Length; i++)
+                {
+    if (ps[i].ParameterType == typeof(bool)) invokeArgs[i] = true;
+    else if (ps[i].IsOptional) invokeArgs[i] = Type.Missing;
+    else invokeArgs[i] = null;
+                }
+            }
+            bool ok = Convert.ToBoolean(method.Invoke(core, invokeArgs));
             return new JObject { ["started"] = ok };
         }
 
         private JObject StopEcospace()
         {
             var core = RequireCore();
-            core.GetType().GetMethod("StopEcospace")?.Invoke(core, null);
+            var method = core.GetType().GetMethod("StopEcospace", Type.EmptyTypes);
+            if (method == null) throw new EwEMcpException("core_unavailable", "StopEcospace not available");
+            method.Invoke(core, null);
             return new JObject { ["stopped"] = true };
         }
 

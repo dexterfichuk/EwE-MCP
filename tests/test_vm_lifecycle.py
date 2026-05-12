@@ -5,7 +5,7 @@ import time
 import pytest
 
 vm_integration = pytest.mark.skipif(
-    not (os.environ.get("EWE_LIVE_TESTS") and os.environ.get("SSHPASS")),
+    not (os.environ.get("EWE_LIVE_TESTS") == "1" and os.environ.get("SSHPASS")),
     reason="Requires EWE_LIVE_TESTS=1 and SSHPASS for VM lifecycle",
 )
 
