@@ -3432,7 +3432,7 @@ namespace EwE_MCP_Plugin
         {
             var target = ResolveEntity(RequiredString(parameters, "domain"), OptionalInt(parameters, "index"));
             var values = parameters["values"] as JObject ?? throw new EwEMcpException("missing_parameter", "Missing 'values' object");
-            var navigate = OptionalBool(parameters, "navigate");
+            var navigate = OptionalBool(parameters, "navigate", true);
 
             var result = SetGenericValues(target.NormalizedDomain, target.Entity, target.Index ?? 1, values);
 
@@ -3453,7 +3453,7 @@ namespace EwE_MCP_Plugin
             var variable = RequiredString(parameters, "variable");
             var indices = RequiredIntArray(parameters, "indices");
             var value = parameters["value"] ?? throw new EwEMcpException("missing_parameter", "Missing value");
-            var navigation = OptionalBool(parameters, "navigate") ? NavigateToSuggestedEditNode(target.NormalizedDomain, new[] { variable }) : null;
+            var navigation = OptionalBool(parameters, "navigate", true) ? NavigateToSuggestedEditNode(target.NormalizedDomain, new[] { variable }) : null;
             var property = FindIndexedProperty(target.Entity, variable, target.NormalizedDomain, indices.Length, requireWritable: true);
             if (property == null)
             {
@@ -4319,10 +4319,15 @@ namespace EwE_MCP_Plugin
 
         private static bool OptionalBool(JObject parameters, string name)
         {
+            return OptionalBool(parameters, name, false);
+        }
+
+        private static bool OptionalBool(JObject parameters, string name, bool defaultValue)
+        {
             var token = parameters?[name];
             if (token == null || token.Type == JTokenType.Null || string.IsNullOrWhiteSpace(token.ToString()))
             {
-                return false;
+                return defaultValue;
             }
             if (token.Type == JTokenType.Boolean)
             {
