@@ -136,12 +136,40 @@ def enrich_diagnose(result: dict[str, Any]) -> dict[str, Any]:
             "detail": {"package": "ewe-mcp"},
         }
     )
+    checks.append(
+        {
+            "name": "sentinel_filtering",
+            "status": "ok" if should_filter_sentinels() else "disabled",
+            "detail": {
+                "enabled": should_filter_sentinels(),
+                "env_var": "EWE_MCP_FILTER_SENTINELS",
+            },
+        }
+    )
     return result
 
 
 # ── EwE range constraints (BUG-8) ───────────────────────────────────────
 
 EWE_NULL_VALUE = -9999.0
+
+_SENTINEL_VALUES = frozenset({-9999, -9999.0})
+
+
+@lru_cache(maxsize=1)
+def should_filter_sentinels() -> bool:
+    return os.environ.get("EWE_MCP_FILTER_SENTINELS", "1") != "0"
+
+
+def filter_sentinels(value: Any) -> Any:
+    if isinstance(value, (int, float)) and value in _SENTINEL_VALUES:
+        return None
+    if isinstance(value, dict):
+        return {k: filter_sentinels(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [filter_sentinels(item) for item in value]
+    return value
+
 
 # 4-tuple: (min_val, max_val, min_exclusive, max_exclusive)
 # min_exclusive=True means value must be > min_val (not >=)
