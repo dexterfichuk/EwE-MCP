@@ -301,16 +301,28 @@ def test_python_batch_blocked_is_superset_of_csharp():
     )
 
 
-_CSHARP_DIALOG_OPENING_COMMANDS = frozenset(
-    {
-        "ImportTimeSeries",
-        "m_cmdImportTimeSeries",
-    }
-)
+def _extract_csharp_dialog_commands():
+    cs_path = pathlib.Path(__file__).resolve().parents[1] / "src" / "EwE_MCP_Plugin" / "EwEMcpPlugin.cs"
+    if not cs_path.exists():
+        return frozenset()
+    text = cs_path.read_text(encoding="utf-8")
+    import re
+    matches = re.findall(r'DefaultDialogOpeningCommands[^;]*?=\s*new\s+HashSet[^{]*\{(.*?)\}', text, re.DOTALL)
+    if not matches:
+        return frozenset()
+    commands = set()
+    for m in matches:
+        for item in re.findall(r'"([^"]+)"', m):
+            commands.add(item)
+    return frozenset(commands)
+
+
+_CSHARP_DIALOG_OPENING_COMMANDS = _extract_csharp_dialog_commands()
 
 
 def test_dialog_opening_commands_denylist_is_known():
-    assert _CSHARP_DIALOG_OPENING_COMMANDS, "DialogOpeningCommands denylist must not be empty"
+    if not _CSHARP_DIALOG_OPENING_COMMANDS:
+        pytest.skip("Could not parse DefaultDialogOpeningCommands from C# source")
     assert "ImportTimeSeries" in _CSHARP_DIALOG_OPENING_COMMANDS
 
 

@@ -98,7 +98,7 @@ def error_hint(message: str) -> str | None:
     if "core" in lower and "unavailable" in lower:
         return "Wait for EwE startup to finish or load a model before using model/run tools."
     if "dialog_command_blocked" in lower:
-        return "This UI command opens a modal dialog that blocks the MCP plugin. Use the dedicated MCP tool instead (e.g., load_ecosim_scenario for time series import)."
+        return "This UI command opens a modal dialog that blocks the MCP plugin. Use the dedicated MCP tool instead (e.g., set_values for parameter edits, run_ecopath for balancing)."
     return None
 
 

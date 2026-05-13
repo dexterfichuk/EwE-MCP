@@ -501,7 +501,8 @@ namespace EwE_MCP_Plugin
                     Check("command_handler", cmdh != null, cmdh?.GetType().FullName),
                     Check("plugin_log", File.Exists(EwEMcpFileLog.Path), EwEMcpFileLog.Path),
                     Check("token", !string.IsNullOrWhiteSpace(_config.Token), _config.UsingDefaultToken ? "default development token" : "configured"),
-                    Check("eval_enabled", _config.EnableEval, _config.EnableEval ? "enabled" : "disabled")
+                    Check("eval_enabled", _config.EnableEval, _config.EnableEval ? "enabled" : "disabled"),
+                Check("dialog_watcher_enabled", _config.DialogWatcherEnabled, _config.DialogWatcherEnabled ? "enabled" : "disabled")
                 },
                 ["host"] = _config.Host,
                 ["port"] = _config.Port,
@@ -2390,11 +2391,28 @@ namespace EwE_MCP_Plugin
             return new JObject { ["commands"] = commands, ["total_count"] = commands.Count };
         }
 
-        private static readonly HashSet<string> DialogOpeningCommands = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        // Dialog-opening commands that are blocked in MCP mode.
+        // Extend via EWE_MCP_DIALOG_BLOCKED_COMMANDS env var (comma-separated) or
+        // dialog_blocked_commands key in EwE_MCP_Plugin.cfg (comma-separated).
+        private static readonly HashSet<string> DefaultDialogOpeningCommands = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
             "ImportTimeSeries",
             "m_cmdImportTimeSeries",
         };
+
+        private HashSet<string> GetDialogOpeningCommands()
+        {
+            var commands = new HashSet<string>(DefaultDialogOpeningCommands, StringComparer.OrdinalIgnoreCase);
+            var extra = _config.DialogBlockedCommands;
+            if (extra != null)
+            {
+                foreach (var cmd in extra.Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries))
+                {
+                    commands.Add(cmd.Trim());
+                }
+            }
+            return commands;
+        }
 
         private JObject InvokeUiCommand(JObject parameters)
         {
@@ -2405,7 +2423,7 @@ namespace EwE_MCP_Plugin
             {
                 throw new EwEMcpException("command_not_found", $"UI command not found: {name}");
             }
-            if (DialogOpeningCommands.Contains(name))
+            if (GetDialogOpeningCommands().Contains(name))
             {
                 throw new EwEMcpException("dialog_command_blocked", $"UI command '{name}' opens a modal dialog that cannot be handled in MCP mode. Use the dedicated MCP tool instead.");
             }
@@ -2755,53 +2773,76 @@ namespace EwE_MCP_Plugin
             };
         }
 
-    private JObject RunEcopath()
-    {
-        var core = RequireCore();
-        bool ok = core.RunEcopath();
-        bool isBalanced = false;
-        try { isBalanced = (bool)SafeInvokeBool(core, "IsModelBalanced"); } catch { }
-        string runState = isBalanced ? "balanced" : "unbalanced";
-        return new JObject
+        private JObject RunEcopath()
         {
-            ["started"] = ok,
-            ["run_type"] = "ecopath",
-            ["is_model_balanced"] = isBalanced,
-            ["ecopath_run_state"] = runState
-        };
-    }
+            var core = RequireCore();
+            bool ok = core.RunEcopath();
+            bool isBalanced = false;
+            try { isBalanced = (bool)SafeInvokeBool(core, "IsModelBalanced"); } catch { }
+            string runDetail = SafeGetEcopathRunStateDetail(core);
+            string runState = isBalanced ? "balanced" : "unbalanced";
+            return new JObject
+            {
+                ["started"] = ok,
+                ["run_type"] = "ecopath",
+                ["is_model_balanced"] = isBalanced,
+                ["ecopath_run_state"] = runState,
+                ["ecopath_detail"] = runDetail
+            };
+        }
 
-    private JObject GetEcopathRunState()
-    {
-        var core = RequireCore();
-        var sm = SafeGetProperty(core, "StateMonitor");
-        bool hasEcopathRan = false;
-        bool isBalanced = false;
-        try { hasEcopathRan = SafeInvokeBool(sm, "HasEcopathRan"); } catch { }
-        try { isBalanced = SafeInvokeBool(core, "IsModelBalanced"); } catch { }
-        string runState;
-        if (hasEcopathRan && isBalanced)
+        private JObject GetEcopathRunState()
         {
-            runState = "balanced";
+            var core = RequireCore();
+            var sm = SafeGetProperty(core, "StateMonitor");
+            bool hasEcopathRan = false;
+            bool isBalanced = false;
+            try { hasEcopathRan = SafeInvokeBool(sm, "HasEcopathRan"); } catch { }
+            try { isBalanced = SafeInvokeBool(core, "IsModelBalanced"); } catch { }
+            string runDetail = SafeGetEcopathRunStateDetail(core);
+            string runState;
+            if (hasEcopathRan && isBalanced)
+            {
+                runState = "balanced";
+            }
+            else if (hasEcopathRan)
+            {
+                runState = "unbalanced";
+            }
+            else
+            {
+                runState = "not_run";
+            }
+            return new JObject
+            {
+                ["core_execution_state"] = SafeInvokeToString(sm, "CoreExecutionState"),
+                ["has_ecopath_loaded"] = SafeInvokeBool(sm, "HasEcopathLoaded"),
+                ["has_ecopath_ran"] = hasEcopathRan,
+                ["is_model_balanced"] = isBalanced,
+                ["ecopath_run_state"] = runState,
+                ["ecopath_detail"] = runDetail,
+                ["queried_at"] = DateTime.UtcNow.ToString("o")
+            };
         }
-        else if (hasEcopathRan)
+
+        private static string SafeGetEcopathRunStateDetail(object core)
         {
-            runState = "unbalanced";
+            try
+            {
+                var ecopath = SafeGetProperty(core, "Ecopath");
+                if (ecopath != null)
+                {
+                    var field = ecopath.GetType().GetField("RunState");
+                    if (field != null)
+                    {
+                        var val = field.GetValue(ecopath);
+                        return val?.ToString() ?? "unknown";
+                    }
+                }
+            }
+            catch { }
+            return "unknown";
         }
-        else
-        {
-            runState = "not_run";
-        }
-        return new JObject
-        {
-            ["core_execution_state"] = SafeInvokeToString(sm, "CoreExecutionState"),
-            ["has_ecopath_loaded"] = SafeInvokeBool(sm, "HasEcopathLoaded"),
-            ["has_ecopath_ran"] = hasEcopathRan,
-            ["is_model_balanced"] = isBalanced,
-            ["ecopath_run_state"] = runState,
-            ["queried_at"] = DateTime.UtcNow.ToString("o")
-        };
-    }
 
         private JObject GetEcopathStats()
         {

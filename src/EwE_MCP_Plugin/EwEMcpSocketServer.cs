@@ -21,6 +21,7 @@ namespace EwE_MCP_Plugin
         private Task _acceptLoop;
         private CancellationTokenSource _dialogWatcherCts;
         private Task _dialogWatcherLoop;
+        private int _currentPid;
 
         [DllImport("user32.dll")]
         private static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
@@ -44,7 +45,10 @@ namespace EwE_MCP_Plugin
         private static extern IntPtr FindWindowEx(IntPtr hWndParent, IntPtr hWndChildAfter, string lpszClass, string lpszWindow);
 
         [DllImport("user32.dll")]
-        private static extern IntPtr SendMessage(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
+        private static extern bool PostMessage(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
+
+        [DllImport("user32.dll")]
+        private static extern bool SendMessageTimeout(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam, uint fuFlags, uint uTimeout, out IntPtr lpdwResult);
 
         [DllImport("user32.dll")]
         private static extern bool SetForegroundWindow(IntPtr hWnd);
@@ -55,7 +59,9 @@ namespace EwE_MCP_Plugin
         private const uint BM_CLICK = 0x00F5;
         private const int IDOK = 1;
         private const int IDYES = 6;
-        private static readonly int _currentPid = System.Diagnostics.Process.GetCurrentProcess().Id;
+        private const uint SMTO_ABORTIFHUNG = 0x0002;
+        private const uint WM_COMMAND = 0x0111;
+        private const uint MSG_TIMEOUT_MS = 500;
 
         public EwEMcpSocketServer(EwEMcpConfig config, EwEMcpCommandRouter router, EwEMcpAuditLog auditLog)
         {
@@ -292,8 +298,15 @@ namespace EwE_MCP_Plugin
 
         private void StartDialogWatcher()
         {
+            if (!_config.DialogWatcherEnabled)
+            {
+                EwEMcpPlugin.EwEMcpFileLog.Info("Dialog watcher is disabled (dialog_watcher_enabled not set)");
+                return;
+            }
+            _currentPid = System.Diagnostics.Process.GetCurrentProcess().Id;
             _dialogWatcherCts = new CancellationTokenSource();
             _dialogWatcherLoop = Task.Run(() => DialogWatcherLoopAsync(_dialogWatcherCts.Token));
+            EwEMcpPlugin.EwEMcpFileLog.Info($"Dialog watcher started (PID={_currentPid})");
         }
 
         private void StopDialogWatcher()
@@ -308,6 +321,7 @@ namespace EwE_MCP_Plugin
             }
             finally
             {
+                _dialogWatcherCts?.Dispose();
                 _dialogWatcherCts = null;
                 _dialogWatcherLoop = null;
             }
@@ -320,7 +334,7 @@ namespace EwE_MCP_Plugin
                 try
                 {
                     await Task.Delay(2000, token).ConfigureAwait(false);
-                    var dismissed = DismissBlockingDialogs();
+                    var dismissed = DismissBlockingDialogs(_currentPid);
                     if (dismissed > 0)
                     {
                         _auditLog.Add("dialog_watcher", "dismissed", $"{dismissed} blocking dialog(s) auto-dismissed");
@@ -336,13 +350,18 @@ namespace EwE_MCP_Plugin
             }
         }
 
-        private static int DismissBlockingDialogs()
+        // Thread safety: BM_CLICK via SendMessageTimeout marshals to the dialog's UI thread.
+        // This is safe because the modal dialog pumps its own message loop (the very thing
+        // blocking the MCP operation), so SendMessageTimeout will complete promptly.
+        // We use SendMessageTimeout with SMTO_ABORTIFHUNG as a safety net in case the
+        // dialog thread is unresponsive, falling back to async PostMessage if it times out.
+        private static int DismissBlockingDialogs(int currentPid)
         {
             var dismissed = 0;
             EnumWindows((hWnd, _) =>
             {
                 GetWindowThreadProcessId(hWnd, out var pid);
-                if (pid != _currentPid)
+                if (pid != currentPid)
                 {
                     return true;
                 }
@@ -365,6 +384,7 @@ namespace EwE_MCP_Plugin
                 var title = new StringBuilder(512);
                 GetWindowText(hWnd, title, title.Capacity);
                 var titleText = title.ToString();
+                var displayTitle = string.IsNullOrEmpty(titleText) ? "(untitled)" : titleText;
 
                 if (cls == "#32770")
                 {
@@ -376,9 +396,17 @@ namespace EwE_MCP_Plugin
                         if (btnId == IDYES || btnId == IDOK)
                         {
                             SetForegroundWindow(hWnd);
-                            SendMessage(btn, BM_CLICK, IntPtr.Zero, IntPtr.Zero);
+                            IntPtr result;
+                            if (!SendMessageTimeout(btn, BM_CLICK, IntPtr.Zero, IntPtr.Zero, SMTO_ABORTIFHUNG, MSG_TIMEOUT_MS, out result))
+                            {
+                                PostMessage(btn, BM_CLICK, IntPtr.Zero, IntPtr.Zero);
+                                EwEMcpPlugin.EwEMcpFileLog.Info($"Dialog watcher: SendMessageTimeout hung for Win32 dialog '{displayTitle}', fell back to PostMessage (button ID {btnId})");
+                            }
+                            else
+                            {
+                                EwEMcpPlugin.EwEMcpFileLog.Info($"Dialog watcher dismissed Win32 dialog '{displayTitle}' (class #32770, button ID {btnId})");
+                            }
                             clicked = true;
-                            EwEMcpPlugin.EwEMcpFileLog.Info($"Dialog watcher dismissed Win32 dialog '{titleText}' (class #32770, button ID {btnId})");
                             dismissed++;
                             break;
                         }
@@ -386,39 +414,37 @@ namespace EwE_MCP_Plugin
                     }
                     if (!clicked)
                     {
-                        SendMessage(hWnd, 0x0111, (IntPtr)IDOK, IntPtr.Zero);
-                        EwEMcpPlugin.EwEMcpFileLog.Info($"Dialog watcher sent WM_COMMAND/IDOK to Win32 dialog '{titleText}' (class #32770)");
-                        dismissed++;
+                        EwEMcpPlugin.EwEMcpFileLog.Warn($"Dialog watcher found Win32 dialog '{displayTitle}' (class #32770) with no OK/Yes button — leaving it alone");
                     }
                 }
                 else
                 {
-                    var yesBtn = FindWindowEx(hWnd, IntPtr.Zero, null, "&Yes");
-                    if (yesBtn == IntPtr.Zero)
+                    // WinForms dialogs: search for Button-class children by text.
+                    // NOTE: Button text ("OK", "Yes", "&Yes") is locale-dependent.
+                    // This matches English/EwE defaults; other locales may require config changes.
+                    var okBtn = FindWindowEx(hWnd, IntPtr.Zero, "Button", "OK");
+                    if (okBtn == IntPtr.Zero)
                     {
-                        yesBtn = FindWindowEx(hWnd, IntPtr.Zero, null, "Yes");
+                        okBtn = FindWindowEx(hWnd, IntPtr.Zero, "Button", "&OK");
                     }
-                    if (yesBtn != IntPtr.Zero)
+                    if (okBtn != IntPtr.Zero)
                     {
                         SetForegroundWindow(hWnd);
-                        SendMessage(yesBtn, BM_CLICK, IntPtr.Zero, IntPtr.Zero);
-                        EwEMcpPlugin.EwEMcpFileLog.Info($"Dialog watcher dismissed WinForms dialog '{titleText}' by clicking Yes");
+                        IntPtr result;
+                        if (!SendMessageTimeout(okBtn, BM_CLICK, IntPtr.Zero, IntPtr.Zero, SMTO_ABORTIFHUNG, MSG_TIMEOUT_MS, out result))
+                        {
+                            PostMessage(okBtn, BM_CLICK, IntPtr.Zero, IntPtr.Zero);
+                            EwEMcpPlugin.EwEMcpFileLog.Info($"Dialog watcher: SendMessageTimeout hung for WinForms dialog '{displayTitle}', fell back to PostMessage (OK)");
+                        }
+                        else
+                        {
+                            EwEMcpPlugin.EwEMcpFileLog.Info($"Dialog watcher dismissed WinForms dialog '{displayTitle}' by clicking OK");
+                        }
                         dismissed++;
                     }
                     else
                     {
-                        var okBtn = FindWindowEx(hWnd, IntPtr.Zero, null, "OK");
-                        if (okBtn == IntPtr.Zero)
-                        {
-                            okBtn = FindWindowEx(hWnd, IntPtr.Zero, null, "&OK");
-                        }
-                        if (okBtn != IntPtr.Zero)
-                        {
-                            SetForegroundWindow(hWnd);
-                            SendMessage(okBtn, BM_CLICK, IntPtr.Zero, IntPtr.Zero);
-                            EwEMcpPlugin.EwEMcpFileLog.Info($"Dialog watcher dismissed WinForms dialog '{titleText}' by clicking OK");
-                            dismissed++;
-                        }
+                        EwEMcpPlugin.EwEMcpFileLog.Warn($"Dialog watcher found WinForms modal '{displayTitle}' (class {cls}) with no OK button — leaving it alone");
                     }
                 }
 
