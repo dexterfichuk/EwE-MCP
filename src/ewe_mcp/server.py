@@ -78,7 +78,7 @@ def _send_sync(command_type: str, params: dict[str, Any] | None = None, timeout:
     for attempt in range(3):
         try:
             return _get_connection().command_result(command_type, params, timeout=timeout)
-        except (OSError, ConnectionError, ValueError) as exc:
+        except (OSError, ConnectionError) as exc:
             last_error = exc
             _invalidate_connection()
             if attempt < 2:

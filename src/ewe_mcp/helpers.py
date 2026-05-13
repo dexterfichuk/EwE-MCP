@@ -12,18 +12,7 @@ DEFAULT_TOKEN = "ewe-mcp-local-dev"
 TIMEOUT_DEFAULT = 30
 TIMEOUT_LONG = 120
 RECV_CHUNK_SIZE = 65_536
-DEFAULT_MAX_RESPONSE_SIZE = 10 * 1024 * 1024
-
-
-def get_max_response_size() -> int:
-    raw = os.environ.get("EWE_MCP_MAX_RESPONSE_SIZE", str(DEFAULT_MAX_RESPONSE_SIZE))
-    try:
-        value = int(raw)
-    except ValueError:
-        raise ValueError(f"EWE_MCP_MAX_RESPONSE_SIZE must be an integer, got {raw!r}")
-    if value <= 0:
-        raise ValueError(f"EWE_MCP_MAX_RESPONSE_SIZE must be positive, got {value}")
-    return value
+MAX_RESPONSE_SIZE = 100 * 1024 * 1024
 HEADER_STRUCT = struct.Struct(">I")
 
 EVAL_DENY_PATTERNS = (
@@ -108,8 +97,6 @@ def error_hint(message: str) -> str | None:
         return "Call list_ui_commands or get_command_catalog to inspect available EwE UI commands."
     if "core" in lower and "unavailable" in lower:
         return "Wait for EwE startup to finish or load a model before using model/run tools."
-    if "response too large" in lower:
-        return "The EwE plugin response exceeded the size limit. Try requesting smaller subsets (e.g., fewer variables, shorter time ranges, or pagination)."
     if "dialog_command_blocked" in lower:
         return "This UI command opens a modal dialog that blocks the MCP plugin. Use the dedicated MCP tool instead (e.g., load_ecosim_scenario for time series import)."
     return None

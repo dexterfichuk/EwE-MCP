@@ -3,22 +3,19 @@
 from __future__ import annotations
 
 import json
-import logging
 import socket
 import uuid
 from typing import Any
 
 from ewe_mcp.helpers import (
     HEADER_STRUCT,
+    MAX_RESPONSE_SIZE,
     RECV_CHUNK_SIZE,
     TIMEOUT_DEFAULT,
     get_host,
-    get_max_response_size,
     get_port,
     get_token,
 )
-
-logger = logging.getLogger("ewe_mcp.client")
 
 
 class EwEMCPError(RuntimeError):
@@ -64,10 +61,8 @@ class EwEMCPClient:
     def _recv_exact(self, n: int) -> bytes:
         if self.socket is None:
             raise ConnectionError("Not connected to EwE MCP plugin")
-        max_size = get_max_response_size()
-        if n > max_size:
-            self.disconnect()
-            raise ValueError(f"Response too large: {n} bytes (limit {max_size} bytes)")
+        if n > MAX_RESPONSE_SIZE:
+            raise ValueError(f"Response too large: {n} bytes")
         buf = bytearray(n)
         view = memoryview(buf)
         pos = 0
@@ -104,8 +99,6 @@ class EwEMCPClient:
             header = self._recv_exact(4)
             length = HEADER_STRUCT.unpack(header)[0]
             data = self._recv_exact(length)
-            if length > 1 * 1024 * 1024:
-                logger.warning("Large response from EwE plugin: %d bytes for command %s", length, command_type)
             self._set_timeout(None)
             return json.loads(data.decode("utf-8"))
         except socket.timeout:

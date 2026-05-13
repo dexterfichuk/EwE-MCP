@@ -104,41 +104,6 @@ def test_client_cleanup_on_close():
     client.disconnect()
     thread.join(timeout=2)
 
-def test_client_disconnects_on_oversized_response():
-    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    server.bind(("127.0.0.1", 0))
-    server.listen(1)
-    port = server.getsockname()[1]
-
-    def run():
-        try:
-            conn, _ = server.accept()
-            with conn:
-                header = conn.recv(4)
-                if not header or len(header) < 4:
-                    return
-                length = HEADER_STRUCT.unpack(header)[0]
-                _ = conn.recv(length)
-                fake_length = 50 * 1024 * 1024
-                conn.sendall(HEADER_STRUCT.pack(fake_length))
-                conn.sendall(b'{"id":"test","status":"success","result":{}')
-        finally:
-            server.close()
-
-    thread = threading.Thread(target=run, daemon=True)
-    thread.start()
-
-    client = EwEMCPClient(host="127.0.0.1", port=port, token="secret")
-    assert client.connect()
-    assert client.socket is not None
-
-    with pytest.raises(ValueError, match="Response too large"):
-        client.command_result("ping")
-
-    assert client.socket is None, "Socket should be disconnected after oversized response rejection"
-    thread.join(timeout=2)
-
-
 def test_client_recovers_after_timeout():
     import time
     def handler(request):

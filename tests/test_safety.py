@@ -17,7 +17,7 @@ from ewe_mcp.helpers import (
     DEFAULT_HOST,
     DEFAULT_TOKEN,
     EVAL_DENY_PATTERNS,
-    DEFAULT_MAX_RESPONSE_SIZE,
+    MAX_RESPONSE_SIZE,
     get_token,
     HEADER_STRUCT,
 )
@@ -150,9 +150,9 @@ def test_audit_log_entries_have_required_fields():
 
 
 def test_max_response_size_prevents_oversized_reads():
-    assert isinstance(DEFAULT_MAX_RESPONSE_SIZE, int)
-    assert DEFAULT_MAX_RESPONSE_SIZE > 0
-    assert DEFAULT_MAX_RESPONSE_SIZE == 10 * 1024 * 1024
+    assert isinstance(MAX_RESPONSE_SIZE, int)
+    assert MAX_RESPONSE_SIZE > 0
+    assert MAX_RESPONSE_SIZE == 100 * 1024 * 1024
 
 
 _RUN_STOP_PATTERN = re.compile(r"^(run_|stop_)")

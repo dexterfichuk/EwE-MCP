@@ -562,32 +562,15 @@ namespace EwE_MCP_Plugin
             };
 
         if (eweModel != null)
-        {
-            // Explicit property list avoids reflection over all cEwEModel properties,
-            // which could pick up complex objects, indexed properties, or future
-            // array properties that would bloat the response.
-            var modelProps = new[]
             {
-                "Name", "Description", "Author", "Contact", "Area",
-                "NumDigits", "GroupDigits", "FirstYear", "NumYears",
-                "South", "North", "West", "East",
-                "UnitTimeCustomText", "UnitCurrencyCustomText", "UnitMonetary",
-                "UnitAreaCustomText", "LastSaved", "IsEcoSpaceModelCoupled",
-                "Country", "EcosystemType", "EcobaseCode",
-                "PublicationDOI", "PublicationURI", "PublicationReference"
-            };
-            var metadata = new JObject();
-            foreach (var propName in modelProps)
-            {
-                try
+                var metadata = new JObject();
+                foreach (var prop in eweModel.GetType().GetProperties())
                 {
-                    var val = eweModel.GetType().GetProperty(propName)?.GetValue(eweModel);
-                    if (val != null) metadata[ToVariableName(propName)] = ToJToken(val);
-                }
-                catch { }
-            }
-            info["metadata"] = metadata;
-        }
+                    try 
+                    { 
+                        var val = prop.GetValue(eweModel);
+                        if (val != null) metadata[prop.Name] = val.ToString();
+                    } 
                     catch { }
                 }
                 info["metadata"] = metadata;
@@ -3090,12 +3073,8 @@ namespace EwE_MCP_Plugin
         private JObject CaptureView(JObject parameters)
         {
             var target = OptionalString(parameters, "target") ?? "auto";
-            // Default to 1280x960 to prevent full-res 4K PNGs (~20 MB base64).
-            // Callers can pass larger values or 0 to disable resizing.
-            const int DefaultMaxWidth = 1280;
-            const int DefaultMaxHeight = 960;
-            var maxWidth = OptionalInt(parameters, "max_width") ?? DefaultMaxWidth;
-            var maxHeight = OptionalInt(parameters, "max_height") ?? DefaultMaxHeight;
+            var maxWidth = OptionalInt(parameters, "max_width") ?? 0;
+            var maxHeight = OptionalInt(parameters, "max_height") ?? 0;
 
             Control captureTarget = ResolveCaptureTarget(target);
             if (captureTarget == null)
@@ -4032,13 +4011,9 @@ namespace EwE_MCP_Plugin
             {
                 return false;
             }
-            // Arrays are never "scalar-like" — they blow up ReadScalarValues payloads
-            // when requestedVariables is null (the "dump all" path). Array-returning
-            // properties (e.g., Single[] PredMort on cEcopathGroupOutput) must be read
-            // explicitly via get_values or get_indexed_value instead.
             if (type.IsArray)
             {
-                return false;
+                return IsValueLikeType(type.GetElementType());
             }
             var t = Nullable.GetUnderlyingType(type) ?? type;
             return t.IsPrimitive || t.IsEnum || t == typeof(string) || t == typeof(decimal) || t == typeof(DateTime);
