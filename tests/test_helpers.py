@@ -5,9 +5,12 @@ from ewe_mcp.helpers import (
     DEFAULT_MAX_RESPONSE_SIZE,
     EWE_NULL_VALUE,
     STATUS_CODE_MAP,
+    enrich_diagnose,
     error_hint,
+    filter_sentinels,
     get_max_response_size,
     normalize_domain_name,
+    should_filter_sentinels,
     validate_ewe_ranges,
 )
 
@@ -230,3 +233,145 @@ def test_error_hint_den_dep_catchability_zero():
     hint = error_hint("DenDepCatchability cannot be 0")
     assert "out of range" in hint
     assert "validate_values" in hint
+
+
+# ── filter_sentinels ──────────────────────────────────────────────────
+
+
+class TestFilterSentinels:
+    def test_replaces_float_sentinel(self):
+        assert filter_sentinels(-9999.0) is None
+
+    def test_replaces_int_sentinel(self):
+        assert filter_sentinels(-9999) is None
+
+    def test_preserves_other_floats(self):
+        assert filter_sentinels(3.14) == 3.14
+
+    def test_preserves_other_ints(self):
+        assert filter_sentinels(42) == 42
+
+    def test_preserves_strings(self):
+        assert filter_sentinels("hello") == "hello"
+
+    def test_preserves_none(self):
+        assert filter_sentinels(None) is None
+
+    def test_filters_dict_values(self):
+        result = filter_sentinels({"a": -9999.0, "b": 5, "c": "text"})
+        assert result == {"a": None, "b": 5, "c": "text"}
+
+    def test_filters_nested_dicts(self):
+        result = filter_sentinels({"outer": {"inner": -9999.0, "keep": 1}})
+        assert result == {"outer": {"inner": None, "keep": 1}}
+
+    def test_filters_list_items(self):
+        result = filter_sentinels([-9999.0, 0, 3.14, -9999])
+        assert result == [None, 0, 3.14, None]
+
+    def test_filters_nested_list_in_dict(self):
+        result = filter_sentinels({"values": [-9999.0, 1.0, 2.0]})
+        assert result == {"values": [None, 1.0, 2.0]}
+
+    def test_filters_deeply_nested(self):
+        result = filter_sentinels({"a": [{"b": -9999}, {"b": 5}]})
+        assert result == {"a": [{"b": None}, {"b": 5}]}
+
+    def test_preserves_empty_structures(self):
+        assert filter_sentinels({}) == {}
+        assert filter_sentinels([]) == []
+
+    def test_does_not_match_partial_sentinel(self):
+        assert filter_sentinels(-9998.0) == -9998.0
+        assert filter_sentinels(-99999) == -99999
+
+    def test_preserves_bool(self):
+        assert filter_sentinels(True) is True
+        assert filter_sentinels(False) is False
+
+    def test_filters_tuple_items(self):
+        result = filter_sentinels((-9999.0, 0, 3.14, -9999))
+        assert result == (None, 0, 3.14, None)
+
+    def test_filters_nested_tuple_in_dict(self):
+        result = filter_sentinels({"coords": (-9999.0, 1.0, 2.0)})
+        assert result == {"coords": (None, 1.0, 2.0)}
+
+    def test_integration_realistic_response(self):
+        response = {
+            "name": "TestGroup",
+            "biomass": 10.0,
+            "ee": -9999.0,
+            "i_stanza": -9999,
+            "diet": [{"prey": -9999.0, "fraction": 0.5}],
+        }
+        result = filter_sentinels(response)
+        assert result["ee"] is None
+        assert result["i_stanza"] is None
+        assert result["biomass"] == 10.0
+        assert result["diet"][0]["prey"] is None
+        assert result["diet"][0]["fraction"] == 0.5
+
+
+class TestShouldFilterSentinels:
+    def test_default_is_on(self, monkeypatch):
+        monkeypatch.delenv("EWE_MCP_FILTER_SENTINELS", raising=False)
+        should_filter_sentinels.cache_clear()
+        assert should_filter_sentinels() is True
+
+    def test_explicit_on(self, monkeypatch):
+        monkeypatch.setenv("EWE_MCP_FILTER_SENTINELS", "1")
+        should_filter_sentinels.cache_clear()
+        assert should_filter_sentinels() is True
+
+    def test_explicit_off(self, monkeypatch):
+        monkeypatch.setenv("EWE_MCP_FILTER_SENTINELS", "0")
+        should_filter_sentinels.cache_clear()
+        assert should_filter_sentinels() is False
+
+
+# ── enrich_diagnose sentinel check ────────────────────────────────────
+
+
+def test_enrich_diagnose_sentinel_filtering_enabled(monkeypatch):
+    monkeypatch.setenv("EWE_MCP_FILTER_SENTINELS", "1")
+    should_filter_sentinels.cache_clear()
+    result = enrich_diagnose({"checks": []})
+    sentinel_check = next(
+        (c for c in result["checks"] if c["name"] == "sentinel_filtering"), None
+    )
+    assert sentinel_check is not None
+    assert sentinel_check["status"] == "ok"
+    assert sentinel_check["detail"]["enabled"] is True
+    should_filter_sentinels.cache_clear()
+
+
+def test_enrich_diagnose_sentinel_filtering_disabled(monkeypatch):
+    monkeypatch.setenv("EWE_MCP_FILTER_SENTINELS", "0")
+    should_filter_sentinels.cache_clear()
+    result = enrich_diagnose({"checks": []})
+    sentinel_check = next(
+        (c for c in result["checks"] if c["name"] == "sentinel_filtering"), None
+    )
+    assert sentinel_check is not None
+    assert sentinel_check["status"] == "disabled"
+    assert sentinel_check["detail"]["enabled"] is False
+    should_filter_sentinels.cache_clear()
+
+
+# ── validate_ewe_ranges sentinel bypass ────────────────────────────────
+
+
+def test_validate_ewe_ranges_skips_sentinel_values():
+    result = validate_ewe_ranges(
+        "ecosim_group_inputs", {"max_rel_pb": -9999.0, "den_dep_catchability": -9999}
+    )
+    assert result == {}
+
+
+def test_validate_ewe_ranges_sentinel_mixed_with_valid():
+    result = validate_ewe_ranges(
+        "ecosim_group_inputs", {"max_rel_pb": -9999.0, "den_dep_catchability": 1.0}
+    )
+    assert "max_rel_pb" not in result
+    assert result["den_dep_catchability"]["valid"] is True

@@ -25,16 +25,17 @@ from ewe_mcp.ecopath import (
 )
 from ewe_mcp.helpers import (
     BATCH_BLOCKED_COMMANDS,
-    EWE_NULL_VALUE,
     STATUS_CODE_MAP,
     TIMEOUT_DEFAULT,
     TIMEOUT_LONG,
     enrich_diagnose,
     error_hint,
+    filter_sentinels,
     get_host,
     get_port,
     get_token,
     normalize_domain_name,
+    should_filter_sentinels,
     validate_ewe_ranges,
 )
 
@@ -106,7 +107,10 @@ async def _send(
     timeout: int = TIMEOUT_DEFAULT,
 ):
     try:
-        return await asyncio.to_thread(_send_sync, command_type, params, timeout)
+        result = await asyncio.to_thread(_send_sync, command_type, params, timeout)
+        if should_filter_sentinels():
+            result = filter_sentinels(result)
+        return result
     except Exception as exc:
         hint = error_hint(str(exc))
         if hint:
@@ -443,7 +447,7 @@ async def get_ecopath_group(index: int) -> dict[str, Any]:
                     enriched_output["trophic_level"] = values["TTLX"]
                 if "PBOutput" in values:
                     enriched_output["pb_computed"] = values["PBOutput"]
-                    if "GEOutput" in values and values["GEOutput"] != EWE_NULL_VALUE:
+                    if "GEOutput" in values and values["GEOutput"] is not None:
                         enriched_output["ge"] = values["GEOutput"]
                 group["output"] = enriched_output
         except Exception:
