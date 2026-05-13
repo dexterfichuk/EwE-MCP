@@ -14,6 +14,15 @@ def test_ecopath_commands_not_in_batch_blocked():
     assert "export_ecopath_results" in BATCH_BLOCKED_COMMANDS
 
 
+def test_run_ecopath_returns_ecopath_detail_field():
+    import pathlib
+    cs_path = pathlib.Path(__file__).resolve().parents[1] / "src" / "EwE_MCP_Plugin" / "EwEMcpPlugin.cs"
+    if not cs_path.exists():
+        pytest.skip("C# source not available")
+    text = cs_path.read_text(encoding="utf-8")
+    assert "ecopath_detail" in text, "RunEcopath and GetEcopathRunState must return ecopath_detail field"
+
+
 @live
 def test_ecopath_run_state_after_load(live_client, sample_model_path):
     live_client.command_result("load_model", {"path": sample_model_path})
@@ -32,11 +41,19 @@ def test_ecopath_run_state_after_run(live_client, sample_model_path):
     assert run["started"] is True
     assert "is_model_balanced" in run
     assert "ecopath_run_state" in run
+    assert run["ecopath_run_state"] in ("balanced", "unbalanced"), (
+        f"ecopath_run_state should be 'balanced' or 'unbalanced' after run, got {run['ecopath_run_state']!r}"
+    )
+    assert "ecopath_detail" in run
 
     state = live_client.command_result("get_ecopath_run_state")
     assert state["has_ecopath_ran"] is True
     assert "is_model_balanced" in state
     assert "ecopath_run_state" in state
+    assert state["ecopath_run_state"] in ("balanced", "unbalanced"), (
+        f"ecopath_run_state should be 'balanced' or 'unbalanced' after run, got {state['ecopath_run_state']!r}"
+    )
+    assert "ecopath_detail" in state
 
 
 @live

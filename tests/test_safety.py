@@ -332,6 +332,27 @@ def test_invoke_ui_command_is_batch_blocked():
     )
 
 
+def test_dialog_watcher_disabled_by_default():
+    cs_path = pathlib.Path(__file__).resolve().parents[1] / "src" / "EwE_MCP_Plugin" / "EwEMcpProtocol.cs"
+    if not cs_path.exists():
+        pytest.skip("C# source not available")
+    text = cs_path.read_text(encoding="utf-8")
+    assert "DialogWatcherEnabled" in text, "DialogWatcherEnabled property must exist in EwEMcpConfig"
+    import re
+    default_match = re.findall(r'dialogWatcherEnabled\s*=\s*(true|false)', text)
+    if default_match:
+        assert default_match[-1] == "false", "Dialog watcher should be disabled by default"
+
+
+def test_dialog_blocked_commands_config_key_exists():
+    cs_path = pathlib.Path(__file__).resolve().parents[1] / "src" / "EwE_MCP_Plugin" / "EwEMcpProtocol.cs"
+    if not cs_path.exists():
+        pytest.skip("C# source not available")
+    text = cs_path.read_text(encoding="utf-8")
+    assert "DialogBlockedCommands" in text, "DialogBlockedCommands property must exist in EwEMcpConfig"
+    assert "EWE_MCP_DIALOG_BLOCKED_COMMANDS" in text, "EWE_MCP_DIALOG_BLOCKED_COMMANDS env var must be read"
+
+
 def test_config_file_requires_ewe_mcp_section_header():
     """The C# ReadConfigFile() only reads key=value pairs under [EwE_MCP].
     The installer must write this section header in the default config file."""

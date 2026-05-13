@@ -44,6 +44,8 @@ export EWE_MCP_REMOTE_PORT=9877
 
 Optional: set `EWE_MCP_ENABLED=0` before launching EwE to keep the plugin installed but prevent it from binding the socket. Leave it unset for normal build/deploy/live work.
 
+Dialog watcher: set `EWE_MCP_DIALOG_WATCHER=1` or add `dialog_watcher_enabled=true` to the config file to enable the in-plugin dialog watcher that auto-dismisses blocking modal dialogs. Disabled by default. Extend the dialog-opening command denylist with `EWE_MCP_DIALOG_BLOCKED_COMMANDS=cmd1,cmd2` or `dialog_blocked_commands=cmd1,cmd2` in the config file.
+
 If you are working from a separate worktree whose directory name is not `EwE-MCP`, either use scripts that derive the remote root from the worktree name or set:
 
 ```bash
@@ -54,7 +56,7 @@ export EWE_VM_REMOTE_ROOT="C:/Users/dexter/$(basename "$PWD")"
 
 The plugin reads configuration from `EwE_MCP_Plugin.cfg` at `%APPDATA%\Ecopath with Ecosim\` (INI-style with a required `[EwE_MCP]` section header; key=value lines outside this section are ignored). Configuration precedence: environment variables > config file > compiled defaults. The `diagnose` command reports `config_file_path` and `config_file_exists` so you can verify which file is loaded.
 
-Supported config keys are `host`, `port`, `token`, `enabled`, and `enable_eval`.
+Supported config keys are `host`, `port`, `token`, `enabled`, `enable_eval`, `dialog_watcher_enabled`, and `dialog_blocked_commands`.
 
 Build the plugin on the Windows VM, deploy it into EwE's plugin folder, and launch EwE through the interactive desktop session:
 
