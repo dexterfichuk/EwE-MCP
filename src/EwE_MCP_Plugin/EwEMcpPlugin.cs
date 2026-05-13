@@ -561,16 +561,33 @@ namespace EwE_MCP_Plugin
                 ["model_name"] = eweModel?.GetType().GetProperty("Name")?.GetValue(eweModel)?.ToString()
             };
 
-            if (eweModel != null)
+        if (eweModel != null)
+        {
+            // Explicit property list avoids reflection over all cEwEModel properties,
+            // which could pick up complex objects, indexed properties, or future
+            // array properties that would bloat the response.
+            var modelProps = new[]
             {
-                var metadata = new JObject();
-                foreach (var prop in eweModel.GetType().GetProperties())
+                "Name", "Description", "Author", "Contact", "Area",
+                "NumDigits", "GroupDigits", "FirstYear", "NumYears",
+                "South", "North", "West", "East",
+                "UnitTimeCustomText", "UnitCurrencyCustomText", "UnitMonetary",
+                "UnitAreaCustomText", "LastSaved", "IsEcoSpaceModelCoupled",
+                "Country", "EcosystemType", "EcobaseCode",
+                "PublicationDOI", "PublicationURI", "PublicationReference"
+            };
+            var metadata = new JObject();
+            foreach (var propName in modelProps)
+            {
+                try
                 {
-                    try 
-                    { 
-                        var val = prop.GetValue(eweModel);
-                        if (val != null) metadata[prop.Name] = val.ToString();
-                    } 
+                    var val = eweModel.GetType().GetProperty(propName)?.GetValue(eweModel);
+                    if (val != null) metadata[ToVariableName(propName)] = ToJToken(val);
+                }
+                catch { }
+            }
+            info["metadata"] = metadata;
+        }
                     catch { }
                 }
                 info["metadata"] = metadata;
@@ -2390,6 +2407,12 @@ namespace EwE_MCP_Plugin
             return new JObject { ["commands"] = commands, ["total_count"] = commands.Count };
         }
 
+        private static readonly HashSet<string> DialogOpeningCommands = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "ImportTimeSeries",
+            "m_cmdImportTimeSeries",
+        };
+
         private JObject InvokeUiCommand(JObject parameters)
         {
             var name = RequiredString(parameters, "name");
@@ -2398,6 +2421,10 @@ namespace EwE_MCP_Plugin
             if (cmd == null)
             {
                 throw new EwEMcpException("command_not_found", $"UI command not found: {name}");
+            }
+            if (DialogOpeningCommands.Contains(name))
+            {
+                throw new EwEMcpException("dialog_command_blocked", $"UI command '{name}' opens a modal dialog that cannot be handled in MCP mode. Use the dedicated MCP tool instead.");
             }
 
             if (parameters.TryGetValue("tag", out var tag))
@@ -2745,61 +2772,53 @@ namespace EwE_MCP_Plugin
             };
         }
 
-        private JObject RunEcopath()
+    private JObject RunEcopath()
+    {
+        var core = RequireCore();
+        bool ok = core.RunEcopath();
+        bool isBalanced = false;
+        try { isBalanced = (bool)SafeInvokeBool(core, "IsModelBalanced"); } catch { }
+        string runState = isBalanced ? "balanced" : "unbalanced";
+        return new JObject
         {
-            var core = RequireCore();
-            bool ok = core.RunEcopath();
-            bool isBalanced = false;
-            string runState = "unknown";
-            try { isBalanced = (bool)SafeInvokeBool(core, "IsModelBalanced"); } catch { }
-            try
-            {
-                var ecopath = SafeGetProperty(core, "Ecopath");
-                if (ecopath != null)
-                {
-                    runState = SafeInvokeToString(ecopath, "RunState");
-                    if (string.IsNullOrEmpty(runState)) runState = "unknown";
-                }
-            }
-            catch { }
-            return new JObject
-            {
-                ["started"] = ok,
-                ["run_type"] = "ecopath",
-                ["is_model_balanced"] = isBalanced,
-                ["ecopath_run_state"] = runState
-            };
-        }
+            ["started"] = ok,
+            ["run_type"] = "ecopath",
+            ["is_model_balanced"] = isBalanced,
+            ["ecopath_run_state"] = runState
+        };
+    }
 
-        private JObject GetEcopathRunState()
+    private JObject GetEcopathRunState()
+    {
+        var core = RequireCore();
+        var sm = SafeGetProperty(core, "StateMonitor");
+        bool hasEcopathRan = false;
+        bool isBalanced = false;
+        try { hasEcopathRan = SafeInvokeBool(sm, "HasEcopathRan"); } catch { }
+        try { isBalanced = SafeInvokeBool(core, "IsModelBalanced"); } catch { }
+        string runState;
+        if (hasEcopathRan && isBalanced)
         {
-            var core = RequireCore();
-            var sm = SafeGetProperty(core, "StateMonitor");
-            bool hasEcopathRan = false;
-            bool isBalanced = false;
-            string runState = "unknown";
-            try { hasEcopathRan = SafeInvokeBool(sm, "HasEcopathRan"); } catch { }
-            try { isBalanced = SafeInvokeBool(core, "IsModelBalanced"); } catch { }
-            try
-            {
-                var ecopath = SafeGetProperty(core, "Ecopath");
-                if (ecopath != null)
-                {
-                    runState = SafeInvokeToString(ecopath, "RunState");
-                    if (string.IsNullOrEmpty(runState)) runState = "unknown";
-                }
-            }
-            catch { }
-            return new JObject
-            {
-                ["core_execution_state"] = SafeInvokeToString(sm, "CoreExecutionState"),
-                ["has_ecopath_loaded"] = SafeInvokeBool(sm, "HasEcopathLoaded"),
-                ["has_ecopath_ran"] = hasEcopathRan,
-                ["is_model_balanced"] = isBalanced,
-                ["ecopath_run_state"] = runState,
-                ["queried_at"] = DateTime.UtcNow.ToString("o")
-            };
+            runState = "balanced";
         }
+        else if (hasEcopathRan)
+        {
+            runState = "unbalanced";
+        }
+        else
+        {
+            runState = "not_run";
+        }
+        return new JObject
+        {
+            ["core_execution_state"] = SafeInvokeToString(sm, "CoreExecutionState"),
+            ["has_ecopath_loaded"] = SafeInvokeBool(sm, "HasEcopathLoaded"),
+            ["has_ecopath_ran"] = hasEcopathRan,
+            ["is_model_balanced"] = isBalanced,
+            ["ecopath_run_state"] = runState,
+            ["queried_at"] = DateTime.UtcNow.ToString("o")
+        };
+    }
 
         private JObject GetEcopathStats()
         {
@@ -3034,9 +3053,10 @@ namespace EwE_MCP_Plugin
             "stop_mse",
             "run_monte_carlo",
             "stop_monte_carlo",
-            "export_ecopath_results",
-            "shutdown_server",
-        };
+        "export_ecopath_results",
+        "shutdown_server",
+        "invoke_ui_command",
+    };
 
         private JObject Batch(JObject parameters)
         {
@@ -3070,8 +3090,12 @@ namespace EwE_MCP_Plugin
         private JObject CaptureView(JObject parameters)
         {
             var target = OptionalString(parameters, "target") ?? "auto";
-            var maxWidth = OptionalInt(parameters, "max_width") ?? 0;
-            var maxHeight = OptionalInt(parameters, "max_height") ?? 0;
+            // Default to 1280x960 to prevent full-res 4K PNGs (~20 MB base64).
+            // Callers can pass larger values or 0 to disable resizing.
+            const int DefaultMaxWidth = 1280;
+            const int DefaultMaxHeight = 960;
+            var maxWidth = OptionalInt(parameters, "max_width") ?? DefaultMaxWidth;
+            var maxHeight = OptionalInt(parameters, "max_height") ?? DefaultMaxHeight;
 
             Control captureTarget = ResolveCaptureTarget(target);
             if (captureTarget == null)
@@ -3848,7 +3872,7 @@ namespace EwE_MCP_Plugin
                 ["domain"] = domain ?? string.Empty,
                 ["type"] = FriendlyTypeName(property.PropertyType),
                 ["readable"] = property.CanRead,
-                ["writable"] = property.CanWrite && indexParameters.Length == 0,
+                ["writable"] = property.CanWrite,
                 ["indexed"] = indexParameters.Length > 0,
                 ["index_count"] = indexParameters.Length
             };
@@ -4008,9 +4032,13 @@ namespace EwE_MCP_Plugin
             {
                 return false;
             }
+            // Arrays are never "scalar-like" — they blow up ReadScalarValues payloads
+            // when requestedVariables is null (the "dump all" path). Array-returning
+            // properties (e.g., Single[] PredMort on cEcopathGroupOutput) must be read
+            // explicitly via get_values or get_indexed_value instead.
             if (type.IsArray)
             {
-                return IsValueLikeType(type.GetElementType());
+                return false;
             }
             var t = Nullable.GetUnderlyingType(type) ?? type;
             return t.IsPrimitive || t.IsEnum || t == typeof(string) || t == typeof(decimal) || t == typeof(DateTime);

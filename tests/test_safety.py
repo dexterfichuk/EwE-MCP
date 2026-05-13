@@ -17,7 +17,7 @@ from ewe_mcp.helpers import (
     DEFAULT_HOST,
     DEFAULT_TOKEN,
     EVAL_DENY_PATTERNS,
-    MAX_RESPONSE_SIZE,
+    DEFAULT_MAX_RESPONSE_SIZE,
     get_token,
     HEADER_STRUCT,
 )
@@ -150,9 +150,9 @@ def test_audit_log_entries_have_required_fields():
 
 
 def test_max_response_size_prevents_oversized_reads():
-    assert isinstance(MAX_RESPONSE_SIZE, int)
-    assert MAX_RESPONSE_SIZE > 0
-    assert MAX_RESPONSE_SIZE == 100 * 1024 * 1024
+    assert isinstance(DEFAULT_MAX_RESPONSE_SIZE, int)
+    assert DEFAULT_MAX_RESPONSE_SIZE > 0
+    assert DEFAULT_MAX_RESPONSE_SIZE == 10 * 1024 * 1024
 
 
 _RUN_STOP_PATTERN = re.compile(r"^(run_|stop_)")
@@ -165,7 +165,7 @@ def test_batch_blocked_commands_are_destructive_or_sensitive():
     allowed_categories = (
         _MODEL_LIFECYCLE
         | _CAPTURE_TOOLS
-        | {"execute_ewe_code", "export_ecopath_results", "discard_changes", "run_ecopath", "shutdown_server"}
+        | {"execute_ewe_code", "export_ecopath_results", "discard_changes", "run_ecopath", "shutdown_server", "invoke_ui_command"}
     )
     for cmd in BATCH_BLOCKED_COMMANDS:
         if cmd in allowed_categories:
@@ -281,6 +281,7 @@ _CSHARP_BATCH_BLOCKED = frozenset(
         "stop_monte_carlo",
         "export_ecopath_results",
         "shutdown_server",
+        "invoke_ui_command",
     }
 )
 
@@ -297,6 +298,25 @@ def test_python_batch_blocked_is_superset_of_csharp():
     csharp_missing = _CSHARP_BATCH_BLOCKED - BATCH_BLOCKED_COMMANDS
     assert not csharp_missing, (
         f"C# blocks these commands in batch but Python does not: {sorted(csharp_missing)}"
+    )
+
+
+_CSHARP_DIALOG_OPENING_COMMANDS = frozenset(
+    {
+        "ImportTimeSeries",
+        "m_cmdImportTimeSeries",
+    }
+)
+
+
+def test_dialog_opening_commands_denylist_is_known():
+    assert _CSHARP_DIALOG_OPENING_COMMANDS, "DialogOpeningCommands denylist must not be empty"
+    assert "ImportTimeSeries" in _CSHARP_DIALOG_OPENING_COMMANDS
+
+
+def test_invoke_ui_command_is_batch_blocked():
+    assert "invoke_ui_command" in BATCH_BLOCKED_COMMANDS, (
+        "invoke_ui_command should be batch-blocked since dialog-opening commands can hang"
     )
 
 

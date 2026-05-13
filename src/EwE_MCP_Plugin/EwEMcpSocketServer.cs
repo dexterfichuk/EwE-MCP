@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using System.Net;
 using System.Net.Sockets;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -18,6 +19,43 @@ namespace EwE_MCP_Plugin
         private TcpListener _listener;
         private CancellationTokenSource _cts;
         private Task _acceptLoop;
+        private CancellationTokenSource _dialogWatcherCts;
+        private Task _dialogWatcherLoop;
+
+        [DllImport("user32.dll")]
+        private static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
+
+        [DllImport("user32.dll")]
+        private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
+
+        [DllImport("user32.dll")]
+        private static extern bool IsWindowVisible(IntPtr hWnd);
+
+        [DllImport("user32.dll")]
+        private static extern IntPtr GetWindow(IntPtr hWnd, uint uCmd);
+
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+        private static extern int GetClassName(IntPtr hWnd, StringBuilder lpClassName, int nMaxCount);
+
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+        private static extern int GetWindowText(IntPtr hWnd, StringBuilder lpString, int nMaxCount);
+
+        [DllImport("user32.dll")]
+        private static extern IntPtr FindWindowEx(IntPtr hWndParent, IntPtr hWndChildAfter, string lpszClass, string lpszWindow);
+
+        [DllImport("user32.dll")]
+        private static extern IntPtr SendMessage(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
+
+        [DllImport("user32.dll")]
+        private static extern bool SetForegroundWindow(IntPtr hWnd);
+
+        private delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+
+        private const uint GW_OWNER = 4;
+        private const uint BM_CLICK = 0x00F5;
+        private const int IDOK = 1;
+        private const int IDYES = 6;
+        private static readonly int _currentPid = System.Diagnostics.Process.GetCurrentProcess().Id;
 
         public EwEMcpSocketServer(EwEMcpConfig config, EwEMcpCommandRouter router, EwEMcpAuditLog auditLog)
         {
@@ -42,6 +80,7 @@ namespace EwE_MCP_Plugin
             _listener = new TcpListener(address, _config.Port);
             _listener.Start();
             _acceptLoop = Task.Run(() => AcceptLoopAsync(_cts.Token));
+            StartDialogWatcher();
             _auditLog.Add("server", "started", $"{_config.Host}:{_config.Port}");
         }
 
@@ -52,6 +91,7 @@ namespace EwE_MCP_Plugin
                 _cts?.Cancel();
                 _listener?.Stop();
                 _acceptLoop?.Wait(1000);
+                StopDialogWatcher();
             }
             catch
             {
@@ -105,8 +145,25 @@ namespace EwE_MCP_Plugin
                             return;
                         }
 
-                        var response = await ExecuteAsync(requestJson, token).ConfigureAwait(false);
-                        await WriteFrameAsync(stream, response.ToString(Formatting.None), token).ConfigureAwait(false);
+                    var response = await ExecuteAsync(requestJson, token).ConfigureAwait(false);
+                    var responseJson = response.ToString(Formatting.None);
+                    var responseBytes = Encoding.UTF8.GetByteCount(responseJson);
+                    if (responseBytes > _config.MaxMessageBytes)
+                    {
+                        _auditLog.Add(request?.Type ?? "unknown", "response_oversized", $"Response {responseBytes} bytes exceeds limit {_config.MaxMessageBytes}");
+                        var oversizedResponse = new JObject
+                        {
+                            ["id"] = response["id"] ?? string.Empty,
+                            ["status"] = "error",
+                            ["error"] = new JObject
+                            {
+                                ["code"] = "response_too_large",
+                                ["message"] = $"Response payload ({responseBytes} bytes) exceeds the size limit ({_config.MaxMessageBytes} bytes). Try requesting smaller subsets of data."
+                            }
+                        };
+                        responseJson = oversizedResponse.ToString(Formatting.None);
+                    }
+                    await WriteFrameAsync(stream, responseJson, token).ConfigureAwait(false);
                     }
                     catch (IOException)
                     {
@@ -249,5 +306,145 @@ namespace EwE_MCP_Plugin
             await stream.WriteAsync(payload, 0, payload.Length, token).ConfigureAwait(false);
             await stream.FlushAsync(token).ConfigureAwait(false);
         }
+
+        private void StartDialogWatcher()
+        {
+            _dialogWatcherCts = new CancellationTokenSource();
+            _dialogWatcherLoop = Task.Run(() => DialogWatcherLoopAsync(_dialogWatcherCts.Token));
+        }
+
+        private void StopDialogWatcher()
+        {
+            try
+            {
+                _dialogWatcherCts?.Cancel();
+                _dialogWatcherLoop?.Wait(2000);
+            }
+            catch
+            {
+            }
+            finally
+            {
+                _dialogWatcherCts = null;
+                _dialogWatcherLoop = null;
+            }
+        }
+
+        private async Task DialogWatcherLoopAsync(CancellationToken token)
+        {
+            while (!token.IsCancellationRequested)
+            {
+                try
+                {
+                    await Task.Delay(2000, token).ConfigureAwait(false);
+                    var dismissed = DismissBlockingDialogs();
+                    if (dismissed > 0)
+                    {
+                        _auditLog.Add("dialog_watcher", "dismissed", $"{dismissed} blocking dialog(s) auto-dismissed");
+                    }
+                }
+                catch (OperationCanceledException)
+                {
+                    break;
+                }
+                catch
+                {
+                }
+            }
+        }
+
+        private static int DismissBlockingDialogs()
+        {
+            var dismissed = 0;
+            EnumWindows((hWnd, _) =>
+            {
+                GetWindowThreadProcessId(hWnd, out var pid);
+                if (pid != _currentPid)
+                {
+                    return true;
+                }
+
+                if (!IsWindowVisible(hWnd))
+                {
+                    return true;
+                }
+
+                var owner = GetWindow(hWnd, GW_OWNER);
+                if (owner == IntPtr.Zero)
+                {
+                    return true;
+                }
+
+                var className = new StringBuilder(256);
+                GetClassName(hWnd, className, className.Capacity);
+                var cls = className.ToString();
+
+                var title = new StringBuilder(512);
+                GetWindowText(hWnd, title, title.Capacity);
+                var titleText = title.ToString();
+
+                if (cls == "#32770")
+                {
+                    var btn = FindWindowEx(hWnd, IntPtr.Zero, "Button", null);
+                    var clicked = false;
+                    while (btn != IntPtr.Zero)
+                    {
+                        var btnId = GetDlgCtrlID(btn);
+                        if (btnId == IDYES || btnId == IDOK)
+                        {
+                            SetForegroundWindow(hWnd);
+                            SendMessage(btn, BM_CLICK, IntPtr.Zero, IntPtr.Zero);
+                            clicked = true;
+                            EwEMcpPlugin.EwEMcpFileLog.Info($"Dialog watcher dismissed Win32 dialog '{titleText}' (class #32770, button ID {btnId})");
+                            dismissed++;
+                            break;
+                        }
+                        btn = FindWindowEx(hWnd, btn, "Button", null);
+                    }
+                    if (!clicked)
+                    {
+                        SendMessage(hWnd, 0x0111, (IntPtr)IDOK, IntPtr.Zero);
+                        EwEMcpPlugin.EwEMcpFileLog.Info($"Dialog watcher sent WM_COMMAND/IDOK to Win32 dialog '{titleText}' (class #32770)");
+                        dismissed++;
+                    }
+                }
+                else
+                {
+                    var yesBtn = FindWindowEx(hWnd, IntPtr.Zero, null, "&Yes");
+                    if (yesBtn == IntPtr.Zero)
+                    {
+                        yesBtn = FindWindowEx(hWnd, IntPtr.Zero, null, "Yes");
+                    }
+                    if (yesBtn != IntPtr.Zero)
+                    {
+                        SetForegroundWindow(hWnd);
+                        SendMessage(yesBtn, BM_CLICK, IntPtr.Zero, IntPtr.Zero);
+                        EwEMcpPlugin.EwEMcpFileLog.Info($"Dialog watcher dismissed WinForms dialog '{titleText}' by clicking Yes");
+                        dismissed++;
+                    }
+                    else
+                    {
+                        var okBtn = FindWindowEx(hWnd, IntPtr.Zero, null, "OK");
+                        if (okBtn == IntPtr.Zero)
+                        {
+                            okBtn = FindWindowEx(hWnd, IntPtr.Zero, null, "&OK");
+                        }
+                        if (okBtn != IntPtr.Zero)
+                        {
+                            SetForegroundWindow(hWnd);
+                            SendMessage(okBtn, BM_CLICK, IntPtr.Zero, IntPtr.Zero);
+                            EwEMcpPlugin.EwEMcpFileLog.Info($"Dialog watcher dismissed WinForms dialog '{titleText}' by clicking OK");
+                            dismissed++;
+                        }
+                    }
+                }
+
+                return true;
+            }, IntPtr.Zero);
+            return dismissed;
+        }
+
+        [DllImport("user32.dll")]
+        private static extern int GetDlgCtrlID(IntPtr hWnd);
     }
 }
