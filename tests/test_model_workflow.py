@@ -12,8 +12,8 @@ def test_model_metadata_and_save_workflow(live_client, sample_model_path):
     info = live_client.command_result("get_model_info")
     assert info["loaded"] is True
     assert "metadata" in info
-    assert "Author" in info["metadata"]
-    assert "Description" in info["metadata"]
+    assert "author" in info["metadata"]
+    assert "description" in info["metadata"]
     
     # 3. Edit something harmless (e.g., name of group 1)
     original_group = live_client.command_result("get_ecopath_group", {"index": 1})
