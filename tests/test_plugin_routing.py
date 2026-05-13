@@ -7,7 +7,7 @@ import threading
 
 import pytest
 
-from ewe_mcp.client import EwEMCPClient, EwEMCPError
+from ewe_mcp.client import EwEMCPClient, EwEMCPError, ResponseTooLargeError
 from ewe_mcp.helpers import DEFAULT_MAX_RESPONSE_SIZE, HEADER_STRUCT
 
 
@@ -147,7 +147,7 @@ def test_oversized_message_raises_value_error():
 
     client = EwEMCPClient(host="127.0.0.1", port=port, token="secret")
     assert client.connect()
-    with pytest.raises(ValueError, match="too large"):
+    with pytest.raises(ResponseTooLargeError, match="too large"):
         client.command_result("ping")
     client.disconnect()
     thread.join(timeout=2)

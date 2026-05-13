@@ -6,7 +6,7 @@ import threading
 
 import pytest
 
-from ewe_mcp.client import EwEMCPClient, EwEMCPError
+from ewe_mcp.client import EwEMCPClient, EwEMCPError, ResponseTooLargeError
 from ewe_mcp.helpers import HEADER_STRUCT
 
 
@@ -120,8 +120,11 @@ def test_client_disconnects_on_oversized_response():
                 length = HEADER_STRUCT.unpack(header)[0]
                 _ = conn.recv(length)
                 fake_length = 50 * 1024 * 1024
-                conn.sendall(HEADER_STRUCT.pack(fake_length))
-                conn.sendall(b'{"id":"test","status":"success","result":{}')
+                try:
+                    conn.sendall(HEADER_STRUCT.pack(fake_length))
+                    conn.sendall(b'{"id":"test","status":"success","result":{}')
+                except (BrokenPipeError, ConnectionResetError):
+                    pass
         finally:
             server.close()
 
@@ -132,7 +135,7 @@ def test_client_disconnects_on_oversized_response():
     assert client.connect()
     assert client.socket is not None
 
-    with pytest.raises(ValueError, match="Response too large"):
+    with pytest.raises(ResponseTooLargeError, match="Response too large"):
         client.command_result("ping")
 
     assert client.socket is None, "Socket should be disconnected after oversized response rejection"

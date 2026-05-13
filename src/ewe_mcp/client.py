@@ -28,6 +28,13 @@ class EwEMCPError(RuntimeError):
         self.message = message
 
 
+class ResponseTooLargeError(ConnectionError):
+    def __init__(self, size: int, limit: int):
+        self.size = size
+        self.limit = limit
+        super().__init__(f"Response too large: {size} bytes (limit {limit} bytes)")
+
+
 class EwEMCPClient:
     def __init__(self, host: str | None = None, port: int | None = None, token: str | None = None):
         self.host = host or get_host()
@@ -67,7 +74,7 @@ class EwEMCPClient:
         max_size = get_max_response_size()
         if n > max_size:
             self.disconnect()
-            raise ValueError(f"Response too large: {n} bytes (limit {max_size} bytes)")
+            raise ResponseTooLargeError(n, max_size)
         buf = bytearray(n)
         view = memoryview(buf)
         pos = 0
