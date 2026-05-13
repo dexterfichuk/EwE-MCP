@@ -373,6 +373,14 @@ def test_dialog_opening_commands_are_cached():
     assert "_dialogOpeningCommands = commands;" in text
 
 
+def test_set_value_commands_navigate_by_default_in_plugin():
+    cs_path = pathlib.Path(__file__).resolve().parents[1] / "src" / "EwE_MCP_Plugin" / "EwEMcpPlugin.cs"
+    if not cs_path.exists():
+        pytest.skip("C# source not available")
+    text = cs_path.read_text(encoding="utf-8")
+    assert 'OptionalBool(parameters, "navigate", true)' in text
+
+
 def test_dialog_watcher_logs_errors_and_does_not_foreground():
     cs_path = pathlib.Path(__file__).resolve().parents[1] / "src" / "EwE_MCP_Plugin" / "EwEMcpSocketServer.cs"
     if not cs_path.exists():
