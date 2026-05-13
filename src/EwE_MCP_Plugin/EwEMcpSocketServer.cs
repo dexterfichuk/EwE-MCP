@@ -106,7 +106,24 @@ namespace EwE_MCP_Plugin
                         }
 
                         var response = await ExecuteAsync(requestJson, token).ConfigureAwait(false);
-                        await WriteFrameAsync(stream, response.ToString(Formatting.None), token).ConfigureAwait(false);
+                    var responseJson = response.ToString(Formatting.None);
+                    var responseBytes = Encoding.UTF8.GetByteCount(responseJson);
+                    if (responseBytes > _config.MaxMessageBytes)
+                    {
+                        _auditLog.Add(request?.Type ?? "unknown", "response_oversized", $"Response {responseBytes} bytes exceeds limit {_config.MaxMessageBytes}");
+                        var oversizedResponse = new JObject
+                        {
+                            ["id"] = response["id"] ?? string.Empty,
+                            ["status"] = "error",
+                            ["error"] = new JObject
+                            {
+                                ["code"] = "response_too_large",
+                                ["message"] = $"Response payload ({responseBytes} bytes) exceeds the size limit ({_config.MaxMessageBytes} bytes). Try requesting smaller subsets of data."
+                            }
+                        };
+                        responseJson = oversizedResponse.ToString(Formatting.None);
+                    }
+                    await WriteFrameAsync(stream, responseJson, token).ConfigureAwait(false);
                     }
                     catch (IOException)
                     {

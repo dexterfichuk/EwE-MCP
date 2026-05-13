@@ -8,7 +8,7 @@ import threading
 import pytest
 
 from ewe_mcp.client import EwEMCPClient, EwEMCPError
-from ewe_mcp.helpers import HEADER_STRUCT, MAX_RESPONSE_SIZE
+from ewe_mcp.helpers import DEFAULT_MAX_RESPONSE_SIZE, HEADER_STRUCT
 
 
 def _serve_once(handler):
@@ -137,7 +137,7 @@ def test_oversized_message_raises_value_error():
                     return
                 length = HEADER_STRUCT.unpack(header)[0]
                 conn.recv(length)
-                oversize = MAX_RESPONSE_SIZE + 1
+                oversize = DEFAULT_MAX_RESPONSE_SIZE + 1
                 conn.sendall(struct.pack(">I", oversize))
         finally:
             server.close()
