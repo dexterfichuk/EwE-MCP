@@ -3,19 +3,23 @@
 from __future__ import annotations
 
 import json
+import logging
 import socket
 import uuid
 from typing import Any
 
 from ewe_mcp.helpers import (
     HEADER_STRUCT,
-    MAX_RESPONSE_SIZE,
     RECV_CHUNK_SIZE,
     TIMEOUT_DEFAULT,
     get_host,
+    get_max_response_size,
     get_port,
     get_token,
 )
+
+logger = logging.getLogger("ewe_mcp.client")
+LARGE_RESPONSE_WARN_RATIO = 0.1
 
 
 class EwEMCPError(RuntimeError):
@@ -23,6 +27,13 @@ class EwEMCPError(RuntimeError):
         super().__init__(message)
         self.code = code
         self.message = message
+
+
+class ResponseTooLargeError(ConnectionError):
+    def __init__(self, size: int, limit: int):
+        self.size = size
+        self.limit = limit
+        super().__init__(f"Response too large: {size} bytes (limit {limit} bytes)")
 
 
 class EwEMCPClient:
@@ -58,11 +69,15 @@ class EwEMCPClient:
             self.socket.settimeout(timeout)
             self._current_timeout = timeout
 
-    def _recv_exact(self, n: int) -> bytes:
+    def _recv_exact(self, n: int, max_size: int | None = None) -> bytes:
+        """Read exactly n bytes, disconnecting first if the frame would desync the protocol."""
         if self.socket is None:
             raise ConnectionError("Not connected to EwE MCP plugin")
-        if n > MAX_RESPONSE_SIZE:
-            raise ValueError(f"Response too large: {n} bytes")
+        if max_size is None:
+            max_size = get_max_response_size()
+        if n > max_size:
+            self.disconnect()
+            raise ResponseTooLargeError(n, max_size)
         buf = bytearray(n)
         view = memoryview(buf)
         pos = 0
@@ -96,9 +111,12 @@ class EwEMCPClient:
 
         self._set_timeout(timeout)
         try:
-            header = self._recv_exact(4)
+            max_response_size = get_max_response_size()
+            header = self._recv_exact(4, max_response_size)
             length = HEADER_STRUCT.unpack(header)[0]
-            data = self._recv_exact(length)
+            data = self._recv_exact(length, max_response_size)
+            if length > int(max_response_size * LARGE_RESPONSE_WARN_RATIO):
+                logger.warning("Large response from EwE plugin: %d bytes for command %s", length, command_type)
             self._set_timeout(None)
             return json.loads(data.decode("utf-8"))
         except socket.timeout:

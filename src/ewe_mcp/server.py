@@ -14,7 +14,7 @@ import pathlib
 from mcp.server.fastmcp import FastMCP
 from mcp.types import ImageContent, TextContent, ToolAnnotations
 
-from ewe_mcp.client import EwEMCPClient
+from ewe_mcp.client import EwEMCPClient, ResponseTooLargeError
 from ewe_mcp.ecopath import (
     estimate_average_longevity as ecopath_estimate_average_longevity,
     estimate_catch as ecopath_estimate_catch,
@@ -78,7 +78,7 @@ def _send_sync(command_type: str, params: dict[str, Any] | None = None, timeout:
     for attempt in range(3):
         try:
             return _get_connection().command_result(command_type, params, timeout=timeout)
-        except (OSError, ConnectionError) as exc:
+        except (OSError, ConnectionError, ResponseTooLargeError) as exc:
             last_error = exc
             _invalidate_connection()
             if attempt < 2:

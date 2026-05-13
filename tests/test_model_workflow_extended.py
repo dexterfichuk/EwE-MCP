@@ -123,4 +123,4 @@ async def test_load_model_idempotent(sample_model_path):
     info2 = await get_model_info()
     assert info2["loaded"] is True
 
-    assert info1["metadata"]["Name"] == info2["metadata"]["Name"]
+    assert info1["metadata"]["name"] == info2["metadata"]["name"]

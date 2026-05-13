@@ -7,8 +7,8 @@ import threading
 
 import pytest
 
-from ewe_mcp.client import EwEMCPClient, EwEMCPError
-from ewe_mcp.helpers import HEADER_STRUCT, MAX_RESPONSE_SIZE
+from ewe_mcp.client import EwEMCPClient, EwEMCPError, ResponseTooLargeError
+from ewe_mcp.helpers import DEFAULT_MAX_RESPONSE_SIZE, HEADER_STRUCT
 
 
 def _serve_once(handler):
@@ -122,7 +122,7 @@ def test_unknown_command_returns_error():
     thread.join(timeout=2)
 
 
-def test_oversized_message_raises_value_error():
+def test_oversized_message_raises_response_too_large_error():
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server.bind(("127.0.0.1", 0))
     server.listen(1)
@@ -137,7 +137,7 @@ def test_oversized_message_raises_value_error():
                     return
                 length = HEADER_STRUCT.unpack(header)[0]
                 conn.recv(length)
-                oversize = MAX_RESPONSE_SIZE + 1
+                oversize = DEFAULT_MAX_RESPONSE_SIZE + 1
                 conn.sendall(struct.pack(">I", oversize))
         finally:
             server.close()
@@ -147,7 +147,7 @@ def test_oversized_message_raises_value_error():
 
     client = EwEMCPClient(host="127.0.0.1", port=port, token="secret")
     assert client.connect()
-    with pytest.raises(ValueError, match="too large"):
+    with pytest.raises(ResponseTooLargeError, match="too large"):
         client.command_result("ping")
     client.disconnect()
     thread.join(timeout=2)
