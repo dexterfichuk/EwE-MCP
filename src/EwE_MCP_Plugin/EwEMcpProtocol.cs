@@ -34,8 +34,8 @@ namespace EwE_MCP_Plugin
             var envToken = Environment.GetEnvironmentVariable("EWE_MCP_TOKEN");
             var envEnabled = Environment.GetEnvironmentVariable("EWE_MCP_ENABLED");
             var envEnableEval = Environment.GetEnvironmentVariable("EWE_MCP_ENABLE_EVAL");
-        var envDialogWatcher = Environment.GetEnvironmentVariable("EWE_MCP_DIALOG_WATCHER");
-        var envDialogBlocked = Environment.GetEnvironmentVariable("EWE_MCP_DIALOG_BLOCKED_COMMANDS");
+            var envDialogWatcher = Environment.GetEnvironmentVariable("EWE_MCP_DIALOG_WATCHER");
+            var envDialogBlocked = Environment.GetEnvironmentVariable("EWE_MCP_DIALOG_BLOCKED_COMMANDS");
 
             string host;
             if (envHost != null)
@@ -110,41 +110,41 @@ namespace EwE_MCP_Plugin
                 enableEval = string.Equals(fileValues["enable_eval"], "true", StringComparison.OrdinalIgnoreCase)
                              || string.Equals(fileValues["enable_eval"], "1", StringComparison.OrdinalIgnoreCase);
             }
-        else
-        {
-            enableEval = false;
-        }
+            else
+            {
+                enableEval = false;
+            }
 
-        bool dialogWatcherEnabled;
-        if (envDialogWatcher != null)
-        {
-            dialogWatcherEnabled = string.Equals(envDialogWatcher, "1", StringComparison.OrdinalIgnoreCase);
-        }
-        else if (fileValues.ContainsKey("dialog_watcher_enabled"))
-        {
-            dialogWatcherEnabled = string.Equals(fileValues["dialog_watcher_enabled"], "true", StringComparison.OrdinalIgnoreCase)
-                || string.Equals(fileValues["dialog_watcher_enabled"], "1", StringComparison.OrdinalIgnoreCase);
-        }
-        else
-        {
-            dialogWatcherEnabled = false;
-        }
+            bool dialogWatcherEnabled;
+            if (envDialogWatcher != null)
+            {
+                dialogWatcherEnabled = string.Equals(envDialogWatcher, "1", StringComparison.OrdinalIgnoreCase);
+            }
+            else if (fileValues.ContainsKey("dialog_watcher_enabled"))
+            {
+                dialogWatcherEnabled = string.Equals(fileValues["dialog_watcher_enabled"], "true", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(fileValues["dialog_watcher_enabled"], "1", StringComparison.OrdinalIgnoreCase);
+            }
+            else
+            {
+                dialogWatcherEnabled = false;
+            }
 
-        string dialogBlockedCommands;
-        if (!string.IsNullOrWhiteSpace(envDialogBlocked))
-        {
-            dialogBlockedCommands = envDialogBlocked;
-        }
-        else if (fileValues.ContainsKey("dialog_blocked_commands"))
-        {
-            dialogBlockedCommands = fileValues["dialog_blocked_commands"];
-        }
-        else
-        {
-            dialogBlockedCommands = null;
-        }
+            string dialogBlockedCommands;
+            if (!string.IsNullOrWhiteSpace(envDialogBlocked))
+            {
+                dialogBlockedCommands = envDialogBlocked;
+            }
+            else if (fileValues.ContainsKey("dialog_blocked_commands"))
+            {
+                dialogBlockedCommands = fileValues["dialog_blocked_commands"];
+            }
+            else
+            {
+                dialogBlockedCommands = null;
+            }
 
-        return new EwEMcpConfig
+            return new EwEMcpConfig
             {
                 Enabled = enabled,
                 Host = host,
@@ -152,8 +152,8 @@ namespace EwE_MCP_Plugin
                 Token = token,
                 UsingDefaultToken = usingDefaultToken,
                 EnableEval = enableEval,
-            DialogWatcherEnabled = dialogWatcherEnabled,
-            DialogBlockedCommands = dialogBlockedCommands,
+                DialogWatcherEnabled = dialogWatcherEnabled,
+                DialogBlockedCommands = dialogBlockedCommands,
                 MaxMessageBytes = 10 * 1024 * 1024,
                 ConfigFilePath = configFilePath,
                 ConfigFileExists = configFileExists

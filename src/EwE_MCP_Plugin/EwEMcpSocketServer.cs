@@ -51,7 +51,7 @@ namespace EwE_MCP_Plugin
         private static extern bool SendMessageTimeout(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam, uint fuFlags, uint uTimeout, out IntPtr lpdwResult);
 
         [DllImport("user32.dll")]
-        private static extern bool SetForegroundWindow(IntPtr hWnd);
+        private static extern int GetDlgCtrlID(IntPtr hWnd);
 
         private delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
 
@@ -60,7 +60,6 @@ namespace EwE_MCP_Plugin
         private const int IDOK = 1;
         private const int IDYES = 6;
         private const uint SMTO_ABORTIFHUNG = 0x0002;
-        private const uint WM_COMMAND = 0x0111;
         private const uint MSG_TIMEOUT_MS = 500;
 
         public EwEMcpSocketServer(EwEMcpConfig config, EwEMcpCommandRouter router, EwEMcpAuditLog auditLog)
@@ -151,8 +150,26 @@ namespace EwE_MCP_Plugin
                             return;
                         }
 
-                    var response = await ExecuteAsync(requestJson, token).ConfigureAwait(false);
-                        await WriteFrameAsync(stream, response.ToString(Formatting.None), token).ConfigureAwait(false);
+                        var response = await ExecuteAsync(requestJson, token).ConfigureAwait(false);
+                        byte[] responsePayload;
+                        long responseBytes;
+                        if (!TrySerializeResponse(response, _config.MaxMessageBytes, out responsePayload, out responseBytes))
+                        {
+                            var commandType = ParseCommandType(requestJson);
+                            _auditLog.Add(commandType, "response_oversized", $"Response {responseBytes} bytes exceeds limit {_config.MaxMessageBytes}");
+                            var oversizedResponse = new JObject
+                            {
+                                ["id"] = response["id"] ?? string.Empty,
+                                ["status"] = "error",
+                                ["error"] = new JObject
+                                {
+                                    ["code"] = "response_too_large",
+                                    ["message"] = $"Response payload ({responseBytes} bytes) exceeds the size limit ({_config.MaxMessageBytes} bytes). Try requesting smaller subsets of data."
+                                }
+                            };
+                            responsePayload = SerializeResponse(oversizedResponse);
+                        }
+                        await WriteFrameAsync(stream, responsePayload, token).ConfigureAwait(false);
                     }
                     catch (IOException)
                     {
@@ -284,9 +301,59 @@ namespace EwE_MCP_Plugin
             return buffer;
         }
 
-        private static async Task WriteFrameAsync(NetworkStream stream, string json, CancellationToken token)
+        private static string ParseCommandType(string requestJson)
         {
-            var payload = Encoding.UTF8.GetBytes(json);
+            try
+            {
+                return JObject.Parse(requestJson)?["type"]?.ToString() ?? "unknown";
+            }
+            catch
+            {
+                return "unknown";
+            }
+        }
+
+        private static bool TrySerializeResponse(JObject response, int maxBytes, out byte[] payload, out long bytesAttempted)
+        {
+            var stream = new SizeLimitedMemoryStream(maxBytes);
+            var streamWriter = new StreamWriter(stream, new UTF8Encoding(false));
+            var jsonWriter = new JsonTextWriter(streamWriter) { Formatting = Formatting.None };
+
+            try
+            {
+                response.WriteTo(jsonWriter);
+                jsonWriter.Flush();
+                streamWriter.Flush();
+                payload = stream.ToArray();
+                bytesAttempted = payload.Length;
+                return true;
+            }
+            catch (ResponseTooLargeException ex)
+            {
+                payload = null;
+                bytesAttempted = ex.BytesAttempted;
+                return false;
+            }
+            finally
+            {
+                try
+                {
+                    jsonWriter.Close();
+                }
+                catch (Exception)
+                {
+                    // The overflow is already captured above; closing may flush buffered bytes.
+                }
+            }
+        }
+
+        private static byte[] SerializeResponse(JObject response)
+        {
+            return Encoding.UTF8.GetBytes(response.ToString(Formatting.None));
+        }
+
+        private static async Task WriteFrameAsync(NetworkStream stream, byte[] payload, CancellationToken token)
+        {
             var header = new byte[4];
             var networkLength = IPAddress.HostToNetworkOrder(payload.Length);
             var lengthBytes = BitConverter.GetBytes(networkLength);
@@ -300,13 +367,13 @@ namespace EwE_MCP_Plugin
         {
             if (!_config.DialogWatcherEnabled)
             {
-                EwEMcpPlugin.EwEMcpFileLog.Info("Dialog watcher is disabled (dialog_watcher_enabled not set)");
+                EwEMcpFileLog.Info("Dialog watcher is disabled (dialog_watcher_enabled not set)");
                 return;
             }
             _currentPid = System.Diagnostics.Process.GetCurrentProcess().Id;
             _dialogWatcherCts = new CancellationTokenSource();
             _dialogWatcherLoop = Task.Run(() => DialogWatcherLoopAsync(_dialogWatcherCts.Token));
-            EwEMcpPlugin.EwEMcpFileLog.Info($"Dialog watcher started (PID={_currentPid})");
+            EwEMcpFileLog.Info($"Dialog watcher started (PID={_currentPid})");
         }
 
         private void StopDialogWatcher()
@@ -316,8 +383,9 @@ namespace EwE_MCP_Plugin
                 _dialogWatcherCts?.Cancel();
                 _dialogWatcherLoop?.Wait(2000);
             }
-            catch
+            catch (Exception ex)
             {
+                EwEMcpFileLog.Warn($"Dialog watcher stop error: {ex.Message}");
             }
             finally
             {
@@ -344,17 +412,15 @@ namespace EwE_MCP_Plugin
                 {
                     break;
                 }
-                catch
+                catch (Exception ex)
                 {
+                    EwEMcpFileLog.Warn($"Dialog watcher error: {ex.Message}");
                 }
             }
         }
 
-        // Thread safety: BM_CLICK via SendMessageTimeout marshals to the dialog's UI thread.
-        // This is safe because the modal dialog pumps its own message loop (the very thing
-        // blocking the MCP operation), so SendMessageTimeout will complete promptly.
-        // We use SendMessageTimeout with SMTO_ABORTIFHUNG as a safety net in case the
-        // dialog thread is unresponsive, falling back to async PostMessage if it times out.
+        // BM_CLICK via SendMessageTimeout marshals to the dialog's UI thread. The timeout
+        // and PostMessage fallback keep the watcher from hanging if a dialog stops pumping.
         private static int DismissBlockingDialogs(int currentPid)
         {
             var dismissed = 0;
@@ -395,17 +461,7 @@ namespace EwE_MCP_Plugin
                         var btnId = GetDlgCtrlID(btn);
                         if (btnId == IDYES || btnId == IDOK)
                         {
-                            SetForegroundWindow(hWnd);
-                            IntPtr result;
-                            if (!SendMessageTimeout(btn, BM_CLICK, IntPtr.Zero, IntPtr.Zero, SMTO_ABORTIFHUNG, MSG_TIMEOUT_MS, out result))
-                            {
-                                PostMessage(btn, BM_CLICK, IntPtr.Zero, IntPtr.Zero);
-                                EwEMcpPlugin.EwEMcpFileLog.Info($"Dialog watcher: SendMessageTimeout hung for Win32 dialog '{displayTitle}', fell back to PostMessage (button ID {btnId})");
-                            }
-                            else
-                            {
-                                EwEMcpPlugin.EwEMcpFileLog.Info($"Dialog watcher dismissed Win32 dialog '{displayTitle}' (class #32770, button ID {btnId})");
-                            }
+                            ClickDialogButton(btn, $"Win32 dialog '{displayTitle}' (class #32770, button ID {btnId})");
                             clicked = true;
                             dismissed++;
                             break;
@@ -414,14 +470,11 @@ namespace EwE_MCP_Plugin
                     }
                     if (!clicked)
                     {
-                        EwEMcpPlugin.EwEMcpFileLog.Warn($"Dialog watcher found Win32 dialog '{displayTitle}' (class #32770) with no OK/Yes button — leaving it alone");
+                        EwEMcpFileLog.Warn($"Dialog watcher found Win32 dialog '{displayTitle}' (class #32770) with no OK/Yes button - leaving it alone");
                     }
                 }
                 else
                 {
-                    // WinForms dialogs: search for Button-class children by text.
-                    // NOTE: Button text ("OK", "Yes", "&Yes") is locale-dependent.
-                    // This matches English/EwE defaults; other locales may require config changes.
                     var okBtn = FindWindowEx(hWnd, IntPtr.Zero, "Button", "OK");
                     if (okBtn == IntPtr.Zero)
                     {
@@ -429,22 +482,12 @@ namespace EwE_MCP_Plugin
                     }
                     if (okBtn != IntPtr.Zero)
                     {
-                        SetForegroundWindow(hWnd);
-                        IntPtr result;
-                        if (!SendMessageTimeout(okBtn, BM_CLICK, IntPtr.Zero, IntPtr.Zero, SMTO_ABORTIFHUNG, MSG_TIMEOUT_MS, out result))
-                        {
-                            PostMessage(okBtn, BM_CLICK, IntPtr.Zero, IntPtr.Zero);
-                            EwEMcpPlugin.EwEMcpFileLog.Info($"Dialog watcher: SendMessageTimeout hung for WinForms dialog '{displayTitle}', fell back to PostMessage (OK)");
-                        }
-                        else
-                        {
-                            EwEMcpPlugin.EwEMcpFileLog.Info($"Dialog watcher dismissed WinForms dialog '{displayTitle}' by clicking OK");
-                        }
+                        ClickDialogButton(okBtn, $"WinForms dialog '{displayTitle}' (OK)");
                         dismissed++;
                     }
                     else
                     {
-                        EwEMcpPlugin.EwEMcpFileLog.Warn($"Dialog watcher found WinForms modal '{displayTitle}' (class {cls}) with no OK button — leaving it alone");
+                        EwEMcpFileLog.Warn($"Dialog watcher found WinForms modal '{displayTitle}' (class {cls}) with no OK button - leaving it alone");
                     }
                 }
 
@@ -453,7 +496,87 @@ namespace EwE_MCP_Plugin
             return dismissed;
         }
 
-        [DllImport("user32.dll")]
-        private static extern int GetDlgCtrlID(IntPtr hWnd);
+        private static void ClickDialogButton(IntPtr buttonHandle, string description)
+        {
+            IntPtr result;
+            if (!SendMessageTimeout(buttonHandle, BM_CLICK, IntPtr.Zero, IntPtr.Zero, SMTO_ABORTIFHUNG, MSG_TIMEOUT_MS, out result))
+            {
+                PostMessage(buttonHandle, BM_CLICK, IntPtr.Zero, IntPtr.Zero);
+                EwEMcpFileLog.Info($"Dialog watcher: SendMessageTimeout timed out for {description}; fell back to PostMessage");
+            }
+            else
+            {
+                EwEMcpFileLog.Info($"Dialog watcher dismissed {description}");
+            }
+        }
+
+        private sealed class ResponseTooLargeException : Exception
+        {
+            public ResponseTooLargeException(long bytesAttempted, int limit)
+                : base($"Response exceeded {limit} bytes")
+            {
+                BytesAttempted = bytesAttempted;
+            }
+
+            public long BytesAttempted { get; }
+        }
+
+        private sealed class SizeLimitedMemoryStream : Stream
+        {
+            private readonly MemoryStream _inner = new MemoryStream();
+            private readonly int _limit;
+            private long _bytesAttempted;
+
+            public SizeLimitedMemoryStream(int limit)
+            {
+                _limit = limit;
+            }
+
+            public override bool CanRead => false;
+            public override bool CanSeek => false;
+            public override bool CanWrite => true;
+            public override long Length => _inner.Length;
+
+            public override long Position
+            {
+                get => _inner.Position;
+                set => throw new NotSupportedException();
+            }
+
+            public override void Flush()
+            {
+                _inner.Flush();
+            }
+
+            public override int Read(byte[] buffer, int offset, int count)
+            {
+                throw new NotSupportedException();
+            }
+
+            public override long Seek(long offset, SeekOrigin origin)
+            {
+                throw new NotSupportedException();
+            }
+
+            public override void SetLength(long value)
+            {
+                throw new NotSupportedException();
+            }
+
+            public override void Write(byte[] buffer, int offset, int count)
+            {
+                _bytesAttempted += count;
+                if (_bytesAttempted > _limit)
+                {
+                    throw new ResponseTooLargeException(_bytesAttempted, _limit);
+                }
+                _inner.Write(buffer, offset, count);
+            }
+
+            public byte[] ToArray()
+            {
+                return _inner.ToArray();
+            }
+        }
     }
 }

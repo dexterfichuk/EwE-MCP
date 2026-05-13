@@ -15,9 +15,9 @@ from ewe_mcp.client import EwEMCPClient
 from ewe_mcp.helpers import (
     BATCH_BLOCKED_COMMANDS,
     DEFAULT_HOST,
+    DEFAULT_MAX_RESPONSE_SIZE,
     DEFAULT_TOKEN,
     EVAL_DENY_PATTERNS,
-    MAX_RESPONSE_SIZE,
     get_token,
     HEADER_STRUCT,
 )
@@ -150,9 +150,9 @@ def test_audit_log_entries_have_required_fields():
 
 
 def test_max_response_size_prevents_oversized_reads():
-    assert isinstance(MAX_RESPONSE_SIZE, int)
-    assert MAX_RESPONSE_SIZE > 0
-    assert MAX_RESPONSE_SIZE == 100 * 1024 * 1024
+    assert isinstance(DEFAULT_MAX_RESPONSE_SIZE, int)
+    assert DEFAULT_MAX_RESPONSE_SIZE > 0
+    assert DEFAULT_MAX_RESPONSE_SIZE == 10 * 1024 * 1024
 
 
 _RUN_STOP_PATTERN = re.compile(r"^(run_|stop_)")
@@ -351,6 +351,35 @@ def test_dialog_blocked_commands_config_key_exists():
     text = cs_path.read_text(encoding="utf-8")
     assert "DialogBlockedCommands" in text, "DialogBlockedCommands property must exist in EwEMcpConfig"
     assert "EWE_MCP_DIALOG_BLOCKED_COMMANDS" in text, "EWE_MCP_DIALOG_BLOCKED_COMMANDS env var must be read"
+
+
+def test_ecopath_run_state_detail_reads_nonpublic_field():
+    cs_path = pathlib.Path(__file__).resolve().parents[1] / "src" / "EwE_MCP_Plugin" / "EwEMcpPlugin.cs"
+    if not cs_path.exists():
+        pytest.skip("C# source not available")
+    text = cs_path.read_text(encoding="utf-8")
+    assert 'SafeGetMember(core, "Ecopath") ?? SafeGetMember(core, "m_Ecopath")' in text
+    assert 'GetField(\n                        "RunState",' in text
+    assert "BindingFlags.NonPublic" in text
+    assert "BindingFlags.Instance" in text
+
+
+def test_dialog_opening_commands_are_cached():
+    cs_path = pathlib.Path(__file__).resolve().parents[1] / "src" / "EwE_MCP_Plugin" / "EwEMcpPlugin.cs"
+    if not cs_path.exists():
+        pytest.skip("C# source not available")
+    text = cs_path.read_text(encoding="utf-8")
+    assert "private HashSet<string> _dialogOpeningCommands;" in text
+    assert "_dialogOpeningCommands = commands;" in text
+
+
+def test_dialog_watcher_logs_errors_and_does_not_foreground():
+    cs_path = pathlib.Path(__file__).resolve().parents[1] / "src" / "EwE_MCP_Plugin" / "EwEMcpSocketServer.cs"
+    if not cs_path.exists():
+        pytest.skip("C# source not available")
+    text = cs_path.read_text(encoding="utf-8")
+    assert "Dialog watcher error:" in text
+    assert "SetForegroundWindow" not in text
 
 
 def test_config_file_requires_ewe_mcp_section_header():

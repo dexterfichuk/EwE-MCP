@@ -197,6 +197,7 @@ namespace EwE_MCP_Plugin
         private readonly Func<SynchronizationContext> _syncContext;
         private readonly EwEMcpAuditLog _auditLog;
         private readonly EwEMcpConfig _config;
+        private HashSet<string> _dialogOpeningCommands;
         public Action OnShutdownRequested { get; set; }
 
         public EwEMcpCommandRouter(
@@ -564,14 +565,27 @@ namespace EwE_MCP_Plugin
 
         if (eweModel != null)
             {
-                var metadata = new JObject();
-                foreach (var prop in eweModel.GetType().GetProperties())
+                // Explicit property list avoids reflection over all cEwEModel properties,
+                // which could pick up complex objects, indexed properties, or future
+                // array properties that would bloat the response.
+                var modelProps = new[]
                 {
-                    try 
-                    { 
-                        var val = prop.GetValue(eweModel);
-                        if (val != null) metadata[prop.Name] = val.ToString();
-                    } 
+                    "Name", "Description", "Author", "Contact", "Area",
+                    "NumDigits", "GroupDigits", "FirstYear", "NumYears",
+                    "South", "North", "West", "East",
+                    "UnitTimeCustomText", "UnitCurrencyCustomText", "UnitMonetary",
+                    "UnitAreaCustomText", "LastSaved", "IsEcoSpaceModelCoupled",
+                    "Country", "EcosystemType", "EcobaseCode",
+                    "PublicationDOI", "PublicationURI", "PublicationReference"
+                };
+                var metadata = new JObject();
+                foreach (var propName in modelProps)
+                {
+                    try
+                    {
+                        var val = eweModel.GetType().GetProperty(propName)?.GetValue(eweModel);
+                        if (val != null) metadata[ToVariableName(propName)] = ToJToken(val);
+                    }
                     catch { }
                 }
                 info["metadata"] = metadata;
@@ -2402,6 +2416,11 @@ namespace EwE_MCP_Plugin
 
         private HashSet<string> GetDialogOpeningCommands()
         {
+            if (_dialogOpeningCommands != null)
+            {
+                return _dialogOpeningCommands;
+            }
+
             var commands = new HashSet<string>(DefaultDialogOpeningCommands, StringComparer.OrdinalIgnoreCase);
             var extra = _config.DialogBlockedCommands;
             if (extra != null)
@@ -2411,7 +2430,8 @@ namespace EwE_MCP_Plugin
                     commands.Add(cmd.Trim());
                 }
             }
-            return commands;
+            _dialogOpeningCommands = commands;
+            return _dialogOpeningCommands;
         }
 
         private JObject InvokeUiCommand(JObject parameters)
@@ -2425,7 +2445,7 @@ namespace EwE_MCP_Plugin
             }
             if (GetDialogOpeningCommands().Contains(name))
             {
-                throw new EwEMcpException("dialog_command_blocked", $"UI command '{name}' opens a modal dialog that cannot be handled in MCP mode. Use the dedicated MCP tool instead.");
+                throw new EwEMcpException("dialog_command_blocked", $"UI command '{name}' opens a modal dialog and is blocked in MCP mode to prevent socket hangs. Use a dedicated MCP tool when available, operate the EwE GUI manually, or enable dialog_watcher_enabled only for supervised workflows.");
             }
 
             if (parameters.TryGetValue("tag", out var tag))
@@ -2829,10 +2849,12 @@ namespace EwE_MCP_Plugin
         {
             try
             {
-                var ecopath = SafeGetProperty(core, "Ecopath");
+                var ecopath = SafeGetMember(core, "Ecopath") ?? SafeGetMember(core, "m_Ecopath");
                 if (ecopath != null)
                 {
-                    var field = ecopath.GetType().GetField("RunState");
+                    var field = ecopath.GetType().GetField(
+                        "RunState",
+                        BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
                     if (field != null)
                     {
                         var val = field.GetValue(ecopath);
@@ -2842,6 +2864,24 @@ namespace EwE_MCP_Plugin
             }
             catch { }
             return "unknown";
+        }
+
+        private static object SafeGetMember(object obj, string name)
+        {
+            if (obj == null)
+            {
+                return null;
+            }
+
+            const BindingFlags flags = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance;
+            var type = obj.GetType();
+            var property = type.GetProperty(name, flags);
+            if (property != null && property.GetIndexParameters().Length == 0)
+            {
+                return property.GetValue(obj, null);
+            }
+            var field = type.GetField(name, flags);
+            return field?.GetValue(obj);
         }
 
         private JObject GetEcopathStats()
@@ -3114,8 +3154,12 @@ namespace EwE_MCP_Plugin
         private JObject CaptureView(JObject parameters)
         {
             var target = OptionalString(parameters, "target") ?? "auto";
-            var maxWidth = OptionalInt(parameters, "max_width") ?? 0;
-            var maxHeight = OptionalInt(parameters, "max_height") ?? 0;
+            // Default to 1280x960 to prevent full-res 4K PNGs (~20 MB base64).
+            // Callers can pass larger values or 0 to disable resizing.
+            const int DefaultMaxWidth = 1280;
+            const int DefaultMaxHeight = 960;
+            var maxWidth = OptionalInt(parameters, "max_width") ?? DefaultMaxWidth;
+            var maxHeight = OptionalInt(parameters, "max_height") ?? DefaultMaxHeight;
 
             Control captureTarget = ResolveCaptureTarget(target);
             if (captureTarget == null)
@@ -4052,9 +4096,13 @@ namespace EwE_MCP_Plugin
             {
                 return false;
             }
+            // Arrays are never "scalar-like" — they blow up ReadScalarValues payloads
+            // when requestedVariables is null (the "dump all" path). Array-returning
+            // properties (e.g., Single[] PredMort on cEcopathGroupOutput) must be read
+            // explicitly via get_values or get_indexed_value instead.
             if (type.IsArray)
             {
-                return IsValueLikeType(type.GetElementType());
+                return false;
             }
             var t = Nullable.GetUnderlyingType(type) ?? type;
             return t.IsPrimitive || t.IsEnum || t == typeof(string) || t == typeof(decimal) || t == typeof(DateTime);
