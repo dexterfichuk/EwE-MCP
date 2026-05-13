@@ -19,6 +19,7 @@ from ewe_mcp.helpers import (
 )
 
 logger = logging.getLogger("ewe_mcp.client")
+LARGE_RESPONSE_WARN_RATIO = 0.1
 
 
 class EwEMCPError(RuntimeError):
@@ -68,10 +69,12 @@ class EwEMCPClient:
             self.socket.settimeout(timeout)
             self._current_timeout = timeout
 
-    def _recv_exact(self, n: int) -> bytes:
+    def _recv_exact(self, n: int, max_size: int | None = None) -> bytes:
+        """Read exactly n bytes, disconnecting first if the frame would desync the protocol."""
         if self.socket is None:
             raise ConnectionError("Not connected to EwE MCP plugin")
-        max_size = get_max_response_size()
+        if max_size is None:
+            max_size = get_max_response_size()
         if n > max_size:
             self.disconnect()
             raise ResponseTooLargeError(n, max_size)
@@ -108,10 +111,11 @@ class EwEMCPClient:
 
         self._set_timeout(timeout)
         try:
-            header = self._recv_exact(4)
+            max_response_size = get_max_response_size()
+            header = self._recv_exact(4, max_response_size)
             length = HEADER_STRUCT.unpack(header)[0]
-            data = self._recv_exact(length)
-            if length > 1 * 1024 * 1024:
+            data = self._recv_exact(length, max_response_size)
+            if length > int(max_response_size * LARGE_RESPONSE_WARN_RATIO):
                 logger.warning("Large response from EwE plugin: %d bytes for command %s", length, command_type)
             self._set_timeout(None)
             return json.loads(data.decode("utf-8"))

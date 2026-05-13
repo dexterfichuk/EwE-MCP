@@ -106,14 +106,11 @@ namespace EwE_MCP_Plugin
                         }
 
                         var response = await ExecuteAsync(requestJson, token).ConfigureAwait(false);
-                        var responseJson = response.ToString(Formatting.None);
-                        var responseBytes = Encoding.UTF8.GetByteCount(responseJson);
-                        if (responseBytes > _config.MaxMessageBytes)
+                        byte[] responsePayload;
+                        long responseBytes;
+                        if (!TrySerializeResponse(response, _config.MaxMessageBytes, out responsePayload, out responseBytes))
                         {
-                            var commandType = response["error"]?["code"]?.ToString() == "timeout"
-                                ? "unknown"
-                                : (response["result"] != null ? "unknown" : "unknown");
-                            try { commandType = JObject.Parse(requestJson)?["type"]?.ToString() ?? "unknown"; } catch { }
+                            var commandType = ParseCommandType(requestJson);
                             _auditLog.Add(commandType, "response_oversized", $"Response {responseBytes} bytes exceeds limit {_config.MaxMessageBytes}");
                             var oversizedResponse = new JObject
                             {
@@ -125,9 +122,9 @@ namespace EwE_MCP_Plugin
                                     ["message"] = $"Response payload ({responseBytes} bytes) exceeds the size limit ({_config.MaxMessageBytes} bytes). Try requesting smaller subsets of data."
                                 }
                             };
-                            responseJson = oversizedResponse.ToString(Formatting.None);
+                            responsePayload = SerializeResponse(oversizedResponse);
                         }
-                        await WriteFrameAsync(stream, responseJson, token).ConfigureAwait(false);
+                        await WriteFrameAsync(stream, responsePayload, token).ConfigureAwait(false);
                     }
                     catch (IOException)
                     {
@@ -259,9 +256,59 @@ namespace EwE_MCP_Plugin
             return buffer;
         }
 
-        private static async Task WriteFrameAsync(NetworkStream stream, string json, CancellationToken token)
+        private static string ParseCommandType(string requestJson)
         {
-            var payload = Encoding.UTF8.GetBytes(json);
+            try
+            {
+                return JObject.Parse(requestJson)?["type"]?.ToString() ?? "unknown";
+            }
+            catch
+            {
+                return "unknown";
+            }
+        }
+
+        private static bool TrySerializeResponse(JObject response, int maxBytes, out byte[] payload, out long bytesAttempted)
+        {
+            var stream = new SizeLimitedMemoryStream(maxBytes);
+            var streamWriter = new StreamWriter(stream, new UTF8Encoding(false));
+            var jsonWriter = new JsonTextWriter(streamWriter) { Formatting = Formatting.None };
+
+            try
+            {
+                response.WriteTo(jsonWriter);
+                jsonWriter.Flush();
+                streamWriter.Flush();
+                payload = stream.ToArray();
+                bytesAttempted = payload.Length;
+                return true;
+            }
+            catch (ResponseTooLargeException ex)
+            {
+                payload = null;
+                bytesAttempted = ex.BytesAttempted;
+                return false;
+            }
+            finally
+            {
+                try
+                {
+                    jsonWriter.Close();
+                }
+                catch (Exception)
+                {
+                    // The overflow is already captured above; closing may flush buffered bytes.
+                }
+            }
+        }
+
+        private static byte[] SerializeResponse(JObject response)
+        {
+            return Encoding.UTF8.GetBytes(response.ToString(Formatting.None));
+        }
+
+        private static async Task WriteFrameAsync(NetworkStream stream, byte[] payload, CancellationToken token)
+        {
             var header = new byte[4];
             var networkLength = IPAddress.HostToNetworkOrder(payload.Length);
             var lengthBytes = BitConverter.GetBytes(networkLength);
@@ -269,6 +316,75 @@ namespace EwE_MCP_Plugin
             await stream.WriteAsync(header, 0, header.Length, token).ConfigureAwait(false);
             await stream.WriteAsync(payload, 0, payload.Length, token).ConfigureAwait(false);
             await stream.FlushAsync(token).ConfigureAwait(false);
+        }
+
+        private sealed class ResponseTooLargeException : Exception
+        {
+            public ResponseTooLargeException(long bytesAttempted, int limit)
+                : base($"Response exceeded {limit} bytes")
+            {
+                BytesAttempted = bytesAttempted;
+            }
+
+            public long BytesAttempted { get; }
+        }
+
+        private sealed class SizeLimitedMemoryStream : Stream
+        {
+            private readonly MemoryStream _inner = new MemoryStream();
+            private readonly int _limit;
+            private long _bytesAttempted;
+
+            public SizeLimitedMemoryStream(int limit)
+            {
+                _limit = limit;
+            }
+
+            public override bool CanRead => false;
+            public override bool CanSeek => false;
+            public override bool CanWrite => true;
+            public override long Length => _inner.Length;
+
+            public override long Position
+            {
+                get => _inner.Position;
+                set => throw new NotSupportedException();
+            }
+
+            public override void Flush()
+            {
+                _inner.Flush();
+            }
+
+            public override int Read(byte[] buffer, int offset, int count)
+            {
+                throw new NotSupportedException();
+            }
+
+            public override long Seek(long offset, SeekOrigin origin)
+            {
+                throw new NotSupportedException();
+            }
+
+            public override void SetLength(long value)
+            {
+                throw new NotSupportedException();
+            }
+
+            public override void Write(byte[] buffer, int offset, int count)
+            {
+                _bytesAttempted += count;
+                if (_bytesAttempted > _limit)
+                {
+                    throw new ResponseTooLargeException(_bytesAttempted, _limit);
+                }
+                _inner.Write(buffer, offset, count);
+            }
+
+            public byte[] ToArray()
+            {
+                return _inner.ToArray();
+            }
         }
     }
 }

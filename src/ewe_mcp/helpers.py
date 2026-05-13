@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from functools import lru_cache
 import os
 import struct
 from typing import Any
@@ -15,6 +16,7 @@ RECV_CHUNK_SIZE = 65_536
 DEFAULT_MAX_RESPONSE_SIZE = 10 * 1024 * 1024
 
 
+@lru_cache(maxsize=1)
 def get_max_response_size() -> int:
     raw = os.environ.get("EWE_MCP_MAX_RESPONSE_SIZE", str(DEFAULT_MAX_RESPONSE_SIZE))
     try:

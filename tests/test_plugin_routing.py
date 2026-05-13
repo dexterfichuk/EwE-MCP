@@ -122,7 +122,7 @@ def test_unknown_command_returns_error():
     thread.join(timeout=2)
 
 
-def test_oversized_message_raises_value_error():
+def test_oversized_message_raises_response_too_large_error():
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server.bind(("127.0.0.1", 0))
     server.listen(1)

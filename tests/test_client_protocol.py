@@ -7,7 +7,7 @@ import threading
 import pytest
 
 from ewe_mcp.client import EwEMCPClient, EwEMCPError, ResponseTooLargeError
-from ewe_mcp.helpers import HEADER_STRUCT
+from ewe_mcp.helpers import DEFAULT_MAX_RESPONSE_SIZE, HEADER_STRUCT
 
 
 def _serve_once(handler):
@@ -119,7 +119,7 @@ def test_client_disconnects_on_oversized_response():
                     return
                 length = HEADER_STRUCT.unpack(header)[0]
                 _ = conn.recv(length)
-                fake_length = 50 * 1024 * 1024
+                fake_length = DEFAULT_MAX_RESPONSE_SIZE * 5
                 try:
                     conn.sendall(HEADER_STRUCT.pack(fake_length))
                     conn.sendall(b'{"id":"test","status":"success","result":{}')
