@@ -28,8 +28,6 @@ live = pytest.mark.skipif(
 )
 
 
-
-
 async def _ensure_ecosim_loaded(sample_model_path):
     model = await load_model(sample_model_path)
     assert model["loaded"] is True
@@ -49,16 +47,22 @@ async def _wait_for_ecosim_completed(timeout_seconds=60):
         if last_state.get("has_ecosim_ran"):
             return last_state
         await asyncio.sleep(1)
-    pytest.fail(f"Ecosim did not complete within {timeout_seconds}s; last state: {last_state}")
+    pytest.fail(
+        f"Ecosim did not complete within {timeout_seconds}s; last state: {last_state}"
+    )
 
 
 @pytest.mark.asyncio
-async def test_ecosim_destructive_scenario_commands_blocked_from_batch(sample_model_path):
+async def test_ecosim_destructive_scenario_commands_blocked_from_batch(
+    sample_model_path,
+):
     assert "create_ecosim_scenario" in BATCH_BLOCKED_COMMANDS
     assert "copy_ecosim_scenario" in BATCH_BLOCKED_COMMANDS
     assert "delete_ecosim_scenario" in BATCH_BLOCKED_COMMANDS
     with pytest.raises(ValueError, match="is not allowed in batch"):
-        await batch_commands([{"type": "delete_ecosim_scenario", "params": {"index": 2}}])
+        await batch_commands(
+            [{"type": "delete_ecosim_scenario", "params": {"index": 2}}]
+        )
 
 
 @live

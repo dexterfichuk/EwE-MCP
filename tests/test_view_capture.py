@@ -19,8 +19,6 @@ live = pytest.mark.skipif(
 )
 
 
-
-
 # ── Offline tests ─────────────────────────────────────────────────
 
 
@@ -85,7 +83,9 @@ async def test_capture_view_targets(sample_model_path):
         assert len(result) == 2
         image_content = result[1]
         image_bytes = base64.b64decode(image_content.data)
-        assert image_bytes[:4] == b"\x89PNG", f"Target {target!r} did not return valid PNG"
+        assert image_bytes[:4] == b"\x89PNG", (
+            f"Target {target!r} did not return valid PNG"
+        )
 
 
 @live

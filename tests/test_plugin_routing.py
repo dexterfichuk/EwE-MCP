@@ -90,7 +90,10 @@ def test_bad_token_returns_unauthorized():
         return {
             "id": request["id"],
             "status": "error",
-            "error": {"code": "unauthorized", "message": "Invalid or missing EWE_MCP_TOKEN"},
+            "error": {
+                "code": "unauthorized",
+                "message": "Invalid or missing EWE_MCP_TOKEN",
+            },
         }
 
     port, thread = _serve_once(handler)
@@ -109,7 +112,10 @@ def test_unknown_command_returns_error():
         return {
             "id": request["id"],
             "status": "error",
-            "error": {"code": "unknown_command", "message": f"Unknown command type: {request['type']}"},
+            "error": {
+                "code": "unknown_command",
+                "message": f"Unknown command type: {request['type']}",
+            },
         }
 
     port, thread = _serve_once(handler)

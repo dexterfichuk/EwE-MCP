@@ -27,7 +27,15 @@ async def test_list_ui_commands_structure(sample_model_path):
     assert result["total_count"] > 0
 
     first_cmd = result["commands"][0]
-    for field in ("name", "description", "enabled", "checked", "is_available", "status", "is_invoking"):
+    for field in (
+        "name",
+        "description",
+        "enabled",
+        "checked",
+        "is_available",
+        "status",
+        "is_invoking",
+    ):
         assert field in first_cmd, f"Missing field {field!r} in command: {first_cmd}"
 
 

@@ -77,14 +77,20 @@ async def test_ecopath_safe_mutation_restore(sample_model_path):
 
     try:
         await set_values(
-            domain="ecopath_group", index=idx, values={"name": "TEST_SMOKE"}, navigate=False
+            domain="ecopath_group",
+            index=idx,
+            values={"name": "TEST_SMOKE"},
+            navigate=False,
         )
 
         changed = await get_ecopath_group(idx)
         assert changed["name"] == "TEST_SMOKE"
     finally:
         await set_values(
-            domain="ecopath_group", index=idx, values={"name": original_name}, navigate=False
+            domain="ecopath_group",
+            index=idx,
+            values={"name": original_name},
+            navigate=False,
         )
         await discard_changes()
 

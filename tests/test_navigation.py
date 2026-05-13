@@ -19,8 +19,6 @@ live = pytest.mark.skipif(
 )
 
 
-
-
 @pytest.mark.asyncio
 async def test_navigate_to_node_requires_target(sample_model_path):
     with pytest.raises(ValueError, match="Provide one of"):
@@ -49,7 +47,9 @@ async def test_list_and_navigate_to_basic_input(sample_model_path):
 async def test_set_values_can_navigate_to_edit_screen(sample_model_path):
     await load_model(sample_model_path)
 
-    result = await set_values(domain="ecopath_group", index=1, values={"name": "0-12 Snook"})
+    result = await set_values(
+        domain="ecopath_group", index=1, values={"name": "0-12 Snook"}
+    )
     assert result["results"]["name"] == "updated"
     assert result["navigation"]["suggested_node_id"] == "ndBasicInput"
     await discard_changes()
@@ -63,8 +63,12 @@ async def test_value_reads_navigate_by_default_and_can_skip(sample_model_path):
     values = await get_values(domain="ecopath_group", index=1, variables=["name"])
     assert values["navigation"]["suggested_node_id"] == "ndBasicInput"
 
-    indexed = await get_indexed_value(domain="ecopath_group", index=20, variable="diet_comp", indices=[25])
+    indexed = await get_indexed_value(
+        domain="ecopath_group", index=20, variable="diet_comp", indices=[25]
+    )
     assert indexed["navigation"]["suggested_node_id"] == "ndDietComposition"
 
-    quiet = await get_values(domain="ecopath_group", index=1, variables=["name"], navigate=False)
+    quiet = await get_values(
+        domain="ecopath_group", index=1, variables=["name"], navigate=False
+    )
     assert "navigation" not in quiet

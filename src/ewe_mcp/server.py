@@ -25,6 +25,8 @@ from ewe_mcp.ecopath import (
 )
 from ewe_mcp.helpers import (
     BATCH_BLOCKED_COMMANDS,
+    EWE_NULL_VALUE,
+    STATUS_CODE_MAP,
     TIMEOUT_DEFAULT,
     TIMEOUT_LONG,
     enrich_diagnose,
@@ -32,6 +34,8 @@ from ewe_mcp.helpers import (
     get_host,
     get_port,
     get_token,
+    normalize_domain_name,
+    validate_ewe_ranges,
 )
 
 logger = logging.getLogger("ewe_mcp")
@@ -67,17 +71,25 @@ def _get_connection() -> EwEMCPClient:
 
     client = EwEMCPClient(host=get_host(), port=get_port(), token=get_token())
     if not client.connect():
-        raise ConnectionError(f"Could not connect to EwE MCP plugin at {client.host}:{client.port}")
+        raise ConnectionError(
+            f"Could not connect to EwE MCP plugin at {client.host}:{client.port}"
+        )
     _connection = client
     _validated_at = time.monotonic()
     return client
 
 
-def _send_sync(command_type: str, params: dict[str, Any] | None = None, timeout: int = TIMEOUT_DEFAULT):
+def _send_sync(
+    command_type: str,
+    params: dict[str, Any] | None = None,
+    timeout: int = TIMEOUT_DEFAULT,
+):
     last_error: Exception | None = None
     for attempt in range(3):
         try:
-            return _get_connection().command_result(command_type, params, timeout=timeout)
+            return _get_connection().command_result(
+                command_type, params, timeout=timeout
+            )
         except (OSError, ConnectionError, ResponseTooLargeError) as exc:
             last_error = exc
             _invalidate_connection()
@@ -88,7 +100,11 @@ def _send_sync(command_type: str, params: dict[str, Any] | None = None, timeout:
     raise RuntimeError("EwE MCP command failed")
 
 
-async def _send(command_type: str, params: dict[str, Any] | None = None, timeout: int = TIMEOUT_DEFAULT):
+async def _send(
+    command_type: str,
+    params: dict[str, Any] | None = None,
+    timeout: int = TIMEOUT_DEFAULT,
+):
     try:
         return await asyncio.to_thread(_send_sync, command_type, params, timeout)
     except Exception as exc:
@@ -108,7 +124,9 @@ async def estimate_fishing_mortality(catch: float, biomass: float) -> float:
 
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
-async def estimate_total_mortality(fishing_mortality: float, natural_mortality: float) -> float:
+async def estimate_total_mortality(
+    fishing_mortality: float, natural_mortality: float
+) -> float:
     """
     Estimate total mortality (Z) as the sum of fishing mortality (F) and natural mortality (M).
     Formula: Z = F + M
@@ -211,7 +229,11 @@ async def navigate_to_node(
     query: str | None = None,
 ) -> dict[str, Any]:
     """Navigate EwE to a UI screen by navigation node id/name, visible text, path, or search query."""
-    params = {key: value for key, value in {"id": id, "text": text, "path": path, "query": query}.items() if value}
+    params = {
+        key: value
+        for key, value in {"id": id, "text": text, "path": path, "query": query}.items()
+        if value
+    }
     if not params:
         raise ValueError("Provide one of id, text, path, or query.")
     return await _send("navigate_to_node", params)
@@ -303,7 +325,9 @@ async def list_variables(domain: str, index: int | None = None) -> dict[str, Any
 
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
-async def get_variable_metadata(domain: str, variable: str, index: int | None = None) -> dict[str, Any]:
+async def get_variable_metadata(
+    domain: str, variable: str, index: int | None = None
+) -> dict[str, Any]:
     """Get metadata for one variable on an EwE entity domain."""
     params: dict[str, Any] = {"domain": domain, "variable": variable}
     if index is not None:
@@ -328,12 +352,22 @@ async def get_values(
 
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
-async def validate_values(domain: str, values: dict[str, Any], index: int | None = None) -> dict[str, Any]:
+async def validate_values(
+    domain: str, values: dict[str, Any], index: int | None = None
+) -> dict[str, Any]:
     """Validate proposed values against writable EwE entity properties without mutating."""
     params: dict[str, Any] = {"domain": domain, "values": values}
     if index is not None:
         params["index"] = index
-    return await _send("validate_values", params)
+    result = await _send("validate_values", params)
+    range_results = validate_ewe_ranges(domain, values)
+    for var_name, range_result in range_results.items():
+        if not range_result["valid"]:
+            if "results" not in result:
+                result["results"] = {}
+            result["results"][var_name] = range_result
+    result["domain"] = normalize_domain_name(result.get("domain", domain))
+    return result
 
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
@@ -345,7 +379,12 @@ async def get_indexed_value(
     navigate: bool = True,
 ) -> dict[str, Any]:
     """Read one indexed EwE value. Pass navigate=False to avoid changing the visible EwE screen."""
-    params: dict[str, Any] = {"domain": domain, "variable": variable, "indices": indices, "navigate": navigate}
+    params: dict[str, Any] = {
+        "domain": domain,
+        "variable": variable,
+        "indices": indices,
+        "navigate": navigate,
+    }
     if index is not None:
         params["index"] = index
     return await _send("get_indexed_value", params)
@@ -360,10 +399,22 @@ async def validate_indexed_value(
     index: int | None = None,
 ) -> dict[str, Any]:
     """Validate one indexed EwE value without mutating."""
-    params: dict[str, Any] = {"domain": domain, "variable": variable, "indices": indices, "value": value}
+    params: dict[str, Any] = {
+        "domain": domain,
+        "variable": variable,
+        "indices": indices,
+        "value": value,
+    }
     if index is not None:
         params["index"] = index
-    return await _send("validate_indexed_value", params)
+    result = await _send("validate_indexed_value", params)
+    range_results = validate_ewe_ranges(domain, {variable: value})
+    for var_name, range_result in range_results.items():
+        if not range_result["valid"]:
+            result["valid"] = False
+            result["reason"] = range_result["reason"]
+    result["domain"] = normalize_domain_name(result.get("domain", domain))
+    return result
 
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
@@ -375,7 +426,33 @@ async def list_ecopath_groups() -> dict[str, Any]:
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
 async def get_ecopath_group(index: int) -> dict[str, Any]:
     """Get one Ecopath functional group, including non-zero diet entries."""
-    return await _send("get_ecopath_group", {"index": index})
+    group = await _send("get_ecopath_group", {"index": index})
+    run_state = await _send("get_ecopath_run_state")
+    if run_state.get("has_ecopath_ran") and "output" in group:
+        try:
+            diag = await _send("get_ecopath_group_diagnostics")
+            diag_group = next(
+                (g for g in diag.get("groups", []) if g["index"] == index), None
+            )
+            if diag_group:
+                values = diag_group.get("values", {})
+                enriched_output = dict(group["output"])
+                if "EEOutput" in values:
+                    enriched_output["ee"] = values["EEOutput"]
+                if "TTLX" in values:
+                    enriched_output["trophic_level"] = values["TTLX"]
+                if "PBOutput" in values:
+                    enriched_output["pb_computed"] = values["PBOutput"]
+                    if "GEOutput" in values and values["GEOutput"] != EWE_NULL_VALUE:
+                        enriched_output["ge"] = values["GEOutput"]
+                group["output"] = enriched_output
+        except Exception:
+            logger.warning(
+                "Failed to enrich ecopath group %d with diagnostics",
+                index,
+                exc_info=True,
+            )
+    return group
 
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
@@ -573,13 +650,19 @@ async def create_ecospace_scenario(
 @mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
 async def copy_ecospace_scenario(name: str, description: str = "") -> dict[str, Any]:
     """Copy the active Ecospace scenario under a new name and load the copy."""
-    return await _send("copy_ecospace_scenario", {"name": name, "description": description}, timeout=TIMEOUT_LONG)
+    return await _send(
+        "copy_ecospace_scenario",
+        {"name": name, "description": description},
+        timeout=TIMEOUT_LONG,
+    )
 
 
 @mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
 async def delete_ecospace_scenario(index: int) -> dict[str, Any]:
     """Delete an unloaded Ecospace scenario by one-based index."""
-    return await _send("delete_ecospace_scenario", {"index": index}, timeout=TIMEOUT_LONG)
+    return await _send(
+        "delete_ecospace_scenario", {"index": index}, timeout=TIMEOUT_LONG
+    )
 
 
 @mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
@@ -602,19 +685,22 @@ async def wait_for_ecospace_completion(
     last_state: dict[str, Any] = {}
     while asyncio.get_running_loop().time() < deadline:
         last_state = await _send("get_ecospace_run_state")
-        if not last_state.get("is_ecospace_running") and last_state.get("has_ecospace_loaded"):
+        if not last_state.get("is_ecospace_running") and last_state.get(
+            "has_ecospace_loaded"
+        ):
             return last_state
         await asyncio.sleep(poll_interval_seconds)
     raise RuntimeError(
-        f"Ecospace did not complete within {timeout_seconds}s. "
-        f"Last state: {last_state}"
+        f"Ecospace did not complete within {timeout_seconds}s. Last state: {last_state}"
     )
 
 
 @mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
 async def load_ecotracer_scenario(index: int) -> dict[str, Any]:
     """Load an Ecotracer scenario by one-based index."""
-    return await _send("load_ecotracer_scenario", {"index": index}, timeout=TIMEOUT_LONG)
+    return await _send(
+        "load_ecotracer_scenario", {"index": index}, timeout=TIMEOUT_LONG
+    )
 
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
@@ -685,7 +771,12 @@ async def create_ecotracer_scenario(
     """Create and load a new Ecotracer scenario."""
     return await _send(
         "create_ecotracer_scenario",
-        {"name": name, "description": description, "author": author, "contact": contact},
+        {
+            "name": name,
+            "description": description,
+            "author": author,
+            "contact": contact,
+        },
         timeout=TIMEOUT_LONG,
     )
 
@@ -693,13 +784,19 @@ async def create_ecotracer_scenario(
 @mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
 async def copy_ecotracer_scenario(name: str, description: str = "") -> dict[str, Any]:
     """Copy the active Ecotracer scenario under a new name and load the copy."""
-    return await _send("copy_ecotracer_scenario", {"name": name, "description": description}, timeout=TIMEOUT_LONG)
+    return await _send(
+        "copy_ecotracer_scenario",
+        {"name": name, "description": description},
+        timeout=TIMEOUT_LONG,
+    )
 
 
 @mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
 async def delete_ecotracer_scenario(index: int) -> dict[str, Any]:
     """Delete an unloaded Ecotracer scenario by one-based index."""
-    return await _send("delete_ecotracer_scenario", {"index": index}, timeout=TIMEOUT_LONG)
+    return await _send(
+        "delete_ecotracer_scenario", {"index": index}, timeout=TIMEOUT_LONG
+    )
 
 
 @mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
@@ -817,7 +914,8 @@ async def get_installed_plugins() -> dict[str, Any]:
 
 
 @mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
-async def create_ecosim_scenario(name: str,
+async def create_ecosim_scenario(
+    name: str,
     description: str = "",
     author: str = "",
     contact: str = "",
@@ -825,7 +923,12 @@ async def create_ecosim_scenario(name: str,
     """Create and load a new Ecosim scenario."""
     return await _send(
         "create_ecosim_scenario",
-        {"name": name, "description": description, "author": author, "contact": contact},
+        {
+            "name": name,
+            "description": description,
+            "author": author,
+            "contact": contact,
+        },
         timeout=TIMEOUT_LONG,
     )
 
@@ -833,7 +936,11 @@ async def create_ecosim_scenario(name: str,
 @mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
 async def copy_ecosim_scenario(name: str, description: str = "") -> dict[str, Any]:
     """Copy the active Ecosim scenario under a new name and load the copy."""
-    return await _send("copy_ecosim_scenario", {"name": name, "description": description}, timeout=TIMEOUT_LONG)
+    return await _send(
+        "copy_ecosim_scenario",
+        {"name": name, "description": description},
+        timeout=TIMEOUT_LONG,
+    )
 
 
 @mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
@@ -872,8 +979,7 @@ async def wait_for_ecosim_completion(
             return last_state
         await asyncio.sleep(poll_interval_seconds)
     raise RuntimeError(
-        f"Ecosim did not complete within {timeout_seconds}s. "
-        f"Last state: {last_state}"
+        f"Ecosim did not complete within {timeout_seconds}s. Last state: {last_state}"
     )
 
 
@@ -961,13 +1067,17 @@ async def get_ecopath_run_state() -> dict[str, Any]:
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
 async def get_ecopath_stats() -> dict[str, Any]:
     """Get Ecopath system-level statistics after an Ecopath run (throughput, connectance, etc.)."""
-    return await _send("get_ecopath_stats")
+    result = await _send("get_ecopath_stats")
+    result["status_code_map"] = STATUS_CODE_MAP
+    return result
 
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
 async def get_ecopath_group_diagnostics() -> dict[str, Any]:
     """Fetch balancing diagnostics (EE, PB, GE outputs and status flags, biomass, trophic level) for all Ecopath groups after a run."""
-    return await _send("get_ecopath_group_diagnostics")
+    result = await _send("get_ecopath_group_diagnostics")
+    result["status_code_map"] = STATUS_CODE_MAP
+    return result
 
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
@@ -1011,8 +1121,8 @@ async def capture_view(
     max_height: int | None = None,
 ) -> list[TextContent | ImageContent]:
     """Capture a screenshot of the current EwE view.
-    
-    NOTE: Prefer using data-reading tools (e.g., get_values, get_indexed_value) to extract tabular data. 
+
+    NOTE: Prefer using data-reading tools (e.g., get_values, get_indexed_value) to extract tabular data.
     Only use this tool for capturing graphs, charts, and spatial visualizations.
 
     Args:
@@ -1035,11 +1145,7 @@ async def capture_view(
     image_data = base64.b64decode(result["data"])
 
     # Build metadata summary (everything except the raw data).
-    meta = {
-        key: value
-        for key, value in result.items()
-        if key != "data"
-    }
+    meta = {key: value for key, value in result.items() if key != "data"}
 
     return [
         TextContent(type="text", text=str(meta)),
@@ -1125,7 +1231,9 @@ async def export_active_plot(target: str = "auto") -> dict[str, Any]:
 
 
 @mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
-async def set_values(domain: str, values: dict[str, Any], index: int | None = None, navigate: bool = True) -> dict[str, Any]:
+async def set_values(
+    domain: str, values: dict[str, Any], index: int | None = None, navigate: bool = True
+) -> dict[str, Any]:
     """Set values for an EwE entity and refresh the UI. Pass navigate=False to avoid changing the visible EwE screen."""
     params: dict[str, Any] = {"domain": domain, "values": values, "navigate": navigate}
     if index is not None:
@@ -1239,7 +1347,9 @@ async def balance_model(path: str) -> list[dict[str, str]]:
 
 
 @mcp.prompt()
-async def run_ecosim_scenario(path: str, scenario_index: int = 1) -> list[dict[str, str]]:
+async def run_ecosim_scenario(
+    path: str, scenario_index: int = 1
+) -> list[dict[str, str]]:
     """Guide through loading a model and running an Ecosim scenario."""
     return [
         {

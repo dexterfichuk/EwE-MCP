@@ -20,7 +20,10 @@ async def test_balance_model_prompt_structure():
     msg = result[0]
     assert "role" in msg
     assert msg["role"] == "user"
-    assert r"C:\test\model.EwEmdb" in msg["content"] or repr(r"C:\test\model.EwEmdb") in msg["content"]
+    assert (
+        r"C:\test\model.EwEmdb" in msg["content"]
+        or repr(r"C:\test\model.EwEmdb") in msg["content"]
+    )
     assert "run_ecopath" in msg["content"]
 
 
@@ -50,5 +53,8 @@ async def test_export_report_prompt_structure():
     result = await export_report(path=r"C:\test\model.EwEmdb")
     assert isinstance(result, list)
     msg = result[0]
-    assert r"C:\test\model.EwEmdb" in msg["content"] or repr(r"C:\test\model.EwEmdb") in msg["content"]
+    assert (
+        r"C:\test\model.EwEmdb" in msg["content"]
+        or repr(r"C:\test\model.EwEmdb") in msg["content"]
+    )
     assert "export_ecopath_results" in msg["content"]

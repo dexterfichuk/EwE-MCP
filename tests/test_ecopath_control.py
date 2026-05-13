@@ -9,18 +9,34 @@ live = pytest.mark.skipif(
 
 def test_ecopath_commands_not_in_batch_blocked():
     from ewe_mcp.helpers import BATCH_BLOCKED_COMMANDS
-    for cmd in ["get_ecopath_run_state", "get_ecopath_stats", "get_ecopath_group_diagnostics", "get_ecopath_fleet_diagnostics"]:
-        assert cmd not in BATCH_BLOCKED_COMMANDS, f"{cmd} should not be in BATCH_BLOCKED_COMMANDS"
+
+    for cmd in [
+        "get_ecopath_run_state",
+        "get_ecopath_stats",
+        "get_ecopath_group_diagnostics",
+        "get_ecopath_fleet_diagnostics",
+    ]:
+        assert cmd not in BATCH_BLOCKED_COMMANDS, (
+            f"{cmd} should not be in BATCH_BLOCKED_COMMANDS"
+        )
     assert "export_ecopath_results" in BATCH_BLOCKED_COMMANDS
 
 
 def test_run_ecopath_returns_ecopath_detail_field():
     import pathlib
-    cs_path = pathlib.Path(__file__).resolve().parents[1] / "src" / "EwE_MCP_Plugin" / "EwEMcpPlugin.cs"
+
+    cs_path = (
+        pathlib.Path(__file__).resolve().parents[1]
+        / "src"
+        / "EwE_MCP_Plugin"
+        / "EwEMcpPlugin.cs"
+    )
     if not cs_path.exists():
         pytest.skip("C# source not available")
     text = cs_path.read_text(encoding="utf-8")
-    assert "ecopath_detail" in text, "RunEcopath and GetEcopathRunState must return ecopath_detail field"
+    assert "ecopath_detail" in text, (
+        "RunEcopath and GetEcopathRunState must return ecopath_detail field"
+    )
 
 
 @live

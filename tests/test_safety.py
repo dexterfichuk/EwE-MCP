@@ -33,7 +33,9 @@ def test_token_is_required_by_default():
     assert get_token(), "get_token() must return a non-empty string"
     saved = os.environ.pop("EWE_MCP_TOKEN", None)
     try:
-        assert get_token() == DEFAULT_TOKEN, "get_token() should fall back to DEFAULT_TOKEN when env var is unset"
+        assert get_token() == DEFAULT_TOKEN, (
+            "get_token() should fall back to DEFAULT_TOKEN when env var is unset"
+        )
     finally:
         if saved is not None:
             os.environ["EWE_MCP_TOKEN"] = saved
@@ -41,7 +43,9 @@ def test_token_is_required_by_default():
 
 def test_eval_disabled_by_default():
     val = os.environ.get("EWE_MCP_ENABLE_EVAL")
-    assert val is None or val == "0", f"EWE_MCP_ENABLE_EVAL should be unset or '0', got {val!r}"
+    assert val is None or val == "0", (
+        f"EWE_MCP_ENABLE_EVAL should be unset or '0', got {val!r}"
+    )
     assert "execute_ewe_code" in BATCH_BLOCKED_COMMANDS
 
 
@@ -53,7 +57,9 @@ def test_destructive_tools_have_annotations():
         obj = getattr(server, name, None)
         if obj is None or not callable(obj):
             continue
-        annotations = getattr(obj, "_mcp_tool_annotations", None) or getattr(obj, "__mcp_annotations__", None)
+        annotations = getattr(obj, "_mcp_tool_annotations", None) or getattr(
+            obj, "__mcp_annotations__", None
+        )
         if annotations is not None and getattr(annotations, "destructiveHint", False):
             destructive_annotated.add(name)
 
@@ -130,7 +136,11 @@ def test_audit_log_entries_have_required_fields():
                     "message": "",
                 },
             ]
-            return {"id": request["id"], "status": "success", "result": {"entries": entries}}
+            return {
+                "id": request["id"],
+                "status": "success",
+                "result": {"entries": entries},
+            }
         return {"id": request["id"], "status": "success", "result": {}}
 
     port, thread = _serve_persistent(handler)
@@ -156,7 +166,9 @@ def test_max_response_size_prevents_oversized_reads():
 
 
 _RUN_STOP_PATTERN = re.compile(r"^(run_|stop_)")
-_SCENARIO_CRUD_PATTERN = re.compile(r"^(create_|copy_|delete_|save_|load_|close_).*scenario$")
+_SCENARIO_CRUD_PATTERN = re.compile(
+    r"^(create_|copy_|delete_|save_|load_|close_).*scenario$"
+)
 _MODEL_LIFECYCLE = {"load_model", "save_model", "save_model_as", "close_model"}
 _CAPTURE_TOOLS = {"capture_view", "save_screenshot"}
 
@@ -165,7 +177,14 @@ def test_batch_blocked_commands_are_destructive_or_sensitive():
     allowed_categories = (
         _MODEL_LIFECYCLE
         | _CAPTURE_TOOLS
-        | {"execute_ewe_code", "export_ecopath_results", "discard_changes", "run_ecopath", "shutdown_server", "invoke_ui_command"}
+        | {
+            "execute_ewe_code",
+            "export_ecopath_results",
+            "discard_changes",
+            "run_ecopath",
+            "shutdown_server",
+            "invoke_ui_command",
+        }
     )
     for cmd in BATCH_BLOCKED_COMMANDS:
         if cmd in allowed_categories:
@@ -222,7 +241,9 @@ def test_eval_deny_patterns_defined():
 
 
 def test_installer_config_template_has_required_section_and_keys():
-    cfg_path = pathlib.Path(__file__).resolve().parents[1] / "installer" / "EwE_MCP_Plugin.cfg"
+    cfg_path = (
+        pathlib.Path(__file__).resolve().parents[1] / "installer" / "EwE_MCP_Plugin.cfg"
+    )
     text = cfg_path.read_text(encoding="utf-8")
     assert "[EwE_MCP]" in text
     for key in ("host=", "port=", "token="):
@@ -302,12 +323,22 @@ def test_python_batch_blocked_is_superset_of_csharp():
 
 
 def _extract_csharp_dialog_commands():
-    cs_path = pathlib.Path(__file__).resolve().parents[1] / "src" / "EwE_MCP_Plugin" / "EwEMcpPlugin.cs"
+    cs_path = (
+        pathlib.Path(__file__).resolve().parents[1]
+        / "src"
+        / "EwE_MCP_Plugin"
+        / "EwEMcpPlugin.cs"
+    )
     if not cs_path.exists():
         return frozenset()
     text = cs_path.read_text(encoding="utf-8")
     import re
-    matches = re.findall(r'DefaultDialogOpeningCommands[^;]*?=\s*new\s+HashSet[^{]*\{(.*?)\}', text, re.DOTALL)
+
+    matches = re.findall(
+        r"DefaultDialogOpeningCommands[^;]*?=\s*new\s+HashSet[^{]*\{(.*?)\}",
+        text,
+        re.DOTALL,
+    )
     if not matches:
         return frozenset()
     commands = set()
@@ -333,28 +364,52 @@ def test_invoke_ui_command_is_batch_blocked():
 
 
 def test_dialog_watcher_disabled_by_default():
-    cs_path = pathlib.Path(__file__).resolve().parents[1] / "src" / "EwE_MCP_Plugin" / "EwEMcpProtocol.cs"
+    cs_path = (
+        pathlib.Path(__file__).resolve().parents[1]
+        / "src"
+        / "EwE_MCP_Plugin"
+        / "EwEMcpProtocol.cs"
+    )
     if not cs_path.exists():
         pytest.skip("C# source not available")
     text = cs_path.read_text(encoding="utf-8")
-    assert "DialogWatcherEnabled" in text, "DialogWatcherEnabled property must exist in EwEMcpConfig"
+    assert "DialogWatcherEnabled" in text, (
+        "DialogWatcherEnabled property must exist in EwEMcpConfig"
+    )
     import re
-    default_match = re.findall(r'dialogWatcherEnabled\s*=\s*(true|false)', text)
+
+    default_match = re.findall(r"dialogWatcherEnabled\s*=\s*(true|false)", text)
     if default_match:
-        assert default_match[-1] == "false", "Dialog watcher should be disabled by default"
+        assert default_match[-1] == "false", (
+            "Dialog watcher should be disabled by default"
+        )
 
 
 def test_dialog_blocked_commands_config_key_exists():
-    cs_path = pathlib.Path(__file__).resolve().parents[1] / "src" / "EwE_MCP_Plugin" / "EwEMcpProtocol.cs"
+    cs_path = (
+        pathlib.Path(__file__).resolve().parents[1]
+        / "src"
+        / "EwE_MCP_Plugin"
+        / "EwEMcpProtocol.cs"
+    )
     if not cs_path.exists():
         pytest.skip("C# source not available")
     text = cs_path.read_text(encoding="utf-8")
-    assert "DialogBlockedCommands" in text, "DialogBlockedCommands property must exist in EwEMcpConfig"
-    assert "EWE_MCP_DIALOG_BLOCKED_COMMANDS" in text, "EWE_MCP_DIALOG_BLOCKED_COMMANDS env var must be read"
+    assert "DialogBlockedCommands" in text, (
+        "DialogBlockedCommands property must exist in EwEMcpConfig"
+    )
+    assert "EWE_MCP_DIALOG_BLOCKED_COMMANDS" in text, (
+        "EWE_MCP_DIALOG_BLOCKED_COMMANDS env var must be read"
+    )
 
 
 def test_ecopath_run_state_detail_reads_nonpublic_field():
-    cs_path = pathlib.Path(__file__).resolve().parents[1] / "src" / "EwE_MCP_Plugin" / "EwEMcpPlugin.cs"
+    cs_path = (
+        pathlib.Path(__file__).resolve().parents[1]
+        / "src"
+        / "EwE_MCP_Plugin"
+        / "EwEMcpPlugin.cs"
+    )
     if not cs_path.exists():
         pytest.skip("C# source not available")
     text = cs_path.read_text(encoding="utf-8")
@@ -365,7 +420,12 @@ def test_ecopath_run_state_detail_reads_nonpublic_field():
 
 
 def test_dialog_opening_commands_are_cached():
-    cs_path = pathlib.Path(__file__).resolve().parents[1] / "src" / "EwE_MCP_Plugin" / "EwEMcpPlugin.cs"
+    cs_path = (
+        pathlib.Path(__file__).resolve().parents[1]
+        / "src"
+        / "EwE_MCP_Plugin"
+        / "EwEMcpPlugin.cs"
+    )
     if not cs_path.exists():
         pytest.skip("C# source not available")
     text = cs_path.read_text(encoding="utf-8")
@@ -374,7 +434,12 @@ def test_dialog_opening_commands_are_cached():
 
 
 def test_set_value_commands_navigate_by_default_in_plugin():
-    cs_path = pathlib.Path(__file__).resolve().parents[1] / "src" / "EwE_MCP_Plugin" / "EwEMcpPlugin.cs"
+    cs_path = (
+        pathlib.Path(__file__).resolve().parents[1]
+        / "src"
+        / "EwE_MCP_Plugin"
+        / "EwEMcpPlugin.cs"
+    )
     if not cs_path.exists():
         pytest.skip("C# source not available")
     text = cs_path.read_text(encoding="utf-8")
@@ -382,7 +447,12 @@ def test_set_value_commands_navigate_by_default_in_plugin():
 
 
 def test_dialog_watcher_logs_errors_and_does_not_foreground():
-    cs_path = pathlib.Path(__file__).resolve().parents[1] / "src" / "EwE_MCP_Plugin" / "EwEMcpSocketServer.cs"
+    cs_path = (
+        pathlib.Path(__file__).resolve().parents[1]
+        / "src"
+        / "EwE_MCP_Plugin"
+        / "EwEMcpSocketServer.cs"
+    )
     if not cs_path.exists():
         pytest.skip("C# source not available")
     text = cs_path.read_text(encoding="utf-8")
@@ -405,7 +475,9 @@ def test_config_file_requires_ewe_mcp_section_header():
         pytest.skip("Installer .iss file not present")
 
     content = pathlib.Path(installer_path).read_text()
-    lines_section = content.split("CurStepChanged")[1] if "CurStepChanged" in content else ""
+    lines_section = (
+        content.split("CurStepChanged")[1] if "CurStepChanged" in content else ""
+    )
     assert expected_header in lines_section, (
         f"Installer CurStepChanged must write '{expected_header}' section header "
         f"before key=value lines — without it, ReadConfigFile() ignores all values"

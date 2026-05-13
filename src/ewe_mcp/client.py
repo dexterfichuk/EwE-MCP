@@ -37,7 +37,9 @@ class ResponseTooLargeError(ConnectionError):
 
 
 class EwEMCPClient:
-    def __init__(self, host: str | None = None, port: int | None = None, token: str | None = None):
+    def __init__(
+        self, host: str | None = None, port: int | None = None, token: str | None = None
+    ):
         self.host = host or get_host()
         self.port = port or get_port()
         self.token = token or get_token()
@@ -116,7 +118,11 @@ class EwEMCPClient:
             length = HEADER_STRUCT.unpack(header)[0]
             data = self._recv_exact(length, max_response_size)
             if length > int(max_response_size * LARGE_RESPONSE_WARN_RATIO):
-                logger.warning("Large response from EwE plugin: %d bytes for command %s", length, command_type)
+                logger.warning(
+                    "Large response from EwE plugin: %d bytes for command %s",
+                    length,
+                    command_type,
+                )
             self._set_timeout(None)
             return json.loads(data.decode("utf-8"))
         except socket.timeout:

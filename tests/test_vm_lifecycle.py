@@ -12,9 +12,12 @@ vm_integration = pytest.mark.skipif(
 VM_USER = os.environ.get("EWE_VM_USER", "dexter")
 VM_HOST = os.environ.get("EWE_VM_HOST", "192.168.64.2")
 SSH_OPTS = [
-    "-o", "StrictHostKeyChecking=no",
-    "-o", "PreferredAuthentications=password",
-    "-o", "PubkeyAuthentication=no",
+    "-o",
+    "StrictHostKeyChecking=no",
+    "-o",
+    "PreferredAuthentications=password",
+    "-o",
+    "PubkeyAuthentication=no",
 ]
 PLUGIN_LOG = r"%APPDATA%\Ecopath with Ecosim\EwE_MCP_Plugin.log"
 DIALOG_SWEEPER_LOG = r"%APPDATA%\Ecopath with Ecosim\EwE_MCP_DialogSweeper.log"
@@ -29,7 +32,9 @@ def _env():
 
 def _run_with_ssh_retry(cmd, **kwargs):
     for attempt in range(_SSH_RETRY_ATTEMPTS):
-        result = subprocess.run(cmd, capture_output=True, text=True, env=_env(), **kwargs)
+        result = subprocess.run(
+            cmd, capture_output=True, text=True, env=_env(), **kwargs
+        )
         if result.returncode == 0:
             return result
         if "Permission denied" not in result.stderr:
@@ -66,8 +71,14 @@ def test_smoke_after_launch():
 @vm_integration
 def test_collect_plugin_log():
     result = _run_with_ssh_retry(
-        ["sshpass", "-e", "ssh", *SSH_OPTS, f"{VM_USER}@{VM_HOST}",
-         f'cmd /c type "{PLUGIN_LOG}"'],
+        [
+            "sshpass",
+            "-e",
+            "ssh",
+            *SSH_OPTS,
+            f"{VM_USER}@{VM_HOST}",
+            f'cmd /c type "{PLUGIN_LOG}"',
+        ],
         timeout=30,
     )
     assert result.returncode == 0, f"could not read plugin log:\n{result.stderr}"
@@ -79,10 +90,20 @@ def test_collect_plugin_log():
 @vm_integration
 def test_collect_dialog_sweeper_log():
     result = _run_with_ssh_retry(
-        ["sshpass", "-e", "ssh", *SSH_OPTS, f"{VM_USER}@{VM_HOST}",
-         f'cmd /c type "{DIALOG_SWEEPER_LOG}"'],
+        [
+            "sshpass",
+            "-e",
+            "ssh",
+            *SSH_OPTS,
+            f"{VM_USER}@{VM_HOST}",
+            f'cmd /c type "{DIALOG_SWEEPER_LOG}"',
+        ],
         timeout=30,
     )
     if result.returncode != 0 and "cannot find" in result.stderr.lower():
-        pytest.skip("Dialog sweeper log not present (sweeper may not have been started)")
-    assert result.returncode == 0, f"could not read dialog sweeper log:\n{result.stderr}"
+        pytest.skip(
+            "Dialog sweeper log not present (sweeper may not have been started)"
+        )
+    assert result.returncode == 0, (
+        f"could not read dialog sweeper log:\n{result.stderr}"
+    )

@@ -38,18 +38,19 @@ def spatial_model_path():
         return f"{_remote_root().rstrip('/\\\\')}\\tests\\fixtures\\Anchovy_Bay_Spatial_Mosaic.eweaccdb"
     return SPATIAL_MODEL
 
+
 @pytest.fixture
 def live_client():
     """Provides a connected synchronous client for live tests, skipping if disabled.
     Starts with a clean slate (model closed)."""
     if os.environ.get("EWE_LIVE_TESTS") != "1":
         pytest.skip("Skipping live tests")
-    
+
     client = EwEMCPClient()
     assert client.connect()
-    
+
     client.command_result("close_model")
-    
+
     yield client
-    
+
     client.disconnect()

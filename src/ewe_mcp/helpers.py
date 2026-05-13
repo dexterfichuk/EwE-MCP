@@ -26,6 +26,8 @@ def get_max_response_size() -> int:
     if value <= 0:
         raise ValueError(f"EWE_MCP_MAX_RESPONSE_SIZE must be positive, got {value}")
     return value
+
+
 HEADER_STRUCT = struct.Struct(">I")
 
 EVAL_DENY_PATTERNS = (
@@ -114,6 +116,14 @@ def error_hint(message: str) -> str | None:
         return "This UI command opens a modal dialog and is blocked in MCP mode. Use a dedicated MCP tool when available, operate the EwE GUI manually, or enable dialog_watcher_enabled only for supervised workflows."
     if "response too large" in lower:
         return "The EwE plugin response exceeded the size limit. Try requesting smaller subsets (e.g., fewer variables, shorter time ranges, or pagination)."
+    if (
+        "cannot be 0" in lower
+        or "cannot be zero" in lower
+        or "value is out of range" in lower
+    ):
+        return "EwE rejected this value as out of range. Use validate_values first and check EwE's range constraints for the specific variable."
+    if "'data'" in lower and "keyerror" in lower:
+        return "A modal dialog may be blocking the EwE GUI. Try enabling dialog_watcher_enabled in the plugin config, or dismiss the dialog manually on the Windows VM."
     return None
 
 
@@ -127,3 +137,95 @@ def enrich_diagnose(result: dict[str, Any]) -> dict[str, Any]:
         }
     )
     return result
+
+
+# ── EwE range constraints (BUG-8) ───────────────────────────────────────
+
+EWE_NULL_VALUE = -9999.0
+
+# 4-tuple: (min_val, max_val, min_exclusive, max_exclusive)
+# min_exclusive=True means value must be > min_val (not >=)
+# max_exclusive=True means value must be < max_val (not <=)
+EWE_RANGE_CONSTRAINTS: dict[str, dict[str, tuple[float, float, bool, bool]]] = {
+    "ecosim_group_inputs": {
+        # (min, max, min_exclusive, max_exclusive)
+        "den_dep_catchability": (1.0, float("inf"), False, False),  # ge 1.0
+        "vul_mult": (1.0, float("inf"), False, False),  # ge 1.0
+        "max_rel_feeding_time": (0.0, 100.0, True, False),  # gt 0, le 100
+        "feeding_time_adjust_rate": (0.0, 1.0, False, True),  # ge 0, lt 1
+        "max_rel_pb": (0.0, float("inf"), True, False),  # gt 0
+    },
+    "ecosim_fleet_inputs": {
+        "rel_q": (1.0, float("inf"), False, False),  # ge 1.0
+        "effort_conversion_factor": (0.0, float("inf"), True, False),  # gt 0
+    },
+}
+
+_DOMAIN_ALIASES: dict[str, str] = {
+    "ecopath_groups": "ecopath_group",
+    "ecopath_fleets": "ecopath_fleet",
+    "ecospace_habitats": "ecospace_habitat",
+}
+
+# Non-exhaustive map of common eStatusFlags composite codes.
+# Bits: 1=OK, 2=FailedValidation, 4=ValueComputed, 8=InvalidModelResult,
+# 16=NotEditable, 32=ErrorEncountered, 64=MissingParameter,
+# 128=CoreHighlight, 256=Null, 512=Stored
+STATUS_CODE_MAP: dict[int, str] = {
+    1: "OK",
+    2: "FailedValidation",
+    4: "ValueComputed",
+    8: "InvalidModelResult",
+    16: "NotEditable",
+    32: "ErrorEncountered",
+    64: "MissingParameter",
+    128: "CoreHighlight",
+    256: "Null",
+    512: "Stored",
+    513: "Stored+OK",
+    528: "Stored+NotEditable",
+    532: "Stored+NotEditable+ValueComputed",
+    768: "Stored+Null",
+    784: "Stored+Null+NotEditable",
+    785: "Stored+Null+NotEditable+OK",
+}
+
+
+def normalize_domain_name(domain: str) -> str:
+    """Normalize domain name aliases (e.g., ecopath_groups -> ecopath_group)."""
+    return _DOMAIN_ALIASES.get(domain, domain)
+
+
+def validate_ewe_ranges(
+    domain: str, values: dict[str, Any]
+) -> dict[str, dict[str, Any]]:
+    """Check EwE-specific range constraints that the plugin's validate_values misses.
+
+    Returns a dict keyed by variable name with validation results for any
+    variables that violate range constraints. Unknown domains/variables are
+    skipped (return empty dict).
+    """
+    constraints = EWE_RANGE_CONSTRAINTS.get(domain, {})
+    if not constraints:
+        return {}
+    results: dict[str, dict[str, Any]] = {}
+    for var_name, raw_value in values.items():
+        if var_name not in constraints:
+            continue
+        min_val, max_val, min_exclusive, max_exclusive = constraints[var_name]
+        try:
+            value = float(raw_value)
+        except (TypeError, ValueError):
+            continue
+        violates_min = value <= min_val if min_exclusive else value < min_val
+        violates_max = value >= max_val if max_exclusive else value > max_val
+        if violates_min or violates_max:
+            min_desc = f">{'>' if min_exclusive else '='} {min_val}"
+            max_desc = f"{'<' if max_exclusive else '<='} {max_val}"
+            results[var_name] = {
+                "valid": False,
+                "reason": f"{var_name} must be {min_desc} and {max_desc} (got {value})",
+            }
+        else:
+            results[var_name] = {"valid": True}
+    return results

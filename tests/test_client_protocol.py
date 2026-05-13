@@ -73,8 +73,10 @@ def test_client_raises_on_error_response():
     client.disconnect()
     thread.join(timeout=2)
 
+
 def test_client_timeout():
     import time
+
     def handler(request):
         time.sleep(0.5)
         return {"id": request["id"], "status": "success", "result": {}}
@@ -88,6 +90,7 @@ def test_client_timeout():
 
     client.disconnect()
     thread.join(timeout=2)
+
 
 def test_client_cleanup_on_close():
     def handler(request):
@@ -103,6 +106,7 @@ def test_client_cleanup_on_close():
     # We should handle calling disconnect multiple times safely
     client.disconnect()
     thread.join(timeout=2)
+
 
 def test_client_disconnects_on_oversized_response():
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -138,12 +142,15 @@ def test_client_disconnects_on_oversized_response():
     with pytest.raises(ResponseTooLargeError, match="Response too large"):
         client.command_result("ping")
 
-    assert client.socket is None, "Socket should be disconnected after oversized response rejection"
+    assert client.socket is None, (
+        "Socket should be disconnected after oversized response rejection"
+    )
     thread.join(timeout=2)
 
 
 def test_client_recovers_after_timeout():
     import time
+
     def handler(request):
         if request["type"] == "slow":
             time.sleep(0.5)

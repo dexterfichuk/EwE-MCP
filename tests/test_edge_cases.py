@@ -19,8 +19,6 @@ live = pytest.mark.skipif(
 )
 
 
-
-
 async def _ensure_model_loaded(sample_model_path):
     """Load the sample model if not already loaded (idempotent)."""
     res = await load_model(sample_model_path)
@@ -33,6 +31,7 @@ async def test_set_values_invalid_domain(sample_model_path):
     with pytest.raises(EwEMCPError) as excinfo:
         await set_values(domain="invalid_domain", index=1, values={"name": "test"})
     assert excinfo.value.code == "unknown_domain"
+
 
 @live
 @pytest.mark.asyncio
@@ -47,7 +46,9 @@ async def test_set_values_index_out_of_range(sample_model_path):
 @pytest.mark.asyncio
 async def test_set_values_unknown_property(sample_model_path):
     await _ensure_model_loaded(sample_model_path)
-    res = await set_values(domain="ecopath_group", index=1, values={"non_existent_prop": 1.0})
+    res = await set_values(
+        domain="ecopath_group", index=1, values={"non_existent_prop": 1.0}
+    )
     assert res["results"]["non_existent_prop"] == "unknown_or_readonly_property"
 
 
@@ -115,4 +116,3 @@ async def test_new_batch_blocked_commands():
     assert "stop_mse" in BATCH_BLOCKED_COMMANDS
     assert "run_monte_carlo" in BATCH_BLOCKED_COMMANDS
     assert "stop_monte_carlo" in BATCH_BLOCKED_COMMANDS
-

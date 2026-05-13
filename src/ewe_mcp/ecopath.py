@@ -16,7 +16,9 @@ def estimate_fishing_mortality(catch: float, biomass: float) -> float:
     return catch / biomass
 
 
-def estimate_total_mortality(fishing_mortality: float, natural_mortality: float) -> float:
+def estimate_total_mortality(
+    fishing_mortality: float, natural_mortality: float
+) -> float:
     """
     Estimate total mortality (Z) as the sum of fishing mortality (F) and natural mortality (M).
 
