@@ -136,12 +136,13 @@ def enrich_diagnose(result: dict[str, Any]) -> dict[str, Any]:
             "detail": {"package": "ewe-mcp"},
         }
     )
+    filtering = should_filter_sentinels()
     checks.append(
         {
             "name": "sentinel_filtering",
-            "status": "ok" if should_filter_sentinels() else "disabled",
+            "status": "ok" if filtering else "disabled",
             "detail": {
-                "enabled": should_filter_sentinels(),
+                "enabled": filtering,
                 "env_var": "EWE_MCP_FILTER_SENTINELS",
             },
         }
@@ -153,6 +154,8 @@ def enrich_diagnose(result: dict[str, Any]) -> dict[str, Any]:
 
 EWE_NULL_VALUE = -9999.0
 
+# EwE uses -9999 as its null/not-set sentinel (cNullValue in EwECore).
+# Both int and float forms appear depending on JSON serialization.
 _SENTINEL_VALUES = frozenset({-9999, -9999.0})
 
 
@@ -162,12 +165,14 @@ def should_filter_sentinels() -> bool:
 
 
 def filter_sentinels(value: Any) -> Any:
-    if isinstance(value, (int, float)) and value in _SENTINEL_VALUES:
+    if isinstance(value, (int, float)) and not isinstance(value, bool) and value in _SENTINEL_VALUES:
         return None
     if isinstance(value, dict):
         return {k: filter_sentinels(v) for k, v in value.items()}
     if isinstance(value, list):
         return [filter_sentinels(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(filter_sentinels(item) for item in value)
     return value
 
 
@@ -239,6 +244,8 @@ def validate_ewe_ranges(
     results: dict[str, dict[str, Any]] = {}
     for var_name, raw_value in values.items():
         if var_name not in constraints:
+            continue
+        if isinstance(raw_value, (int, float)) and raw_value in _SENTINEL_VALUES:
             continue
         min_val, max_val, min_exclusive, max_exclusive = constraints[var_name]
         try:

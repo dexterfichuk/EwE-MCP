@@ -5,6 +5,7 @@ from ewe_mcp.helpers import (
     DEFAULT_MAX_RESPONSE_SIZE,
     EWE_NULL_VALUE,
     STATUS_CODE_MAP,
+    enrich_diagnose,
     error_hint,
     filter_sentinels,
     get_max_response_size,
@@ -288,6 +289,14 @@ class TestFilterSentinels:
         assert filter_sentinels(True) is True
         assert filter_sentinels(False) is False
 
+    def test_filters_tuple_items(self):
+        result = filter_sentinels((-9999.0, 0, 3.14, -9999))
+        assert result == (None, 0, 3.14, None)
+
+    def test_filters_nested_tuple_in_dict(self):
+        result = filter_sentinels({"coords": (-9999.0, 1.0, 2.0)})
+        assert result == {"coords": (None, 1.0, 2.0)}
+
     def test_integration_realistic_response(self):
         response = {
             "name": "TestGroup",
@@ -319,3 +328,50 @@ class TestShouldFilterSentinels:
         monkeypatch.setenv("EWE_MCP_FILTER_SENTINELS", "0")
         should_filter_sentinels.cache_clear()
         assert should_filter_sentinels() is False
+
+
+# ── enrich_diagnose sentinel check ────────────────────────────────────
+
+
+def test_enrich_diagnose_sentinel_filtering_enabled(monkeypatch):
+    monkeypatch.setenv("EWE_MCP_FILTER_SENTINELS", "1")
+    should_filter_sentinels.cache_clear()
+    result = enrich_diagnose({"checks": []})
+    sentinel_check = next(
+        (c for c in result["checks"] if c["name"] == "sentinel_filtering"), None
+    )
+    assert sentinel_check is not None
+    assert sentinel_check["status"] == "ok"
+    assert sentinel_check["detail"]["enabled"] is True
+    should_filter_sentinels.cache_clear()
+
+
+def test_enrich_diagnose_sentinel_filtering_disabled(monkeypatch):
+    monkeypatch.setenv("EWE_MCP_FILTER_SENTINELS", "0")
+    should_filter_sentinels.cache_clear()
+    result = enrich_diagnose({"checks": []})
+    sentinel_check = next(
+        (c for c in result["checks"] if c["name"] == "sentinel_filtering"), None
+    )
+    assert sentinel_check is not None
+    assert sentinel_check["status"] == "disabled"
+    assert sentinel_check["detail"]["enabled"] is False
+    should_filter_sentinels.cache_clear()
+
+
+# ── validate_ewe_ranges sentinel bypass ────────────────────────────────
+
+
+def test_validate_ewe_ranges_skips_sentinel_values():
+    result = validate_ewe_ranges(
+        "ecosim_group_inputs", {"max_rel_pb": -9999.0, "den_dep_catchability": -9999}
+    )
+    assert result == {}
+
+
+def test_validate_ewe_ranges_sentinel_mixed_with_valid():
+    result = validate_ewe_ranges(
+        "ecosim_group_inputs", {"max_rel_pb": -9999.0, "den_dep_catchability": 1.0}
+    )
+    assert "max_rel_pb" not in result
+    assert result["den_dep_catchability"]["valid"] is True
