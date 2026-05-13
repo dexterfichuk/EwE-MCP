@@ -4,7 +4,9 @@ version = "0.1.0"
 description = "Model Context Protocol bridge for Ecopath with Ecosim"
 requires-python = ">=3.11"
 dependencies = [
-  "mcp>=1.0.0",
+    "mcp>=1.0.0",
+    "duckdb>=1.0.0",
+    "httpx>=0.27.0",
 ]
 
 [project.scripts]

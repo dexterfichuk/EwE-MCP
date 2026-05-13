@@ -23,6 +23,9 @@ from ewe_mcp.ecopath import (
     estimate_production as ecopath_estimate_production,
     estimate_total_mortality as ecopath_estimate_total_mortality,
 )
+from ewe_mcp.data_sources.fishbase import query_fishbase as _query_fishbase
+from ewe_mcp.data_sources.sealifebase import query_sealifebase as _query_sealifebase
+from ewe_mcp.data_sources.globi import query_globi as _query_globi
 from ewe_mcp.helpers import (
     BATCH_BLOCKED_COMMANDS,
     STATUS_CODE_MAP,
@@ -172,6 +175,67 @@ async def estimate_average_longevity(pb_ratio: float) -> float:
     Formula: Longevity = 1 / (P/B)
     """
     return ecopath_estimate_average_longevity(pb_ratio)
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+async def query_fishbase(genus: str, species: str, tables: list[str] | None = None) -> dict[str, Any]:
+    """Query FishBase for fish species trait data (growth, mortality, trophic level, diet).
+
+    Queries FishBase via DuckDB against Source Cooperative S3 Parquet files.
+    Does NOT require an EwE connection — works standalone.
+
+    Args:
+        genus: Genus name (e.g., "Gadus").
+        species: Species epithet (e.g., "morhua").
+        tables: Optional list of tables to query: "popgrowth", "ecology", "diet".
+                Defaults to all three.
+
+    Returns:
+        Dict keyed by table name with list of row dicts containing trait data,
+        or {"error": "..."} on failure.
+    """
+    return await asyncio.to_thread(_query_fishbase, genus, species, tables)
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+async def query_sealifebase(genus: str, species: str, tables: list[str] | None = None) -> dict[str, Any]:
+    """Query SeaLifeBase for non-fish marine species trait data (growth, mortality, trophic level, diet).
+
+    Queries SeaLifeBase via DuckDB against Source Cooperative S3 Parquet files.
+    Same structure as FishBase but covers invertebrates, marine mammals, etc.
+    Does NOT require an EwE connection — works standalone.
+
+    Args:
+        genus: Genus name (e.g., "Octopus").
+        species: Species epithet (e.g., "vulgaris").
+        tables: Optional list of tables to query: "popgrowth", "ecology", "diet".
+                Defaults to all three.
+
+    Returns:
+        Dict keyed by table name with list of row dicts containing trait data,
+        or {"error": "..."} on failure.
+    """
+    return await asyncio.to_thread(_query_sealifebase, genus, species, tables)
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+async def query_globi(taxon_name: str, interaction_type: str = "preysOn") -> dict[str, Any]:
+    """Query GLOBI for species interaction data (predator-prey relationships).
+
+    Searches the Global Biotic Interactions database for trophic and other
+    biotic interactions. Returns up to 100 interactions.
+    Does NOT require an EwE connection — works standalone.
+
+    Args:
+        taxon_name: Full scientific name (e.g., "Gadus morhua").
+        interaction_type: Type of interaction. Common: "preysOn", "eatenBy",
+                         "parasiteOf", "hostOf". Defaults to "preysOn".
+
+    Returns:
+        Dict with source, interaction_type, interactions list, count, and
+        optional note if capped. Returns {"error": "..."} on failure.
+    """
+    return await asyncio.to_thread(_query_globi, taxon_name, interaction_type)
 
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
