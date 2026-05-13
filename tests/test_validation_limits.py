@@ -4,6 +4,7 @@ import pytest
 
 from ewe_mcp.server import (
     load_model,
+    load_ecosim_scenario,
     validate_values,
     validate_indexed_value,
     run_ecopath,
@@ -18,6 +19,7 @@ live = pytest.mark.skipif(
 async def _ensure_model_loaded_and_balanced(sample_model_path):
     await load_model(sample_model_path)
     await run_ecopath()
+    await load_ecosim_scenario(index=1)
 
 
 @live

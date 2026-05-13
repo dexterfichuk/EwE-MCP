@@ -10,14 +10,14 @@ live = pytest.mark.skipif(
 
 @live
 @pytest.mark.asyncio
-async def test_sentinel_filtering_ecopath_group_i_stanza(sample_model_path):
+async def test_sentinel_filtering_ecopath_group_ee(sample_model_path):
     from ewe_mcp.server import get_ecopath_group, load_model
 
     await load_model(sample_model_path)
     group = await get_ecopath_group(index=1)
     assert "input" in group
-    assert group["input"]["i_stanza"] is None, (
-        f"Expected i_stanza to be None (filtered sentinel), got {group['input']['i_stanza']}"
+    assert group["input"]["ee"] is None, (
+        f"Expected ee to be None (filtered sentinel), got {group['input']['ee']}"
     )
 
 
@@ -48,8 +48,8 @@ async def test_sentinel_filtering_ecosim_group_i_stanza(sample_model_path):
 
     await load_model(sample_model_path)
     await load_ecosim_scenario(index=1)
-    group = await get_ecosim_group_input(index=1)
-    assert "i_stanza" in group
-    assert group["i_stanza"] is None, (
-        f"Expected i_stanza to be None (filtered sentinel), got {group['i_stanza']}"
+    group = await get_ecosim_group_input(index=24)
+    assert "values" in group
+    assert group["values"]["i_stanza"] is None, (
+        f"Expected i_stanza to be None (filtered sentinel), got {group['values']['i_stanza']}"
     )
