@@ -197,6 +197,7 @@ namespace EwE_MCP_Plugin
         private readonly Func<SynchronizationContext> _syncContext;
         private readonly EwEMcpAuditLog _auditLog;
         private readonly EwEMcpConfig _config;
+        private HashSet<string> _dialogOpeningCommands;
         public Action OnShutdownRequested { get; set; }
 
         public EwEMcpCommandRouter(
@@ -501,7 +502,8 @@ namespace EwE_MCP_Plugin
                     Check("command_handler", cmdh != null, cmdh?.GetType().FullName),
                     Check("plugin_log", File.Exists(EwEMcpFileLog.Path), EwEMcpFileLog.Path),
                     Check("token", !string.IsNullOrWhiteSpace(_config.Token), _config.UsingDefaultToken ? "default development token" : "configured"),
-                    Check("eval_enabled", _config.EnableEval, _config.EnableEval ? "enabled" : "disabled")
+                    Check("eval_enabled", _config.EnableEval, _config.EnableEval ? "enabled" : "disabled"),
+                Check("dialog_watcher_enabled", _config.DialogWatcherEnabled, _config.DialogWatcherEnabled ? "enabled" : "disabled")
                 },
                 ["host"] = _config.Host,
                 ["port"] = _config.Port,
@@ -561,7 +563,7 @@ namespace EwE_MCP_Plugin
                 ["model_name"] = eweModel?.GetType().GetProperty("Name")?.GetValue(eweModel)?.ToString()
             };
 
-            if (eweModel != null)
+        if (eweModel != null)
             {
                 // Explicit property list avoids reflection over all cEwEModel properties,
                 // which could pick up complex objects, indexed properties, or future
@@ -2403,6 +2405,35 @@ namespace EwE_MCP_Plugin
             return new JObject { ["commands"] = commands, ["total_count"] = commands.Count };
         }
 
+        // Dialog-opening commands that are blocked in MCP mode.
+        // Extend via EWE_MCP_DIALOG_BLOCKED_COMMANDS env var (comma-separated) or
+        // dialog_blocked_commands key in EwE_MCP_Plugin.cfg (comma-separated).
+        private static readonly HashSet<string> DefaultDialogOpeningCommands = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "ImportTimeSeries",
+            "m_cmdImportTimeSeries",
+        };
+
+        private HashSet<string> GetDialogOpeningCommands()
+        {
+            if (_dialogOpeningCommands != null)
+            {
+                return _dialogOpeningCommands;
+            }
+
+            var commands = new HashSet<string>(DefaultDialogOpeningCommands, StringComparer.OrdinalIgnoreCase);
+            var extra = _config.DialogBlockedCommands;
+            if (extra != null)
+            {
+                foreach (var cmd in extra.Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries))
+                {
+                    commands.Add(cmd.Trim());
+                }
+            }
+            _dialogOpeningCommands = commands;
+            return _dialogOpeningCommands;
+        }
+
         private JObject InvokeUiCommand(JObject parameters)
         {
             var name = RequiredString(parameters, "name");
@@ -2411,6 +2442,10 @@ namespace EwE_MCP_Plugin
             if (cmd == null)
             {
                 throw new EwEMcpException("command_not_found", $"UI command not found: {name}");
+            }
+            if (GetDialogOpeningCommands().Contains(name))
+            {
+                throw new EwEMcpException("dialog_command_blocked", $"UI command '{name}' opens a modal dialog and is blocked in MCP mode to prevent socket hangs. Use a dedicated MCP tool when available, operate the EwE GUI manually, or enable dialog_watcher_enabled only for supervised workflows.");
             }
 
             if (parameters.TryGetValue("tag", out var tag))
@@ -2763,24 +2798,16 @@ namespace EwE_MCP_Plugin
             var core = RequireCore();
             bool ok = core.RunEcopath();
             bool isBalanced = false;
-            string runState = "unknown";
             try { isBalanced = (bool)SafeInvokeBool(core, "IsModelBalanced"); } catch { }
-            try
-            {
-                var ecopath = SafeGetProperty(core, "Ecopath");
-                if (ecopath != null)
-                {
-                    runState = SafeInvokeToString(ecopath, "RunState");
-                    if (string.IsNullOrEmpty(runState)) runState = "unknown";
-                }
-            }
-            catch { }
+            string runDetail = SafeGetEcopathRunStateDetail(core);
+            string runState = isBalanced ? "balanced" : "unbalanced";
             return new JObject
             {
                 ["started"] = ok,
                 ["run_type"] = "ecopath",
                 ["is_model_balanced"] = isBalanced,
-                ["ecopath_run_state"] = runState
+                ["ecopath_run_state"] = runState,
+                ["ecopath_detail"] = runDetail
             };
         }
 
@@ -2790,19 +2817,22 @@ namespace EwE_MCP_Plugin
             var sm = SafeGetProperty(core, "StateMonitor");
             bool hasEcopathRan = false;
             bool isBalanced = false;
-            string runState = "unknown";
             try { hasEcopathRan = SafeInvokeBool(sm, "HasEcopathRan"); } catch { }
             try { isBalanced = SafeInvokeBool(core, "IsModelBalanced"); } catch { }
-            try
+            string runDetail = SafeGetEcopathRunStateDetail(core);
+            string runState;
+            if (hasEcopathRan && isBalanced)
             {
-                var ecopath = SafeGetProperty(core, "Ecopath");
-                if (ecopath != null)
-                {
-                    runState = SafeInvokeToString(ecopath, "RunState");
-                    if (string.IsNullOrEmpty(runState)) runState = "unknown";
-                }
+                runState = "balanced";
             }
-            catch { }
+            else if (hasEcopathRan)
+            {
+                runState = "unbalanced";
+            }
+            else
+            {
+                runState = "not_run";
+            }
             return new JObject
             {
                 ["core_execution_state"] = SafeInvokeToString(sm, "CoreExecutionState"),
@@ -2810,8 +2840,48 @@ namespace EwE_MCP_Plugin
                 ["has_ecopath_ran"] = hasEcopathRan,
                 ["is_model_balanced"] = isBalanced,
                 ["ecopath_run_state"] = runState,
+                ["ecopath_detail"] = runDetail,
                 ["queried_at"] = DateTime.UtcNow.ToString("o")
             };
+        }
+
+        private static string SafeGetEcopathRunStateDetail(object core)
+        {
+            try
+            {
+                var ecopath = SafeGetMember(core, "Ecopath") ?? SafeGetMember(core, "m_Ecopath");
+                if (ecopath != null)
+                {
+                    var field = ecopath.GetType().GetField(
+                        "RunState",
+                        BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                    if (field != null)
+                    {
+                        var val = field.GetValue(ecopath);
+                        return val?.ToString() ?? "unknown";
+                    }
+                }
+            }
+            catch { }
+            return "unknown";
+        }
+
+        private static object SafeGetMember(object obj, string name)
+        {
+            if (obj == null)
+            {
+                return null;
+            }
+
+            const BindingFlags flags = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance;
+            var type = obj.GetType();
+            var property = type.GetProperty(name, flags);
+            if (property != null && property.GetIndexParameters().Length == 0)
+            {
+                return property.GetValue(obj, null);
+            }
+            var field = type.GetField(name, flags);
+            return field?.GetValue(obj);
         }
 
         private JObject GetEcopathStats()
@@ -3047,9 +3117,10 @@ namespace EwE_MCP_Plugin
             "stop_mse",
             "run_monte_carlo",
             "stop_monte_carlo",
-            "export_ecopath_results",
-            "shutdown_server",
-        };
+        "export_ecopath_results",
+        "shutdown_server",
+        "invoke_ui_command",
+    };
 
         private JObject Batch(JObject parameters)
         {
@@ -3865,7 +3936,7 @@ namespace EwE_MCP_Plugin
                 ["domain"] = domain ?? string.Empty,
                 ["type"] = FriendlyTypeName(property.PropertyType),
                 ["readable"] = property.CanRead,
-                ["writable"] = property.CanWrite && indexParameters.Length == 0,
+                ["writable"] = property.CanWrite,
                 ["indexed"] = indexParameters.Length > 0,
                 ["index_count"] = indexParameters.Length
             };

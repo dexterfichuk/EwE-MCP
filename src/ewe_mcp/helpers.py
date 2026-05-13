@@ -76,6 +76,7 @@ BATCH_BLOCKED_COMMANDS = frozenset(
         "stop_monte_carlo",
         "export_ecopath_results",
         "shutdown_server",
+        "invoke_ui_command",
     }
 )
 
@@ -109,6 +110,8 @@ def error_hint(message: str) -> str | None:
         return "Call list_ui_commands or get_command_catalog to inspect available EwE UI commands."
     if "core" in lower and "unavailable" in lower:
         return "Wait for EwE startup to finish or load a model before using model/run tools."
+    if "dialog_command_blocked" in lower:
+        return "This UI command opens a modal dialog and is blocked in MCP mode. Use a dedicated MCP tool when available, operate the EwE GUI manually, or enable dialog_watcher_enabled only for supervised workflows."
     if "response too large" in lower:
         return "The EwE plugin response exceeded the size limit. Try requesting smaller subsets (e.g., fewer variables, shorter time ranges, or pagination)."
     return None

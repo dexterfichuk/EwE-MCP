@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using System.Net;
 using System.Net.Sockets;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -18,6 +19,48 @@ namespace EwE_MCP_Plugin
         private TcpListener _listener;
         private CancellationTokenSource _cts;
         private Task _acceptLoop;
+        private CancellationTokenSource _dialogWatcherCts;
+        private Task _dialogWatcherLoop;
+        private int _currentPid;
+
+        [DllImport("user32.dll")]
+        private static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
+
+        [DllImport("user32.dll")]
+        private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
+
+        [DllImport("user32.dll")]
+        private static extern bool IsWindowVisible(IntPtr hWnd);
+
+        [DllImport("user32.dll")]
+        private static extern IntPtr GetWindow(IntPtr hWnd, uint uCmd);
+
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+        private static extern int GetClassName(IntPtr hWnd, StringBuilder lpClassName, int nMaxCount);
+
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+        private static extern int GetWindowText(IntPtr hWnd, StringBuilder lpString, int nMaxCount);
+
+        [DllImport("user32.dll")]
+        private static extern IntPtr FindWindowEx(IntPtr hWndParent, IntPtr hWndChildAfter, string lpszClass, string lpszWindow);
+
+        [DllImport("user32.dll")]
+        private static extern bool PostMessage(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
+
+        [DllImport("user32.dll")]
+        private static extern bool SendMessageTimeout(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam, uint fuFlags, uint uTimeout, out IntPtr lpdwResult);
+
+        [DllImport("user32.dll")]
+        private static extern int GetDlgCtrlID(IntPtr hWnd);
+
+        private delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+
+        private const uint GW_OWNER = 4;
+        private const uint BM_CLICK = 0x00F5;
+        private const int IDOK = 1;
+        private const int IDYES = 6;
+        private const uint SMTO_ABORTIFHUNG = 0x0002;
+        private const uint MSG_TIMEOUT_MS = 500;
 
         public EwEMcpSocketServer(EwEMcpConfig config, EwEMcpCommandRouter router, EwEMcpAuditLog auditLog)
         {
@@ -42,6 +85,7 @@ namespace EwE_MCP_Plugin
             _listener = new TcpListener(address, _config.Port);
             _listener.Start();
             _acceptLoop = Task.Run(() => AcceptLoopAsync(_cts.Token));
+            StartDialogWatcher();
             _auditLog.Add("server", "started", $"{_config.Host}:{_config.Port}");
         }
 
@@ -52,6 +96,7 @@ namespace EwE_MCP_Plugin
                 _cts?.Cancel();
                 _listener?.Stop();
                 _acceptLoop?.Wait(1000);
+                StopDialogWatcher();
             }
             catch
             {
@@ -316,6 +361,153 @@ namespace EwE_MCP_Plugin
             await stream.WriteAsync(header, 0, header.Length, token).ConfigureAwait(false);
             await stream.WriteAsync(payload, 0, payload.Length, token).ConfigureAwait(false);
             await stream.FlushAsync(token).ConfigureAwait(false);
+        }
+
+        private void StartDialogWatcher()
+        {
+            if (!_config.DialogWatcherEnabled)
+            {
+                EwEMcpFileLog.Info("Dialog watcher is disabled (dialog_watcher_enabled not set)");
+                return;
+            }
+            _currentPid = System.Diagnostics.Process.GetCurrentProcess().Id;
+            _dialogWatcherCts = new CancellationTokenSource();
+            _dialogWatcherLoop = Task.Run(() => DialogWatcherLoopAsync(_dialogWatcherCts.Token));
+            EwEMcpFileLog.Info($"Dialog watcher started (PID={_currentPid})");
+        }
+
+        private void StopDialogWatcher()
+        {
+            try
+            {
+                _dialogWatcherCts?.Cancel();
+                _dialogWatcherLoop?.Wait(2000);
+            }
+            catch (Exception ex)
+            {
+                EwEMcpFileLog.Warn($"Dialog watcher stop error: {ex.Message}");
+            }
+            finally
+            {
+                _dialogWatcherCts?.Dispose();
+                _dialogWatcherCts = null;
+                _dialogWatcherLoop = null;
+            }
+        }
+
+        private async Task DialogWatcherLoopAsync(CancellationToken token)
+        {
+            while (!token.IsCancellationRequested)
+            {
+                try
+                {
+                    await Task.Delay(2000, token).ConfigureAwait(false);
+                    var dismissed = DismissBlockingDialogs(_currentPid);
+                    if (dismissed > 0)
+                    {
+                        _auditLog.Add("dialog_watcher", "dismissed", $"{dismissed} blocking dialog(s) auto-dismissed");
+                    }
+                }
+                catch (OperationCanceledException)
+                {
+                    break;
+                }
+                catch (Exception ex)
+                {
+                    EwEMcpFileLog.Warn($"Dialog watcher error: {ex.Message}");
+                }
+            }
+        }
+
+        // BM_CLICK via SendMessageTimeout marshals to the dialog's UI thread. The timeout
+        // and PostMessage fallback keep the watcher from hanging if a dialog stops pumping.
+        private static int DismissBlockingDialogs(int currentPid)
+        {
+            var dismissed = 0;
+            EnumWindows((hWnd, _) =>
+            {
+                GetWindowThreadProcessId(hWnd, out var pid);
+                if (pid != currentPid)
+                {
+                    return true;
+                }
+
+                if (!IsWindowVisible(hWnd))
+                {
+                    return true;
+                }
+
+                var owner = GetWindow(hWnd, GW_OWNER);
+                if (owner == IntPtr.Zero)
+                {
+                    return true;
+                }
+
+                var className = new StringBuilder(256);
+                GetClassName(hWnd, className, className.Capacity);
+                var cls = className.ToString();
+
+                var title = new StringBuilder(512);
+                GetWindowText(hWnd, title, title.Capacity);
+                var titleText = title.ToString();
+                var displayTitle = string.IsNullOrEmpty(titleText) ? "(untitled)" : titleText;
+
+                if (cls == "#32770")
+                {
+                    var btn = FindWindowEx(hWnd, IntPtr.Zero, "Button", null);
+                    var clicked = false;
+                    while (btn != IntPtr.Zero)
+                    {
+                        var btnId = GetDlgCtrlID(btn);
+                        if (btnId == IDYES || btnId == IDOK)
+                        {
+                            ClickDialogButton(btn, $"Win32 dialog '{displayTitle}' (class #32770, button ID {btnId})");
+                            clicked = true;
+                            dismissed++;
+                            break;
+                        }
+                        btn = FindWindowEx(hWnd, btn, "Button", null);
+                    }
+                    if (!clicked)
+                    {
+                        EwEMcpFileLog.Warn($"Dialog watcher found Win32 dialog '{displayTitle}' (class #32770) with no OK/Yes button - leaving it alone");
+                    }
+                }
+                else
+                {
+                    var okBtn = FindWindowEx(hWnd, IntPtr.Zero, "Button", "OK");
+                    if (okBtn == IntPtr.Zero)
+                    {
+                        okBtn = FindWindowEx(hWnd, IntPtr.Zero, "Button", "&OK");
+                    }
+                    if (okBtn != IntPtr.Zero)
+                    {
+                        ClickDialogButton(okBtn, $"WinForms dialog '{displayTitle}' (OK)");
+                        dismissed++;
+                    }
+                    else
+                    {
+                        EwEMcpFileLog.Warn($"Dialog watcher found WinForms modal '{displayTitle}' (class {cls}) with no OK button - leaving it alone");
+                    }
+                }
+
+                return true;
+            }, IntPtr.Zero);
+            return dismissed;
+        }
+
+        private static void ClickDialogButton(IntPtr buttonHandle, string description)
+        {
+            IntPtr result;
+            if (!SendMessageTimeout(buttonHandle, BM_CLICK, IntPtr.Zero, IntPtr.Zero, SMTO_ABORTIFHUNG, MSG_TIMEOUT_MS, out result))
+            {
+                PostMessage(buttonHandle, BM_CLICK, IntPtr.Zero, IntPtr.Zero);
+                EwEMcpFileLog.Info($"Dialog watcher: SendMessageTimeout timed out for {description}; fell back to PostMessage");
+            }
+            else
+            {
+                EwEMcpFileLog.Info($"Dialog watcher dismissed {description}");
+            }
         }
 
         private sealed class ResponseTooLargeException : Exception

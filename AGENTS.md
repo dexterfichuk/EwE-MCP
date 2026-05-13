@@ -44,6 +44,10 @@ export EWE_MCP_REMOTE_PORT=9877
 
 Optional: set `EWE_MCP_ENABLED=0` before launching EwE to keep the plugin installed but prevent it from binding the socket. Leave it unset for normal build/deploy/live work.
 
+Response-size guard: plugin and Python defaults are aligned at 10 MB. The C# plugin emits a structured `response_too_large` error instead of sending oversized frames, and the Python client disconnects if an oversized frame is announced. For client-side testing only, adjust `EWE_MCP_MAX_RESPONSE_SIZE`; the plugin limit is compiled at 10 MB.
+
+Dialog watcher: set `EWE_MCP_DIALOG_WATCHER=1` or add `dialog_watcher_enabled=true` to the config file to enable the in-plugin dialog watcher that auto-dismisses blocking modal dialogs. Disabled by default; prefer leaving it off unless a supervised workflow explicitly needs it. Extend the dialog-opening command denylist with `EWE_MCP_DIALOG_BLOCKED_COMMANDS=cmd1,cmd2` or `dialog_blocked_commands=cmd1,cmd2` in the config file. `ImportTimeSeries` and `m_cmdImportTimeSeries` are blocked by default through `dialog_command_blocked`.
+
 If you are working from a separate worktree whose directory name is not `EwE-MCP`, either use scripts that derive the remote root from the worktree name or set:
 
 ```bash
@@ -54,7 +58,7 @@ export EWE_VM_REMOTE_ROOT="C:/Users/dexter/$(basename "$PWD")"
 
 The plugin reads configuration from `EwE_MCP_Plugin.cfg` at `%APPDATA%\Ecopath with Ecosim\` (INI-style with a required `[EwE_MCP]` section header; key=value lines outside this section are ignored). Configuration precedence: environment variables > config file > compiled defaults. The `diagnose` command reports `config_file_path` and `config_file_exists` so you can verify which file is loaded.
 
-Supported config keys are `host`, `port`, `token`, `enabled`, and `enable_eval`.
+Supported config keys are `host`, `port`, `token`, `enabled`, `enable_eval`, `dialog_watcher_enabled`, and `dialog_blocked_commands`.
 
 Build the plugin on the Windows VM, deploy it into EwE's plugin folder, and launch EwE through the interactive desktop session:
 
@@ -114,7 +118,7 @@ assert client.connect()
 print(client.command_result("ping"))
 print(client.command_result("diagnose"))
 print(client.command_result("get_ewe_info"))
-print(client.command_result("load_model", {"path": r"tests/fixtures/Tampa_Bay.EwEmdb"}, timeout=60))
+print(client.command_result("load_model", {"path": r"C:\Users\dexter\EwE-MCP\tests\fixtures\Tampa_Bay.EwEmdb"}, timeout=60))
 print(client.command_result("get_core_counters"))
 client.disconnect()
 PY
@@ -134,7 +138,7 @@ The MCP server exposes tools backed by the running EwE plugin. Current tools inc
 
 - **Diagnostics:** `ping`, `diagnose`, `get_ewe_info`, `get_runtime_state`, `get_message_log`, `get_core_counters`, `get_installed_plugins`, `export_active_plot`
 - **Model lifecycle:** `load_model`, `save_model`, `save_model_as`, `close_model`, `get_model_info`, `has_changes`, `discard_changes`
-- **Ecopath:** `run_ecopath`, `get_ecopath_run_state`, `get_ecopath_stats`, `get_ecopath_group_diagnostics`, `get_ecopath_fleet_diagnostics`, `export_ecopath_results`, `list_ecopath_groups`, `get_ecopath_group`, `list_ecopath_fleets`, `get_ecopath_fleet`
+- **Ecopath:** `run_ecopath`, `get_ecopath_run_state`, `get_ecopath_stats`, `get_ecopath_group_diagnostics`, `get_ecopath_fleet_diagnostics`, `export_ecopath_results`, `list_ecopath_groups`, `get_ecopath_group`, `list_ecopath_fleets`, `get_ecopath_fleet`. Ecopath run state uses `StateMonitor.HasEcopathRan` + `IsModelBalanced`; `ecopath_detail` exposes the raw internal `RunState` for diagnostics.
 - **Ecosim:** `list_ecosim_scenarios`, `get_ecosim_scenario`, `load_ecosim_scenario`, `create_ecosim_scenario`, `copy_ecosim_scenario`, `delete_ecosim_scenario`, `save_ecosim_scenario`, `get_ecosim_run_state`, `wait_for_ecosim_completion`, `run_ecosim`, `stop_ecosim`, `list_ecosim_group_inputs`, `get_ecosim_group_input`, `list_ecosim_fleet_inputs`, `get_ecosim_fleet_input`, `get_ecosim_group_results`, `get_ecosim_fleet_results`, `export_ecosim_results`
 - **Ecospace:** `list_ecospace_scenarios`, `get_ecospace_scenario`, `load_ecospace_scenario`, `get_ecospace_run_state`, `run_ecospace`, `stop_ecospace`, `list_ecospace_group_inputs`, `get_ecospace_group_input`, `list_ecospace_fleet_inputs`, `get_ecospace_fleet_input`, `get_ecospace_group_results`, `get_ecospace_fleet_results`, `list_ecospace_habitats`, `get_ecospace_habitat`, `list_ecospace_mpas`, `get_ecospace_mpa`, `get_ecospace_basemap`, `get_ecospace_model_parameters`, `create_ecospace_scenario`, `copy_ecospace_scenario`, `delete_ecospace_scenario`, `save_ecospace_scenario`, `wait_for_ecospace_completion`
 - **Ecotracer:** `list_ecotracer_scenarios`, `get_ecotracer_scenario`, `load_ecotracer_scenario`, `get_ecotracer_run_state`, `get_ecotracer_model_parameters`, `list_ecotracer_group_inputs`, `get_ecotracer_group_input`, `get_ecotracer_group_results`, `create_ecotracer_scenario`, `copy_ecotracer_scenario`, `delete_ecotracer_scenario`, `save_ecotracer_scenario`, `close_ecotracer_scenario`
@@ -177,11 +181,11 @@ EWE_LIVE_TESTS=1 \
 uv run pytest
 ```
 
-Expected local baseline with live tests skipped is currently `53 passed, 80 skipped`.
+Expected local baseline with live tests skipped is currently `69 passed, 83 skipped`.
 
 The sample model (`tests/fixtures/Tampa_Bay.EwEmdb`) is bundled under the same GPL-3.0 license as EwE and does not require a separate `EWE_MODEL_PATH` environment variable.
 
-Expected full live result on current `main` is `126 passed, 8 skipped`.
+Expected full live result on PR #83 after merging current `main` is `144 passed, 8 skipped`.
 
 Prefer testing mutations against copied models. If you mutate the shared sample model, restore the original value in a `finally` block and call `discard_changes` so EwE clears the unsaved-change flag without saving over the sample model. `discard_changes` only clears dirty flags; it does not physically revert values.
 
@@ -192,7 +196,8 @@ Prefer testing mutations against copied models. If you mutate the shared sample 
   - Blocked from `batch_commands`.
   - Every eval request is audit-logged with outcome (`denied`/`executed`).
 - `shutdown_server` is gated behind `EWE_MCP_ENABLE_EVAL=1` (same flag as `execute_ewe_code`), blocked from `batch_commands`, and audit-logged. It is destructive — it stops the plugin socket server.
-- Do not batch `execute_ewe_code`, `shutdown_server`, model lifecycle operations, simulation run/stop commands, export/capture commands, or scenario load/mutation operations. The plugin enforces this guard for direct socket clients as well as the Python MCP server.
+- Do not batch `execute_ewe_code`, `shutdown_server`, `invoke_ui_command`, model lifecycle operations, simulation run/stop commands, export/capture commands, or scenario load/mutation operations. The plugin enforces this guard for direct socket clients as well as the Python MCP server.
+- Do not use `invoke_ui_command` for commands that open modal dialogs. Known dialog-opening commands such as `ImportTimeSeries` are blocked by default with `dialog_command_blocked`; use a dedicated MCP tool when available or operate the EwE GUI manually.
 - Use `validate_values` before `set_values` when possible.
 - Value reads/writes navigate by default through `get_values`, `get_indexed_value`, `set_values`, and `set_indexed_value`; pass `navigate=False` for quiet/background access, batches, or batch-like workflows to avoid UI flicker.
 - Use `discard_changes` only as an explicit cleanup step after test mutations have been restored; it clears EwE's dirty flag but does not physically revert values.

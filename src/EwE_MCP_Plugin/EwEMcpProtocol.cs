@@ -17,6 +17,8 @@ namespace EwE_MCP_Plugin
         public bool UsingDefaultToken { get; private set; }
         public bool Enabled { get; private set; }
         public bool EnableEval { get; private set; }
+        public bool DialogWatcherEnabled { get; private set; }
+        public string DialogBlockedCommands { get; private set; }
         public int MaxMessageBytes { get; private set; }
         public string ConfigFilePath { get; private set; }
         public bool ConfigFileExists { get; private set; }
@@ -32,6 +34,8 @@ namespace EwE_MCP_Plugin
             var envToken = Environment.GetEnvironmentVariable("EWE_MCP_TOKEN");
             var envEnabled = Environment.GetEnvironmentVariable("EWE_MCP_ENABLED");
             var envEnableEval = Environment.GetEnvironmentVariable("EWE_MCP_ENABLE_EVAL");
+            var envDialogWatcher = Environment.GetEnvironmentVariable("EWE_MCP_DIALOG_WATCHER");
+            var envDialogBlocked = Environment.GetEnvironmentVariable("EWE_MCP_DIALOG_BLOCKED_COMMANDS");
 
             string host;
             if (envHost != null)
@@ -111,6 +115,35 @@ namespace EwE_MCP_Plugin
                 enableEval = false;
             }
 
+            bool dialogWatcherEnabled;
+            if (envDialogWatcher != null)
+            {
+                dialogWatcherEnabled = string.Equals(envDialogWatcher, "1", StringComparison.OrdinalIgnoreCase);
+            }
+            else if (fileValues.ContainsKey("dialog_watcher_enabled"))
+            {
+                dialogWatcherEnabled = string.Equals(fileValues["dialog_watcher_enabled"], "true", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(fileValues["dialog_watcher_enabled"], "1", StringComparison.OrdinalIgnoreCase);
+            }
+            else
+            {
+                dialogWatcherEnabled = false;
+            }
+
+            string dialogBlockedCommands;
+            if (!string.IsNullOrWhiteSpace(envDialogBlocked))
+            {
+                dialogBlockedCommands = envDialogBlocked;
+            }
+            else if (fileValues.ContainsKey("dialog_blocked_commands"))
+            {
+                dialogBlockedCommands = fileValues["dialog_blocked_commands"];
+            }
+            else
+            {
+                dialogBlockedCommands = null;
+            }
+
             return new EwEMcpConfig
             {
                 Enabled = enabled,
@@ -119,6 +152,8 @@ namespace EwE_MCP_Plugin
                 Token = token,
                 UsingDefaultToken = usingDefaultToken,
                 EnableEval = enableEval,
+                DialogWatcherEnabled = dialogWatcherEnabled,
+                DialogBlockedCommands = dialogBlockedCommands,
                 MaxMessageBytes = 10 * 1024 * 1024,
                 ConfigFilePath = configFilePath,
                 ConfigFileExists = configFileExists

@@ -51,3 +51,9 @@ def test_error_hint_oversized_response():
     hint = error_hint("Response too large: 50000000 bytes (limit 10485760 bytes)")
     assert "size limit" in hint
     assert "smaller subsets" in hint
+
+
+def test_error_hint_dialog_command_blocked():
+    hint = error_hint("dialog_command_blocked: ImportTimeSeries")
+    assert "modal dialog" in hint
+    assert "dialog_watcher_enabled" in hint

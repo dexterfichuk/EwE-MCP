@@ -165,7 +165,7 @@ def test_batch_blocked_commands_are_destructive_or_sensitive():
     allowed_categories = (
         _MODEL_LIFECYCLE
         | _CAPTURE_TOOLS
-        | {"execute_ewe_code", "export_ecopath_results", "discard_changes", "run_ecopath", "shutdown_server"}
+        | {"execute_ewe_code", "export_ecopath_results", "discard_changes", "run_ecopath", "shutdown_server", "invoke_ui_command"}
     )
     for cmd in BATCH_BLOCKED_COMMANDS:
         if cmd in allowed_categories:
@@ -281,6 +281,7 @@ _CSHARP_BATCH_BLOCKED = frozenset(
         "stop_monte_carlo",
         "export_ecopath_results",
         "shutdown_server",
+        "invoke_ui_command",
     }
 )
 
@@ -298,6 +299,87 @@ def test_python_batch_blocked_is_superset_of_csharp():
     assert not csharp_missing, (
         f"C# blocks these commands in batch but Python does not: {sorted(csharp_missing)}"
     )
+
+
+def _extract_csharp_dialog_commands():
+    cs_path = pathlib.Path(__file__).resolve().parents[1] / "src" / "EwE_MCP_Plugin" / "EwEMcpPlugin.cs"
+    if not cs_path.exists():
+        return frozenset()
+    text = cs_path.read_text(encoding="utf-8")
+    import re
+    matches = re.findall(r'DefaultDialogOpeningCommands[^;]*?=\s*new\s+HashSet[^{]*\{(.*?)\}', text, re.DOTALL)
+    if not matches:
+        return frozenset()
+    commands = set()
+    for m in matches:
+        for item in re.findall(r'"([^"]+)"', m):
+            commands.add(item)
+    return frozenset(commands)
+
+
+_CSHARP_DIALOG_OPENING_COMMANDS = _extract_csharp_dialog_commands()
+
+
+def test_dialog_opening_commands_denylist_is_known():
+    if not _CSHARP_DIALOG_OPENING_COMMANDS:
+        pytest.skip("Could not parse DefaultDialogOpeningCommands from C# source")
+    assert "ImportTimeSeries" in _CSHARP_DIALOG_OPENING_COMMANDS
+
+
+def test_invoke_ui_command_is_batch_blocked():
+    assert "invoke_ui_command" in BATCH_BLOCKED_COMMANDS, (
+        "invoke_ui_command should be batch-blocked since dialog-opening commands can hang"
+    )
+
+
+def test_dialog_watcher_disabled_by_default():
+    cs_path = pathlib.Path(__file__).resolve().parents[1] / "src" / "EwE_MCP_Plugin" / "EwEMcpProtocol.cs"
+    if not cs_path.exists():
+        pytest.skip("C# source not available")
+    text = cs_path.read_text(encoding="utf-8")
+    assert "DialogWatcherEnabled" in text, "DialogWatcherEnabled property must exist in EwEMcpConfig"
+    import re
+    default_match = re.findall(r'dialogWatcherEnabled\s*=\s*(true|false)', text)
+    if default_match:
+        assert default_match[-1] == "false", "Dialog watcher should be disabled by default"
+
+
+def test_dialog_blocked_commands_config_key_exists():
+    cs_path = pathlib.Path(__file__).resolve().parents[1] / "src" / "EwE_MCP_Plugin" / "EwEMcpProtocol.cs"
+    if not cs_path.exists():
+        pytest.skip("C# source not available")
+    text = cs_path.read_text(encoding="utf-8")
+    assert "DialogBlockedCommands" in text, "DialogBlockedCommands property must exist in EwEMcpConfig"
+    assert "EWE_MCP_DIALOG_BLOCKED_COMMANDS" in text, "EWE_MCP_DIALOG_BLOCKED_COMMANDS env var must be read"
+
+
+def test_ecopath_run_state_detail_reads_nonpublic_field():
+    cs_path = pathlib.Path(__file__).resolve().parents[1] / "src" / "EwE_MCP_Plugin" / "EwEMcpPlugin.cs"
+    if not cs_path.exists():
+        pytest.skip("C# source not available")
+    text = cs_path.read_text(encoding="utf-8")
+    assert 'SafeGetMember(core, "Ecopath") ?? SafeGetMember(core, "m_Ecopath")' in text
+    assert 'GetField(\n                        "RunState",' in text
+    assert "BindingFlags.NonPublic" in text
+    assert "BindingFlags.Instance" in text
+
+
+def test_dialog_opening_commands_are_cached():
+    cs_path = pathlib.Path(__file__).resolve().parents[1] / "src" / "EwE_MCP_Plugin" / "EwEMcpPlugin.cs"
+    if not cs_path.exists():
+        pytest.skip("C# source not available")
+    text = cs_path.read_text(encoding="utf-8")
+    assert "private HashSet<string> _dialogOpeningCommands;" in text
+    assert "_dialogOpeningCommands = commands;" in text
+
+
+def test_dialog_watcher_logs_errors_and_does_not_foreground():
+    cs_path = pathlib.Path(__file__).resolve().parents[1] / "src" / "EwE_MCP_Plugin" / "EwEMcpSocketServer.cs"
+    if not cs_path.exists():
+        pytest.skip("C# source not available")
+    text = cs_path.read_text(encoding="utf-8")
+    assert "Dialog watcher error:" in text
+    assert "SetForegroundWindow" not in text
 
 
 def test_config_file_requires_ewe_mcp_section_header():
