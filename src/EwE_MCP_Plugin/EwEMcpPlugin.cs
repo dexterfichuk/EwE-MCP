@@ -3886,15 +3886,15 @@ case "list_ecosim_scenarios":
                 throw new EwEMcpException("unsupported_operation", "cEwEAccessDatabase not available in this EwE build");
 
             object db = Activator.CreateInstance(dbType);
-            // eDataSourceTypes.Access2007 = 1
-            var dsTypeEnum = core.GetType().Assembly.GetType("EwECore.eDataSourceTypes")
-                ?? core.GetType().Assembly.GetType("EwECore.DataSources.eDataSourceTypes");
-            object dsType = dsTypeEnum != null ? Enum.ToObject(dsTypeEnum, 1) : 1;
-
+            // Get the Create method by matching exact parameter types from
+            // the first candidate we find.  The 4th param is eDataSourceTypes.
             var createMethod = dbType.GetMethods()
-                .FirstOrDefault(m => m.Name == "Create" && m.GetParameters().Length >= 4);
+                .FirstOrDefault(m => m.Name == "Create" && m.GetParameters().Length == 5);
             if (createMethod == null)
                 throw new EwEMcpException("unsupported_operation", "cEwEAccessDatabase.Create method not available");
+            // Use the actual parameter type from the method for the enum
+            var actualDsType = createMethod.GetParameters()[3].ParameterType;
+            object dsType = Enum.ToObject(actualDsType, 3); // eDataSourceTypes.Access2007 = 3
 
             var result = createMethod.Invoke(db, new object[] { path, modelName, true, dsType, author });
             // eDatasourceAccessType.Success = 0
