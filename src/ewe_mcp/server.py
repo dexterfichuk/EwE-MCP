@@ -317,7 +317,13 @@ async def get_active_view() -> dict[str, Any]:
 
 @mcp.tool()
 async def load_model(path: str) -> dict[str, Any]:
-    """Load an EwE model file inside the running EwE instance."""
+    """Load an EwE model file inside the running EwE instance.
+
+    If the load times out, EwE may be showing a modal dialog
+    (e.g., a database conversion prompt). Try restarting EwE
+    with dialog watcher enabled (EWE_MCP_DIALOG_WATCHER=1) or
+    convert the model manually before loading.
+    """
     return await _send("load_model", {"path": path}, timeout=TIMEOUT_LONG)
 
 
