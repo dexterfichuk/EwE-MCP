@@ -327,6 +327,31 @@ async def load_model(path: str) -> dict[str, Any]:
     return await _send("load_model", {"path": path}, timeout=TIMEOUT_LONG)
 
 
+@mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
+async def create_model(
+    path: str,
+    model_name: str | None = None,
+    author: str | None = None,
+) -> dict[str, Any]:
+    """Create a new empty EwE model at the specified path.
+
+    Uses the access database engine to create a blank EwE model with
+    the required schema (one default Detritus group).  After creation
+    the model is automatically loaded in the running EwE instance.
+
+    Args:
+        path: Full path where the .EwEmdb file will be created.
+        model_name: Optional display name (defaults to filename).
+        author: Optional author string (defaults to EwE's current default).
+    """
+    params: dict[str, Any] = {"path": path}
+    if model_name is not None:
+        params["model_name"] = model_name
+    if author is not None:
+        params["author"] = author
+    return await _send("create_model", params, timeout=TIMEOUT_LONG)
+
+
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
 async def get_model_info() -> dict[str, Any]:
     """Get the currently loaded model summary."""

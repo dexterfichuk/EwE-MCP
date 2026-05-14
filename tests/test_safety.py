@@ -177,7 +177,7 @@ _ECOSPACE_SPATIAL_MUTATION_PATTERN = re.compile(
 )
 _SET_MUTATION_PATTERN = re.compile(r"^set_")
 _IMPORT_MUTATION_PATTERN = re.compile(r"^import_")
-_MODEL_LIFECYCLE = {"load_model", "save_model", "save_model_as", "close_model"}
+_MODEL_LIFECYCLE = {"load_model", "create_model", "save_model", "save_model_as", "close_model"}
 _CAPTURE_TOOLS = {"capture_view", "save_screenshot"}
 
 
@@ -287,6 +287,7 @@ _CSHARP_BATCH_BLOCKED = frozenset(
     {
         "execute_ewe_code",
         "close_model",
+        "create_model",
         "load_model",
         "save_model",
         "save_model_as",

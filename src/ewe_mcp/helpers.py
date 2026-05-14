@@ -48,6 +48,7 @@ BATCH_BLOCKED_COMMANDS = frozenset(
         "execute_ewe_code",
         "close_model",
         "load_model",
+        "create_model",
         "save_model",
         "save_model_as",
         "run_ecopath",
