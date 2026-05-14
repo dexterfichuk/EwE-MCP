@@ -4764,55 +4764,96 @@ case "list_ecosim_scenarios":
             };
         }
 
-        private static string ValidatePropertyValue(object entity, PropertyInfo property, object value)
-        {
-            if (value == null || !IsNumericType(value.GetType())) return null;
+ private static string ValidatePropertyValue(object entity, PropertyInfo property, object value)
+ {
+ if (value == null || !IsNumericType(value.GetType())) return null;
 
-            double numericValue = Convert.ToDouble(value);
+ double numericValue = Convert.ToDouble(value);
 
-            try
-            {
-                var metadata = SafeGetProperty(entity, "Metadata");
-                if (metadata == null) return null;
+ try
+ {
+ var metadata = SafeGetProperty(entity, "Metadata");
+ if (metadata == null) return null;
 
-                var minObj = SafeGetProperty(metadata, "Min");
-                var maxObj = SafeGetProperty(metadata, "Max");
-                if (minObj == null && maxObj == null) return null;
+ var minObj = SafeGetProperty(metadata, "Min");
+ var maxObj = SafeGetProperty(metadata, "Max");
+ if (minObj == null && maxObj == null) return null;
 
-                double min = minObj != null ? Convert.ToDouble(minObj) : double.MinValue;
-                double max = maxObj != null ? Convert.ToDouble(maxObj) : double.MaxValue;
+ double min = minObj != null ? Convert.ToDouble(minObj) : double.MinValue;
+ double max = maxObj != null ? Convert.ToDouble(maxObj) : double.MaxValue;
 
-                if (numericValue < min || numericValue > max)
-                {
-                    return $"Value {numericValue} is outside valid range [{min}, {max}]";
-                }
-            }
-            catch { }
+ // Check MinOperator/MaxOperator for inclusive/exclusive bounds
+ bool minExclusive = IsOperatorExclusive(SafeGetProperty(metadata, "MinOperator"), isMin: true);
+ bool maxExclusive = IsOperatorExclusive(SafeGetProperty(metadata, "MaxOperator"), isMin: false);
 
-            try
-            {
-                var varNameProp = SafeGetProperty(entity, "VariableName");
-                if (varNameProp != null && varNameProp is string varName && !string.IsNullOrEmpty(varName))
-                {
-                    var metadataProp = entity.GetType().GetProperty("VariableMetadata(" + varName + ")");
-                    if (metadataProp == null) return null;
-                    var metadata = metadataProp.GetValue(entity);
-                    if (metadata == null) return null;
-                    var minObj = SafeGetProperty(metadata, "Min");
-                    var maxObj = SafeGetProperty(metadata, "Max");
-                    if (minObj == null && maxObj == null) return null;
-                    double min = minObj != null ? Convert.ToDouble(minObj) : double.MinValue;
-                    double max = maxObj != null ? Convert.ToDouble(maxObj) : double.MaxValue;
-                    if (numericValue < min || numericValue > max)
-                    {
-                        return $"Value {numericValue} is outside valid range [{min}, {max}] for {varName}";
-                    }
-                }
-            }
-            catch { }
+ bool violatesMin = minExclusive ? numericValue <= min : numericValue < min;
+ bool violatesMax = maxExclusive ? numericValue >= max : numericValue > max;
 
-            return null;
-        }
+ if (violatesMin || violatesMax)
+ {
+ string minDesc = minExclusive ? $"> {min}" : $">= {min}";
+ string maxDesc = maxExclusive ? $"< {max}" : $"<= {max}";
+ return $"Value {numericValue} is outside valid range ({minDesc}, {maxDesc})";
+ }
+ }
+ catch { }
+
+ try
+ {
+ var varNameProp = SafeGetProperty(entity, "VariableName");
+ if (varNameProp != null && varNameProp is string varName && !string.IsNullOrEmpty(varName))
+ {
+ var metadataProp = entity.GetType().GetProperty("VariableMetadata(" + varName + ")");
+ if (metadataProp == null) return null;
+ var metadata = metadataProp.GetValue(entity);
+ if (metadata == null) return null;
+ var minObj = SafeGetProperty(metadata, "Min");
+ var maxObj = SafeGetProperty(metadata, "Max");
+ if (minObj == null && maxObj == null) return null;
+ double min = minObj != null ? Convert.ToDouble(minObj) : double.MinValue;
+ double max = maxObj != null ? Convert.ToDouble(maxObj) : double.MaxValue;
+
+ // Check MinOperator/MaxOperator for inclusive/exclusive bounds
+ bool minExclusive = IsOperatorExclusive(SafeGetProperty(metadata, "MinOperator"), isMin: true);
+ bool maxExclusive = IsOperatorExclusive(SafeGetProperty(metadata, "MaxOperator"), isMin: false);
+
+ bool violatesMin = minExclusive ? numericValue <= min : numericValue < min;
+ bool violatesMax = maxExclusive ? numericValue >= max : numericValue > max;
+
+ if (violatesMin || violatesMax)
+ {
+ string minDesc = minExclusive ? $"> {min}" : $">= {min}";
+ string maxDesc = maxExclusive ? $"< {max}" : $"<= {max}";
+ return $"Value {numericValue} is outside valid range ({minDesc}, {maxDesc}) for {varName}";
+ }
+ }
+ }
+ catch { }
+
+ return null;
+ }
+
+ /// <summary>
+ /// Determine if a Min/Max operator is exclusive (strict comparison).
+ /// For MinOperator: GreaterThan (= exclusive, value must be > min)
+ /// For MaxOperator: LessThan (= exclusive, value must be < max)
+ /// Returns true if the operator enforces strict (exclusive) comparison.
+ /// </summary>
+ private static bool IsOperatorExclusive(object operatorObj, bool isMin)
+ {
+ if (operatorObj == null) return true; // Default to exclusive if operator missing
+ var typeName = operatorObj.GetType().Name;
+ if (isMin)
+ {
+ // MinOperator: GreaterThan means exclusive (value > min), GreaterThanOrEqualTo means inclusive (value >= min)
+ return typeName == "cGreaterThan";
+ }
+ else
+ {
+ // MaxOperator: LessThan means exclusive (value < max), LessThanOrEqualTo means inclusive (value <= max)
+ return typeName == "cLessThan";
+ }
+ }
 
         private static bool IsNumericType(Type type)
         {
