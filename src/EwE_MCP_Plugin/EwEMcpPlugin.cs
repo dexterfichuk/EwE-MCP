@@ -285,9 +285,15 @@ namespace EwE_MCP_Plugin
                     return GetEcopathGroup(request.Params);
                 case "list_ecopath_fleets":
                     return ListEcopathFleets();
-                case "get_ecopath_fleet":
-                    return GetEcopathFleet(request.Params);
-                case "list_ecosim_scenarios":
+            case "get_ecopath_fleet":
+                return GetEcopathFleet(request.Params);
+            case "create_ecopath_group":
+                return OnUiThread(() => CreateEcopathGroup(request.Params));
+case "create_ecopath_fleet":
+    return OnUiThread(() => CreateEcopathFleet(request.Params));
+case "import_time_series":
+    return OnUiThread(() => ImportTimeSeries(request.Params));
+case "list_ecosim_scenarios":
                     return ListEcosimScenarios();
                 case "get_ecosim_scenario":
                     return GetEcosimScenario(request.Params);
@@ -335,9 +341,17 @@ namespace EwE_MCP_Plugin
                     return OnUiThread(() => CopyEcospaceScenario(request.Params));
                 case "delete_ecospace_scenario":
                     return OnUiThread(() => DeleteEcospaceScenario(request.Params));
-                case "save_ecospace_scenario":
-                    return OnUiThread(SaveEcospaceScenario);
-                case "list_ecotracer_scenarios":
+            case "save_ecospace_scenario":
+                return OnUiThread(SaveEcospaceScenario);
+            case "get_ecospace_map_summary":
+                return GetEcospaceMapSummary();
+            case "create_ecospace_mpa":
+                return OnUiThread(() => CreateEcospaceMpa(request.Params));
+            case "set_ecospace_mpa_cells":
+                return OnUiThread(() => SetEcospaceMpaCells(request.Params));
+            case "create_regions_from_mpas":
+                return OnUiThread(() => CreateRegionsFromMPAs(request.Params));
+            case "list_ecotracer_scenarios":
                     return ListEcotracerScenarios();
                 case "get_ecotracer_scenario":
                     return GetEcotracerScenario(request.Params);
@@ -407,14 +421,24 @@ namespace EwE_MCP_Plugin
                     return OnUiThread(SaveEcosimScenario);
                 case "get_ecosim_run_state":
                     return GetEcosimRunState();
-                case "list_ecosim_group_inputs":
-                    return ListEcosimGroupInputs();
-                case "get_ecosim_group_input":
-                    return GetEcosimGroupInput(request.Params);
-                case "list_ecosim_fleet_inputs":
-                    return ListEcosimFleetInputs();
-                case "get_ecosim_fleet_input":
-                    return GetEcosimFleetInput(request.Params);
+            case "list_ecosim_group_inputs":
+                return ListEcosimGroupInputs();
+            case "get_ecosim_group_input":
+                return GetEcosimGroupInput(request.Params);
+            case "list_ecosim_fleet_inputs":
+                return ListEcosimFleetInputs();
+            case "get_ecosim_fleet_input":
+                return GetEcosimFleetInput(request.Params);
+            case "list_ecosim_forcing_shapes":
+                return ListEcosimForcingShapes();
+            case "get_ecosim_forcing_shape":
+                return GetEcosimForcingShape(request.Params);
+            case "set_ecosim_forcing_shape":
+                return OnUiThread(() => SetEcosimForcingShape(request.Params));
+            case "list_ecosim_pp_forcing":
+                return ListEcosimPPForcing();
+            case "get_ecosim_pp_forcing":
+                return GetEcosimPPForcing(request.Params);
                 case "get_ecosim_group_results":
                     return GetEcosimGroupResults(request.Params);
                 case "get_ecosim_fleet_results":
@@ -431,12 +455,16 @@ namespace EwE_MCP_Plugin
                     return GetEcopathGroupDiagnostics();
                 case "get_ecopath_fleet_diagnostics":
                     return GetEcopathFleetDiagnostics();
+                case "get_mti_matrix":
+                    return GetMtiMatrix();
                 case "export_ecopath_results":
                     return OnUiThread(() => ExportEcopathResults(request.Params));
                 case "run_ecosim":
                     return OnUiThread(RunEcosim);
                 case "stop_ecosim":
                     return OnUiThread(StopEcosim);
+                case "wait_for_ecosim_completion":
+                    return OnUiThread(() => WaitForEcosimCompletion(request.Params));
                 case "refresh_ui":
                     return OnUiThread(RefreshUI);
                 case "capture_view":
@@ -1138,7 +1166,490 @@ namespace EwE_MCP_Plugin
             return result;
         }
 
-        private JObject ListEcosimScenarios()
+        private JObject CreateEcopathGroup(JObject parameters)
+        {
+            var core = RequireCore();
+            var name = RequiredString(parameters, "name");
+            int groupType = OptionalInt(parameters, "type") ?? 0; // 0=consumer, 1=producer, 2=detritus
+            int iGroup = SafeIntProperty(core, "nGroups") + 1;
+            int iGroupID = 0;
+            float sPP = (float)groupType;
+            float sVBK = 0.0f; // von Bertalanffy K, default 0
+
+            var method = core.GetType().GetMethod("AddGroup", new[] { typeof(string), typeof(float), typeof(float), typeof(int).MakeByRefType(), typeof(int).MakeByRefType() });
+            if (method == null) throw new EwEMcpException("unsupported_operation", "AddGroup not available in this EwE build");
+
+            object[] args = new object[] { name, sPP, sVBK, iGroup, iGroupID };
+            bool ok = Convert.ToBoolean(method.Invoke(core, args));
+            if (!ok) throw new EwEMcpException("create_failed", "Failed to create Ecopath group");
+
+            int newGroupIndex = Convert.ToInt32(args[3]);
+            int newGroupID = Convert.ToInt32(args[4]);
+
+            // Set optional properties on the new group if provided
+            var input = SafeGetIndexedProperty(core, "EcopathGroupInputs", newGroupIndex);
+            if (input != null)
+            {
+                var biomassToken = parameters?["biomass"];
+                if (biomassToken != null && biomassToken.Type != JTokenType.Null)
+                {
+                    SafeSetProperty(input, "BiomassAreaInput", Convert.ToSingle(biomassToken));
+                }
+                var pbToken = parameters?["pb_ratio"];
+                if (pbToken != null && pbToken.Type != JTokenType.Null)
+                {
+                    SafeSetProperty(input, "PBInput", Convert.ToSingle(pbToken));
+                }
+                var qbToken = parameters?["qb_ratio"];
+                if (qbToken != null && qbToken.Type != JTokenType.Null)
+                {
+                    SafeSetProperty(input, "QBInput", Convert.ToSingle(qbToken));
+                }
+                var eeToken = parameters?["ee"];
+                if (eeToken != null && eeToken.Type != JTokenType.Null)
+                {
+                    SafeSetProperty(input, "EEInput", Convert.ToSingle(eeToken));
+                }
+            }
+
+            return new JObject
+            {
+                ["created"] = true,
+                ["group_index"] = newGroupIndex,
+                ["name"] = name,
+                ["type"] = GroupTypeFromInt(groupType),
+                ["group_id"] = newGroupID
+            };
+        }
+
+        private static string GroupTypeFromInt(int type)
+        {
+            switch (type)
+            {
+                case 1: return "producer";
+                case 2: return "detritus";
+                default: return "consumer";
+            }
+        }
+
+        private JObject CreateEcopathFleet(JObject parameters)
+        {
+            var core = RequireCore();
+            var name = RequiredString(parameters, "name");
+            int iFleet = SafeIntProperty(core, "nFleets") + 1;
+            int iFleetID = 0;
+
+            var method = core.GetType().GetMethod("AddFleet", new[] { typeof(string), typeof(int).MakeByRefType(), typeof(int).MakeByRefType() });
+            if (method == null) throw new EwEMcpException("unsupported_operation", "AddFleet not available in this EwE build");
+
+            object[] args = new object[] { name, iFleet, iFleetID };
+            bool ok = Convert.ToBoolean(method.Invoke(core, args));
+            if (!ok) throw new EwEMcpException("create_failed", "Failed to create Ecopath fleet");
+
+            int newFleetIndex = Convert.ToInt32(args[1]);
+            int newFleetID = Convert.ToInt32(args[2]);
+
+        return new JObject
+        {
+            ["created"] = true,
+            ["fleet_index"] = newFleetIndex,
+            ["name"] = name,
+            ["fleet_id"] = newFleetID
+        };
+    }
+
+    private JObject ImportTimeSeries(JObject parameters)
+    {
+        var core = RequireCore();
+        var csvData = RequiredString(parameters, "data");
+        var importType = OptionalString(parameters, "import_type") ?? "biomass";
+        var datasetName = OptionalString(parameters, "dataset_name") ?? "MCP Import";
+        var delimiter = OptionalString(parameters, "delimiter") ?? ",";
+        var decimalSeparator = OptionalString(parameters, "decimal_separator") ?? ".";
+        var interval = OptionalString(parameters, "interval") ?? "annual";
+        var enableOnLoad = OptionalBool(parameters, "enable_on_load");
+
+        // Validate interval
+        var intervalInt = interval.ToLowerInvariant() switch
+        {
+            "annual" => 0,    // eTSDataSetInterval.Annual
+            "timestep" => 1,  // eTSDataSetInterval.TimeStep
+            _ => throw new EwEMcpException("invalid_parameter", $"interval must be 'annual' or 'timestep', got '{interval}'")
+        };
+
+        // Validate import_type
+        var validImportTypes = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "catch", "effort", "biomass", "forcing"
+        };
+        if (!validImportTypes.Contains(importType))
+        {
+            throw new EwEMcpException("invalid_parameter", $"import_type must be one of: catch, effort, biomass, forcing. Got '{importType}'");
+        }
+
+        // Verify Ecosim is loaded (time series require it)
+        var sm = SafeGetProperty(core, "StateMonitor");
+        bool hasEcosimLoaded = false;
+        try { hasEcosimLoaded = SafeInvokeBool(sm, "HasEcosimLoaded"); } catch { }
+        if (!hasEcosimLoaded)
+        {
+            throw new EwEMcpException("not_ready", "Ecosim must be loaded before importing time series. Load an Ecosim scenario first.");
+        }
+
+        // Write CSV data to a temporary file
+        var tempDir = System.IO.Path.Combine(
+            System.Environment.GetFolderPath(System.Environment.SpecialFolder.LocalApplicationData),
+            "EwE_MCP"
+        );
+        System.IO.Directory.CreateDirectory(tempDir);
+        var tempFile = System.IO.Path.Combine(tempDir, $"ts_import_{System.IO.Path.GetRandomFileName()}.csv");
+        // Normalize line endings for Windows so EwE's StreamReader splits correctly.
+        var normalizedCsv = csvData.Replace("\r\n", "\n").Replace("\n", "\r\n");
+        // Use UTF‑8 without BOM; EwE's StreamReader handles it and non‑ASCII
+        // series names are preserved.
+        System.IO.File.WriteAllText(tempFile, normalizedCsv, new System.Text.UTF8Encoding(false));
+
+        try
+        {
+            // Use reflection to create a cTimeSeriesCSVReader
+            var readerFactoryType = core.GetType().Assembly.GetType("EwECore.cTimeSeriesReaderFactory");
+            if (readerFactoryType == null)
+            {
+                throw new EwEMcpException("unsupported_operation", "cTimeSeriesReaderFactory not available in this EwE build");
+            }
+
+            // eTimeSeriesReaderTypes.CSV = 0
+            var getReaderMethod = readerFactoryType.GetMethod("GetTimeSeriesReader",
+                new[] { typeof(cCore), readerFactoryType.GetNestedType("eTimeSeriesReaderTypes") });
+            if (getReaderMethod == null)
+            {
+                throw new EwEMcpException("unsupported_operation", "GetTimeSeriesReader method not available");
+            }
+
+            var csvEnumValue = Enum.ToObject(readerFactoryType.GetNestedType("eTimeSeriesReaderTypes"), 0);
+            var reader = getReaderMethod.Invoke(null, new object[] { core, csvEnumValue });
+            if (reader == null)
+            {
+                throw new EwEMcpException("import_failed", "Failed to create CSV reader");
+            }
+
+    // eTSDataSetInterval enum value - resolve before GetMethod so the signature matches
+    var intervalEnumType = core.GetType().Assembly.GetType("EwECore.eTSDataSetInterval");
+    object intervalEnumValue = intervalEnumType != null
+        ? Enum.ToObject(intervalEnumType, intervalInt)
+        : (object)intervalInt;
+    Type intervalParamType = intervalEnumType ?? intervalInt.GetType();
+
+    // Call Read(fileName, delimiter, decimalSeparator, interval)
+    var readMethod = reader.GetType().GetMethod("Read",
+        new[] { typeof(string), typeof(string), typeof(string), intervalParamType });
+    if (readMethod == null)
+    {
+        throw new EwEMcpException("unsupported_operation", "CSV Read method not available in this EwE build");
+    }
+
+            bool readOk = false;
+            string readErrorMessage = "";
+            try
+            {
+                readOk = Convert.ToBoolean(readMethod.Invoke(reader, new object[] { tempFile, delimiter, decimalSeparator, intervalEnumValue }));
+                if (!readOk)
+                {
+                    // Try to extract preview/error info from the reader
+                    var previewProp = reader.GetType().GetProperty("Preview");
+                    if (previewProp != null)
+                    {
+                        var preview = previewProp.GetValue(reader, null);
+                        if (preview != null)
+                        {
+                            var colCount = SafeIntProperty(preview, "ColumnCount");
+                            var rowCount = SafeIntProperty(preview, "RowCount");
+                            // Try to get row errors
+                            var rowErrorProp = preview.GetType().GetProperty("RowError", new[] { typeof(int) });
+                            var errors = new System.Collections.Generic.List<string>();
+                            if (rowErrorProp != null)
+                            {
+                                for (int r = 0; r < rowCount; r++)
+                                {
+                                    var err = rowErrorProp.GetValue(preview, new object[] { r })?.ToString();
+                                    if (!string.IsNullOrEmpty(err))
+                                        errors.Add($"Row {r}: {err}");
+                                }
+                            }
+                            readErrorMessage = $"Reader preview: cols={colCount}, rows={rowCount}" + (errors.Count > 0 ? $", errors=[{string.Join("; ", errors)}]" : "");
+                        }
+                    }
+                    // Also try to get the file contents for diagnostics
+                    try
+                    {
+                        var fileBytes = System.IO.File.ReadAllBytes(tempFile);
+                        readErrorMessage += $", file_size={fileBytes.Length}, first_bytes={BitConverter.ToString(fileBytes.Take(50).ToArray())}";
+                    }
+                    catch { }
+                }
+            }
+            catch (Exception ex)
+            {
+                throw new EwEMcpException("import_failed", $"CSV read exception: {ex.InnerException?.Message ?? ex.Message}");
+            }
+
+            if (!readOk)
+            {
+                throw new EwEMcpException("import_failed", $"CSV file could not be read; check format and delimiters. {readErrorMessage}");
+            }
+
+            // Get FirstYear and NumPoints from the reader
+            int firstYear = SafeIntProperty(reader, "FirstYear");
+            int numPoints = SafeIntProperty(reader, "NumPoints");
+
+            // Count time series from the reader (it implements ICollection)
+            int tsCount = 0;
+            var countProp = reader.GetType().GetProperty("Count");
+            if (countProp != null)
+            {
+                tsCount = Convert.ToInt32(countProp.GetValue(reader, null));
+            }
+
+            if (tsCount == 0)
+            {
+                return new JObject
+                {
+                    ["status"] = "no_data",
+                    ["rows_previewed"] = numPoints,
+                    ["note"] = "CSV was parsed but no time series records were extracted. Check CSV format against EwE time series documentation."
+                };
+            }
+
+            // Determine if we need to create a new dataset
+            // Non-forcing series require a new dataset; forcing goes to active
+            var categoryType = core.GetType().Assembly.GetType("EwECore.eTimeSeriesCategoryType");
+            var timeSeriesClass = core.GetType().Assembly.GetType("EwECore.cTimeSeries");
+
+            // Acquire batch lock for the import (matching dialog behavior)
+            var batchLockType = core.GetType().Assembly.GetType("EwECore.cCore+eBatchLockType");
+            var setBatchLockMethod = batchLockType != null
+                ? core.GetType().GetMethod("SetBatchLock", new[] { batchLockType })
+                : null;
+            object restructureLock = batchLockType != null
+                ? Enum.ToObject(batchLockType, 1) // eBatchLockType.Restructure = 1
+                : (object)1;
+
+            if (setBatchLockMethod != null)
+            {
+                bool lockOk = Convert.ToBoolean(setBatchLockMethod.Invoke(core, new object[] { restructureLock }));
+                if (!lockOk)
+                {
+                    throw new EwEMcpException("import_failed", "Could not acquire batch lock for import");
+                }
+            }
+
+            int iDataset = 0;
+            int numTS = 0;
+            int numForcing = 0;
+            int numErrors = 0;
+            bool createNewSet = true; // Always create a new dataset to get a valid ID
+            var stepLog = new System.Collections.Generic.List<string>();
+
+            try
+            {
+                // Check each time series to see if we need to create a new dataset
+                for (int i = 0; i < tsCount; i++)
+                {
+                    var tsItem = SafeGetPropertyWithIndex(reader, "Item", i);
+                    if (tsItem == null) continue;
+
+                    var tsType = SafeGetProperty(tsItem, "TimeSeriesType");
+                    if (tsType == null) continue;
+
+                    // cTimeSeries.Category(tsType) tells if it's Group, Fleet, or Forcing
+                    if (timeSeriesClass != null)
+                    {
+                        var categoryMethod = timeSeriesClass.GetMethod("Category",
+                            new[] { tsType.GetType() });
+                        if (categoryMethod != null)
+                        {
+                            var cat = categoryMethod.Invoke(null, new object[] { tsType });
+                            if (cat != null)
+                            {
+                                int catValue = Convert.ToInt32(cat);
+                                // Forcing = 0, Group = 1, Fleet = 2
+                                if (catValue != 0) createNewSet = true;
+                                stepLog.Add($"series[{i}]: cat={catValue}, needsNewSet={catValue != 0}");
+                            }
+                        }
+                    }
+                    break; // Only need to check the first one
+                }
+
+                if (createNewSet)
+                {
+                    // Create new dataset via AppendTimeSeriesDataset
+                    var appendMethod = core.GetType().GetMethod("AppendTimeSeriesDataset",
+                        new[] { typeof(string), typeof(string), typeof(string), typeof(string),
+                                typeof(int), typeof(int), intervalEnumType ?? typeof(int),
+                                typeof(int).MakeByRefType() });
+
+                    if (appendMethod == null)
+                    {
+                        // Try without enum type
+                        appendMethod = core.GetType().GetMethod("AppendTimeSeriesDataset");
+                    }
+
+                    if (appendMethod != null)
+                    {
+                        object[] appendArgs = new object[] { datasetName, "", "", "",
+                            firstYear, numPoints, intervalEnumValue ?? intervalInt, iDataset };
+                        bool appendOk = Convert.ToBoolean(appendMethod.Invoke(core, appendArgs));
+                        iDataset = Convert.ToInt32(appendArgs[7]);
+
+                        if (!appendOk)
+                        {
+                            stepLog.Add("AppendTimeSeriesDataset: FAILED (returned false)");
+                            throw new EwEMcpException("import_failed", "Failed to create time series dataset");
+                        }
+                        stepLog.Add($"AppendTimeSeriesDataset: OK, iDataset={iDataset}");
+
+                        // Refresh the time series data structures so DatasetDBID works
+                        var initMethod = core.GetType().GetMethod("InitAndLoadEcosimTimeSeriesDatasets",
+                            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                        if (initMethod != null)
+                        {
+                            try { initMethod.Invoke(core, null); stepLog.Add("InitAndLoadEcosimTimeSeriesDatasets: OK"); }
+                            catch (Exception iex) { stepLog.Add($"InitAndLoadEcosimTimeSeriesDatasets: {iex.Message}"); }
+                        }
+                    }
+                    else
+                    {
+                        stepLog.Add("AppendTimeSeriesDataset: method not found");
+                        throw new EwEMcpException("unsupported_operation", "AppendTimeSeriesDataset not available in this EwE build");
+                    }
+                }
+                else
+                {
+                    // Use active dataset for forcing
+                    iDataset = SafeIntProperty(core, "ActiveTimeSeriesDatasetIndex");
+                    stepLog.Add($"Using active dataset (forcing), iDataset={iDataset}");
+                }
+
+                // Import each time series record
+                var importMethod = core.GetType().GetMethod("ImportEcosimTimeSeries",
+                    new[] { core.GetType().Assembly.GetType("EwECore.cTimeSeriesImport"), typeof(int) });
+                if (importMethod == null)
+                {
+                    // Fallback: try with just object and int
+                    importMethod = core.GetType().GetMethod("ImportEcosimTimeSeries");
+                }
+                stepLog.Add($"ImportEcosimTimeSeries method: {(importMethod != null ? "found" : "NOT FOUND")}, iDataset={iDataset}");
+
+                for (int i = 0; i < tsCount; i++)
+                {
+                    var tsItem = SafeGetPropertyWithIndex(reader, "Item", i);
+                    if (tsItem == null) { numErrors++; continue; }
+
+            try
+            {
+                // Set the interval on each time series record
+                SafeSetProperty(tsItem, "Interval", intervalEnumValue ?? intervalInt);
+
+                bool imported = false;
+                if (importMethod != null)
+                {
+                    imported = Convert.ToBoolean(importMethod.Invoke(core, new object[] { tsItem, iDataset }));
+                }
+
+                if (imported)
+                {
+                    // Check if this is a forcing time series
+                    bool isForcing = false;
+                    var tsType = SafeGetProperty(tsItem, "TimeSeriesType");
+                    if (tsType != null && timeSeriesClass != null)
+                    {
+                        var categoryMethod = timeSeriesClass.GetMethod("Category", new[] { tsType.GetType() });
+                        if (categoryMethod != null)
+                        {
+                            var cat = categoryMethod.Invoke(null, new object[] { tsType });
+                            if (cat != null && Convert.ToInt32(cat) == 0) // Forcing = 0
+                            {
+                                isForcing = true;
+                            }
+                        }
+                    }
+                    if (isForcing) numForcing++; else numTS++;
+                }
+                else
+                {
+                    numErrors++;
+                }
+            }
+            catch
+            {
+                numErrors++;
+            }
+                }
+            }
+            finally
+            {
+                // Release batch lock
+                var releaseMethod = core.GetType().GetMethod("ReleaseBatchLock",
+                    new[] { batchLockType ?? typeof(int), typeof(bool) });
+                if (releaseMethod != null)
+                {
+                    try
+                    {
+                        releaseMethod.Invoke(core, new object[] { restructureLock ?? 1, numErrors == 0 });
+                    }
+                    catch { }
+                }
+            }
+
+            // Load and optionally enable the time series
+            bool loadOk = false;
+            try
+            {
+                var loadMethod = core.GetType().GetMethod("LoadTimeSeries",
+                    new[] { typeof(int), typeof(bool) });
+                if (loadMethod != null && iDataset > 0)
+                {
+                    loadOk = Convert.ToBoolean(loadMethod.Invoke(core, new object[] { iDataset, enableOnLoad }));
+                    stepLog.Add($"LoadTimeSeries({iDataset}): {(loadOk ? "OK" : "FAILED")}");
+                }
+                else
+                {
+                    stepLog.Add($"LoadTimeSeries: method=({loadMethod != null}), iDataset={iDataset} (must be >0)");
+                }
+            }
+            catch (Exception lex)
+            {
+                stepLog.Add($"LoadTimeSeries threw: {lex.Message}");
+            }
+
+            return new JObject
+            {
+                ["status"] = numErrors == 0 ? "ok" : "partial",
+                ["rows_imported"] = numTS + numForcing,
+                ["time_series_count"] = numTS,
+                ["forcing_count"] = numForcing,
+                ["error_count"] = numErrors,
+                ["dataset_index"] = iDataset,
+                ["dataset_name"] = datasetName,
+                ["import_type"] = importType,
+                ["interval"] = interval,
+                ["first_year"] = firstYear,
+                ["num_points"] = numPoints,
+                ["loaded"] = loadOk,
+                ["total_in_file"] = tsCount,
+                ["diagnostics"] = new JArray(stepLog.Select(s => new JValue(s)))
+            };
+        }
+        finally
+        {
+            // Clean up temp file
+            try { if (System.IO.File.Exists(tempFile)) System.IO.File.Delete(tempFile); } catch { }
+            try { System.IO.Directory.Delete(tempDir, false); } catch { }
+        }
+    }
+
+    private JObject ListEcosimScenarios()
         {
             var core = RequireCore();
             var scenarios = new JArray();
@@ -1202,6 +1713,17 @@ namespace EwE_MCP_Plugin
         private JObject LoadEcospaceScenario(JObject parameters)
         {
             var index = RequiredInt(parameters, "index");
+            var core = RequireCore();
+            var sm = SafeGetProperty(core, "StateMonitor");
+            if (sm != null && !SafeInvokeBool(sm, "HasEcosimLoaded"))
+            {
+                var loadEsim = core.GetType().GetMethod("LoadEcosimScenario", new[] { typeof(int) });
+                if (loadEsim == null)
+                    throw new EwEMcpException("unsupported_operation", "LoadEcosimScenario method not available");
+                var loaded = Convert.ToBoolean(loadEsim.Invoke(core, new object[] { 1 }));
+                if (!loaded)
+                    throw new EwEMcpException("not_ready", "Auto-load of Ecosim scenario 1 failed. Load an Ecosim scenario manually before loading Ecospace.");
+            }
             bool ok = RequireCore().LoadEcospaceScenario(index);
             return new JObject { ["loaded"] = ok, ["index"] = index };
         }
@@ -1209,6 +1731,17 @@ namespace EwE_MCP_Plugin
         private JObject LoadEcotracerScenario(JObject parameters)
         {
             var index = RequiredInt(parameters, "index");
+            var core = RequireCore();
+            var sm = SafeGetProperty(core, "StateMonitor");
+            if (sm != null && !SafeInvokeBool(sm, "HasEcosimLoaded"))
+            {
+                var loadEsim = core.GetType().GetMethod("LoadEcosimScenario", new[] { typeof(int) });
+                if (loadEsim == null)
+                    throw new EwEMcpException("unsupported_operation", "LoadEcosimScenario method not available");
+                var loaded = Convert.ToBoolean(loadEsim.Invoke(core, new object[] { 1 }));
+                if (!loaded)
+                    throw new EwEMcpException("not_ready", "Auto-load of Ecosim scenario 1 failed. Load an Ecosim scenario manually before loading Ecotracer.");
+            }
             bool ok = RequireCore().LoadEcotracerScenario(index);
             return new JObject { ["loaded"] = ok, ["index"] = index };
         }
@@ -1488,8 +2021,43 @@ namespace EwE_MCP_Plugin
             float cellLength = RequiredFloat(parameters, "cell_length");
             var method = core.GetType().GetMethod("NewEcospaceScenario", new[] { typeof(string), typeof(string), typeof(string), typeof(string), typeof(int), typeof(int), typeof(float), typeof(float), typeof(float) });
             if (method == null) throw new EwEMcpException("unsupported_operation", "NewEcospaceScenario not available in this EwE build");
-            bool ok = Convert.ToBoolean(method.Invoke(core, new object[] { name, description, author, contact, rows, cols, lat, lon, cellLength }));
-            if (!ok) throw new EwEMcpException("create_failed", "Failed to create Ecospace scenario");
+            // Pre-checks matching cCore.NewEcospaceScenario to give a clear error
+            var ds = SafeGetProperty(core, "DataSource");
+            var canSaveMethod = core.GetType().GetMethod("CanSave", new[] { typeof(bool) });
+            bool canSave = canSaveMethod != null && Convert.ToBoolean(canSaveMethod.Invoke(core, new object[] { false }));
+            var dsType = ds?.GetType().FullName ?? "(null)";
+            var hasIface = ds != null && ds.GetType().GetInterface("IEcospaceDatasource") != null;
+            var sm = SafeGetProperty(core, "StateMonitor");
+            var hasLoaded = sm != null && SafeInvokeBool(sm, "HasEcopathLoaded");
+            var hasEcosimLoaded = sm != null && SafeInvokeBool(sm, "HasEcosimLoaded");
+            if (!canSave)
+                throw new EwEMcpException("create_failed", $"Cannot create Ecospace scenario: CanSave=false");
+            if (!hasIface)
+                throw new EwEMcpException("create_failed", $"Cannot create Ecospace scenario: DataSource {dsType} does not implement IEcospaceDatasource");
+            if (!hasLoaded)
+                throw new EwEMcpException("create_failed", "Cannot create Ecospace scenario: Ecopath has not loaded");
+            // LoadEcospaceScenario inside NewEcospaceScenario requires an Ecosim
+            // scenario to be loaded.  Auto-load Ecosim scenario 1 if none is active.
+            if (!hasEcosimLoaded)
+            {
+                var loadEcosimMethod = core.GetType().GetMethod("LoadEcosimScenario", new[] { typeof(int) });
+                if (loadEcosimMethod == null)
+                    throw new EwEMcpException("create_failed", "Cannot auto-load Ecosim scenario: LoadEcosimScenario not available");
+                var esOk = Convert.ToBoolean(loadEcosimMethod.Invoke(core, new object[] { 1 }));
+                if (!esOk)
+                    throw new EwEMcpException("create_failed", "Cannot auto-load Ecosim scenario 1");
+            }
+            try
+            {
+                bool ok = Convert.ToBoolean(method.Invoke(core, new object[] { name, description, author, contact, rows, cols, lat, lon, cellLength }));
+                if (!ok)
+                    throw new EwEMcpException("create_failed", "NewEcospaceScenario returned false");
+            }
+            catch (TargetInvocationException tie)
+            {
+                throw new EwEMcpException("create_failed",
+                    $"NewEcospaceScenario threw: {tie.InnerException?.GetType().Name}: {tie.InnerException?.Message ?? "(no message)"}");
+            }
             return new JObject { ["created"] = true, ["index"] = SafeIntProperty(core, "ActiveEcospaceScenarioIndex") };
         }
 
@@ -1537,7 +2105,231 @@ namespace EwE_MCP_Plugin
             return new JObject { ["saved"] = ok };
         }
 
-        // ── Ecotracer Handlers ──────────────────────────────────────────
+        // ── Ecospace Spatial / MPA / Region Handlers ──────────────────
+
+    private JObject GetEcospaceMapSummary()
+    {
+        var core = RequireCore();
+        var basemap = SafeGetProperty(core, "EcospaceBasemap");
+        if (basemap == null) throw new EwEMcpException("core_unavailable", "Ecospace basemap not available. Load an Ecospace scenario first.");
+
+        int rows = SafeIntProperty(basemap, "InRow");
+        int cols = SafeIntProperty(basemap, "InCol");
+
+        // Count land and water cells from the depth layer
+        int landCells = 0;
+        int waterCells = 0;
+        var depthLayer = SafeGetProperty(basemap, "LayerDepth");
+        if (depthLayer != null)
+        {
+            for (int r = 1; r <= rows; r++)
+            {
+                for (int c = 1; c <= cols; c++)
+                {
+                    // Cell is an indexed property with (row, col); use two-index accessor
+                    var cellObj = SafeGetIndexedProperty(depthLayer, "Cell", r, c);
+                    if (cellObj != null)
+                    {
+                        try
+                        {
+                            float depth = Convert.ToSingle(cellObj);
+                            if (depth > 0)
+                                waterCells++;
+                            else
+                                landCells++;
+                        }
+                        catch
+                        {
+                            landCells++;
+                        }
+                    }
+                    else
+                    {
+                        landCells++;
+                    }
+                }
+            }
+        }
+
+        return new JObject
+        {
+            ["rows"] = rows,
+            ["cols"] = cols,
+            ["land_cells"] = landCells,
+            ["water_cells"] = waterCells,
+            ["n_mpa"] = SafeIntProperty(core, "nMPAs"),
+            ["n_habitats"] = SafeIntProperty(core, "nHabitats"),
+            ["n_regions"] = SafeIntProperty(core, "nRegions"),
+        };
+    }
+
+    private JObject CreateEcospaceMpa(JObject parameters)
+    {
+        var core = RequireCore();
+        var name = RequiredString(parameters, "name");
+        bool isActive = OptionalBool(parameters, "is_active");
+
+        if (SafeIntProperty(core, "ActiveEcospaceScenarioIndex") < 1)
+            throw new EwEMcpException("ecospace_scenario_not_loaded", "Load an Ecospace scenario before creating an MPA.");
+
+        int newIndex = SafeIntProperty(core, "nMPAs") + 1;
+        int dbid = 0;
+        var months = new bool[13]; // 1-based; all false = MPA closed (active) all year
+        if (isActive)
+        {
+            // is_active=true means MPA is enforced; the months array
+            // indicates when the MPA is OPEN for fishing, so leave all false
+        }
+
+        var method = core.GetType().GetMethod("AddEcospaceMPA", new[] { typeof(string), typeof(int), typeof(bool[]), typeof(int).MakeByRefType() });
+        if (method == null) throw new EwEMcpException("unsupported_operation", "AddEcospaceMPA not available in this EwE build");
+
+        bool ok = false;
+        try
+        {
+            object[] args = new object[] { name, newIndex, months, dbid };
+            ok = Convert.ToBoolean(method.Invoke(core, args));
+            dbid = (args[3] != null && args[3] != DBNull.Value) ? Convert.ToInt32(args[3]) : 0;
+        }
+        catch (Exception ex)
+        {
+            var inner = ex.InnerException ?? ex;
+            throw new EwEMcpException("create_failed", $"Failed to create MPA: {inner.Message}");
+        }
+
+        if (!ok) throw new EwEMcpException("create_failed", "Failed to create Ecospace MPA");
+        return new JObject { ["created"] = true, ["index"] = newIndex, ["name"] = name, ["dbid"] = dbid };
+    }
+
+    private JObject SetEcospaceMpaCells(JObject parameters)
+    {
+        var core = RequireCore();
+        int mpaIndex = RequiredInt(parameters, "mpa_index");
+
+        var cellsToken = parameters?["cells"];
+        if (cellsToken == null || cellsToken.Type != JTokenType.Array)
+            throw new EwEMcpException("missing_parameter", "Missing required parameter: cells (array of [row, col] pairs)");
+
+        var basemap = SafeGetProperty(core, "EcospaceBasemap");
+        if (basemap == null) throw new EwEMcpException("core_unavailable", "Ecospace basemap not available. Load an Ecospace scenario first.");
+
+        // Access basemap.LayerMPA(mpaIndex) to get the MPA layer
+        var mpaLayer = SafeGetPropertyWithIndex(basemap, "LayerMPA", mpaIndex);
+        if (mpaLayer == null) throw new EwEMcpException("index_out_of_range", $"MPA layer index {mpaIndex} out of range");
+
+        int cellsSet = 0;
+        int cellsSkipped = 0;
+        int cellsFailed = 0;
+        int maxRows = SafeIntProperty(basemap, "InRow");
+        int maxCols = SafeIntProperty(basemap, "InCol");
+
+        foreach (var cellPair in cellsToken)
+        {
+            if (cellPair is JArray arr && arr.Count >= 2)
+            {
+                int row = arr[0].Value<int>();
+                int col = arr[1].Value<int>();
+                if (row < 1 || row > maxRows || col < 1 || col > maxCols)
+                {
+                    cellsSkipped++;
+                    continue;
+                }
+                try
+                {
+                    // Set Cell(row, col) = 1 on the MPA layer (1 = MPA active)
+                    mpaLayer.GetType().InvokeMember(
+                        "Cell",
+                        BindingFlags.Instance | BindingFlags.Public | BindingFlags.SetProperty,
+                        null,
+                        mpaLayer,
+                        new object[] { 1, row, col }
+                    );
+                    cellsSet++;
+                }
+                catch
+                {
+                    cellsFailed++;
+                }
+            }
+        }
+
+        return new JObject { ["set"] = true, ["mpa_index"] = mpaIndex, ["cells_set"] = cellsSet, ["cells_skipped"] = cellsSkipped, ["cells_failed"] = cellsFailed };
+    }
+
+    private JObject CreateRegionsFromMPAs(JObject parameters)
+    {
+        var core = RequireCore();
+        var basemap = SafeGetProperty(core, "EcospaceBasemap");
+        if (basemap == null) throw new EwEMcpException("core_unavailable", "Ecospace basemap not available. Load an Ecospace scenario first.");
+
+        int nMPAs = SafeIntProperty(core, "nMPAs");
+        int? regionCountOverride = OptionalInt(parameters, "region_count");
+        int regionCount = regionCountOverride ?? nMPAs;
+
+        if (regionCount < 1)
+            throw new EwEMcpException("invalid_parameter", "region_count must be at least 1");
+
+        // Set nRegions on the Ecospace model parameters
+        var modelParams = SafeGetProperty(core, "EcospaceModelParameters");
+        if (modelParams != null)
+        {
+            SafeSetProperty(modelParams, "nRegions", regionCount);
+        }
+
+        // Get the region layer
+        var regionLayer = SafeGetProperty(basemap, "LayerRegion");
+        int rows = SafeIntProperty(basemap, "InRow");
+        int cols = SafeIntProperty(basemap, "InCol");
+
+        int cellsAssigned = 0;
+
+        if (regionLayer != null)
+        {
+            // Copy MPA cell assignments to the region layer
+            for (int mpaIdx = 1; mpaIdx <= nMPAs; mpaIdx++)
+            {
+                var mpaLayer = SafeGetPropertyWithIndex(basemap, "LayerMPA", mpaIdx);
+                if (mpaLayer == null) continue;
+
+                for (int r = 1; r <= rows; r++)
+                {
+                    for (int c = 1; c <= cols; c++)
+                    {
+                        try
+                        {
+                            var mpaCellVal = SafeGetIndexedProperty(mpaLayer, "Cell", r, c);
+                            if (mpaCellVal != null && Convert.ToInt32(mpaCellVal) > 0)
+                            {
+                                // Assign this cell to the MPA's region number
+                                regionLayer.GetType().InvokeMember(
+                                    "Cell",
+                                    BindingFlags.Instance | BindingFlags.Public | BindingFlags.SetProperty,
+                                    null,
+                                    regionLayer,
+                                    new object[] { mpaIdx, r, c }
+                                );
+                                cellsAssigned++;
+                            }
+                        }
+                        catch
+                        {
+                            // Skip cells that fail
+                        }
+                    }
+                }
+            }
+        }
+
+        return new JObject
+        {
+            ["regions_created"] = true,
+            ["region_count"] = regionCount,
+            ["cells_assigned"] = cellsAssigned,
+            ["mpas_processed"] = nMPAs,
+        };
+    }
+
+    // ── Ecotracer Handlers ──────────────────────────────────────────
 
         private JObject ListEcotracerScenarios()
         {
@@ -2164,14 +2956,305 @@ namespace EwE_MCP_Plugin
             {
                 throw new EwEMcpException("entity_unavailable", $"Ecosim fleet input {index} is unavailable. Load an Ecosim scenario first.");
             }
-            return new JObject
+        return new JObject
+        {
+            ["index"] = index,
+            ["values"] = ReadScalarValues(input, null, false, "ecosim_fleet_inputs")
+        };
+    }
+
+    #region Ecosim Forcing Shapes
+
+    private JObject ListEcosimForcingShapes()
+    {
+        var core = RequireCore();
+        var manager = SafeGetProperty(core, "ForcingShapeManager");
+        if (manager == null)
+        {
+            throw new EwEMcpException("entity_unavailable", "ForcingShapeManager is unavailable. Load an Ecosim scenario first.");
+        }
+        var count = SafeIntProperty(manager, "Count");
+        var shapes = new JArray();
+        for (var i = 0; i < count; i++)
+        {
+            var shape = SafeGetPropertyWithIndex(manager, "Item", i);
+            if (shape != null)
             {
-                ["index"] = index,
-                ["values"] = ReadScalarValues(input, null, false, "ecosim_fleet_inputs")
-            };
+                shapes.Add(BuildForcingShapeSummary(shape, i));
+            }
+        }
+        return new JObject { ["shapes"] = shapes, ["total_count"] = count };
+    }
+
+    private JObject GetEcosimForcingShape(JObject parameters)
+    {
+        var core = RequireCore();
+        var index = RequiredInt(parameters, "index");
+        return BuildEcosimForcingShape(core, index);
+    }
+
+    private JObject BuildEcosimForcingShape(cCore core, int index)
+    {
+        var manager = SafeGetProperty(core, "ForcingShapeManager");
+        if (manager == null)
+        {
+            throw new EwEMcpException("entity_unavailable", "ForcingShapeManager is unavailable. Load an Ecosim scenario first.");
+        }
+        var count = SafeIntProperty(manager, "Count");
+        if (index < 1 || index > count)
+        {
+            throw new EwEMcpException("index_out_of_range", $"Forcing shape index {index} is outside 1..{count}");
+        }
+        // Shape manager uses zero-based Item index
+        var shape = SafeGetPropertyWithIndex(manager, "Item", index - 1);
+        if (shape == null)
+        {
+            throw new EwEMcpException("entity_unavailable", $"Forcing shape {index} is unavailable.");
+        }
+        var nPoints = SafeIntProperty(shape, "nPoints");
+        var data = new JArray();
+        for (var i = 1; i <= nPoints; i++)
+        {
+            var val = SafeGetPropertyWithIndex(shape, "ShapeData", i);
+            data.Add(val != null ? Convert.ToDouble(val) : 0.0);
+        }
+        return new JObject
+        {
+            ["index"] = index,
+            ["name"] = SafeStringProperty(shape, "Name"),
+            ["n_points"] = nPoints,
+            ["shape_data"] = data,
+            ["is_seasonal"] = SafeBoolProperty(shape, "IsSeasonal"),
+            ["shape_function_type"] = SafeIntProperty(shape, "ShapeFunctionType"),
+        };
+    }
+
+    private JObject SetEcosimForcingShape(JObject parameters)
+    {
+        var core = RequireCore();
+        var index = RequiredInt(parameters, "index");
+        var shapeData = parameters["shape_data"] as JArray
+            ?? throw new EwEMcpException("missing_parameter", "Missing required parameter: shape_data");
+
+        var manager = SafeGetProperty(core, "ForcingShapeManager");
+        if (manager == null)
+        {
+            throw new EwEMcpException("entity_unavailable", "ForcingShapeManager is unavailable. Load an Ecosim scenario first.");
+        }
+        var count = SafeIntProperty(manager, "Count");
+        if (index < 1 || index > count)
+        {
+            throw new EwEMcpException("index_out_of_range", $"Forcing shape index {index} is outside 1..{count}");
+        }
+        // Shape manager uses zero-based Item index
+        var shape = SafeGetPropertyWithIndex(manager, "Item", index - 1);
+        if (shape == null)
+        {
+            throw new EwEMcpException("entity_unavailable", $"Forcing shape {index} is unavailable.");
         }
 
-        private JObject GetEcosimGroupResults(JObject parameters)
+        var nPoints = SafeIntProperty(shape, "nPoints");
+        if (shapeData.Count != nPoints)
+        {
+            throw new EwEMcpException("invalid_shape_data", $"shape_data length {shapeData.Count} does not match nPoints {nPoints}");
+        }
+
+            // Set each data point using the indexed ShapeData(int) property.
+            // cShapeData has two ShapeData overloads: ShapeData() As Single() and
+            // ShapeData(iPoint As Integer) As Single.  We must resolve the indexer
+            // explicitly to avoid an AmbiguousMatchException.
+            var indexedProp = shape.GetType().GetProperty(
+                "ShapeData", BindingFlags.Instance | BindingFlags.Public, null,
+                typeof(float), new Type[] { typeof(int) }, null);
+            if (indexedProp == null)
+            {
+                throw new EwEMcpException("set_failed", "Could not resolve indexed ShapeData property on shape object");
+            }
+            for (var i = 0; i < shapeData.Count; i++)
+            {
+                var pointIndex = i + 1; // ShapeData is one-based
+                var value = (float)shapeData[i];
+                try
+                {
+                    indexedProp.SetValue(shape, value, new object[] { pointIndex });
+                }
+                catch (Exception ex)
+                {
+                    throw new EwEMcpException("set_failed", $"Failed to set ShapeData({pointIndex}): {ex.Message}");
+                }
+            }
+
+        return new JObject
+        {
+            ["index"] = index,
+            ["name"] = SafeStringProperty(shape, "Name"),
+            ["n_points"] = nPoints,
+            ["result"] = "updated",
+        };
+    }
+
+    private static JObject BuildForcingShapeSummary(object shape, int zeroBasedIndex)
+    {
+        return new JObject
+        {
+            ["index"] = zeroBasedIndex + 1,
+            ["name"] = SafeStringProperty(shape, "Name"),
+            ["n_points"] = SafeIntProperty(shape, "nPoints"),
+            ["is_seasonal"] = SafeBoolProperty(shape, "IsSeasonal"),
+            ["shape_function_type"] = SafeIntProperty(shape, "ShapeFunctionType"),
+        };
+    }
+
+    #endregion
+
+    #region Ecosim PP Forcing
+
+    private JObject ListEcosimPPForcing()
+    {
+        var core = RequireCore();
+        var nGroups = SafeIntProperty(core, "nGroups");
+        var groups = new JArray();
+        var miManager = SafeGetProperty(core, "MediatedInteractionManager");
+
+        for (var i = 1; i <= nGroups; i++)
+        {
+            var entry = BuildPPForcingEntry(core, miManager, i, summaryOnly: true);
+            if (entry != null)
+            {
+                groups.Add(entry);
+            }
+        }
+        return new JObject { ["groups"] = groups, ["total_count"] = nGroups };
+    }
+
+    private JObject GetEcosimPPForcing(JObject parameters)
+    {
+        var core = RequireCore();
+        var index = RequiredInt(parameters, "index");
+        var nGroups = SafeIntProperty(core, "nGroups");
+        if (index < 1 || index > nGroups)
+        {
+            throw new EwEMcpException("index_out_of_range", $"PP forcing group index {index} is outside 1..{nGroups}");
+        }
+        var miManager = SafeGetProperty(core, "MediatedInteractionManager");
+        var entry = BuildPPForcingEntry(core, miManager, index, summaryOnly: false);
+        if (entry == null)
+        {
+            throw new EwEMcpException("entity_unavailable", $"PP forcing data for group {index} is unavailable.");
+        }
+        return entry;
+    }
+
+    private JObject BuildPPForcingEntry(cCore core, object miManager, int groupIndex, bool summaryOnly)
+    {
+        // Get the group name from EcosimGroupInputs
+        var groupName = "";
+        var groupInput = SafeGetIndexedProperty(core, "EcosimGroupInputs", groupIndex);
+        if (groupInput != null)
+        {
+            groupName = SafeStringProperty(groupInput, "Name");
+        }
+
+        // Try to get the PredPreyInteraction for this group (group x group diagonal)
+        object interaction = null;
+        if (miManager != null)
+        {
+            interaction = SafeInvokeWithArgs(miManager, "PredPreyInteraction", new object[] { groupIndex, groupIndex });
+            // If no PredPrey interaction, try GroupInteraction (mortality forcing)
+            if (interaction == null)
+            {
+                interaction = SafeGetPropertyWithIndex(miManager, "GroupInteraction", groupIndex);
+            }
+        }
+
+        // Extract applied shape info
+        var appliedShapes = new JArray();
+        if (interaction != null)
+        {
+            var maxShapes = SafeIntProperty(interaction, "MaxNumShapes");
+            var nApplied = SafeIntProperty(interaction, "nAppliedShapes");
+            for (var si = 1; si <= maxShapes; si++)
+            {
+                // Call getShape(iItem, out shape, out functionType) via reflection
+                var shapeAndType = InvokeGetShape(interaction, si);
+                if (shapeAndType != null)
+                {
+                    appliedShapes.Add(shapeAndType);
+                }
+            }
+        }
+
+        var result = new JObject
+        {
+            ["index"] = groupIndex,
+            ["name"] = groupName,
+            ["n_applied_shapes"] = appliedShapes.Count,
+        };
+
+        if (!summaryOnly)
+        {
+            result["applied_shapes"] = appliedShapes;
+        }
+
+        return result;
+    }
+
+    private JObject InvokeGetShape(object interaction, int itemIndex)
+    {
+        try
+        {
+            var method = interaction.GetType().GetMethod("getShape", BindingFlags.Instance | BindingFlags.Public);
+            if (method == null) return null;
+
+            var args = new object[] { itemIndex, null, null };
+            var result = method.Invoke(interaction, args);
+            if (result is bool ok && ok)
+            {
+                var shape = args[1];
+                var funcType = args[2];
+                if (shape != null)
+                {
+                    var entry = new JObject
+                    {
+                        ["shape_index"] = SafeIntProperty(shape, "Index") + 1, // Convert zero-based to one-based
+                        ["shape_name"] = SafeStringProperty(shape, "Name"),
+                        ["function_type"] = funcType?.ToString() ?? "unknown",
+                    };
+                    return entry;
+                }
+            }
+            return null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static object SafeInvokeWithArgs(object obj, string methodName, object[] args)
+    {
+        if (obj == null) return null;
+        try
+        {
+            // Try to find a method with the right parameter count
+            foreach (var method in obj.GetType().GetMethods(BindingFlags.Instance | BindingFlags.Public))
+            {
+                if (method.Name == methodName && method.GetParameters().Length == args.Length)
+                {
+                    return method.Invoke(obj, args);
+                }
+            }
+            return null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    #endregion
+
+    private JObject GetEcosimGroupResults(JObject parameters)
         {
             var core = RequireCore();
             EnsureEcosimRan(core);
@@ -2969,6 +4052,110 @@ namespace EwE_MCP_Plugin
             return new JObject { ["fleets"] = fleets, ["total_count"] = fleetCount };
         }
 
+        private JObject GetMtiMatrix()
+        {
+            var core = RequireCore();
+            var nGroups = SafeIntProperty(core, "nGroups");
+            var groupNames = new JArray();
+            for (var i = 1; i <= nGroups; i++)
+            {
+                var input = SafeGetIndexedProperty(core, "EcopathGroupInputs", i);
+                groupNames.Add(SafeStringProperty(input, "Name"));
+            }
+
+            // Try to read MTI from the Network Analysis plugin via PluginManager
+            float[,] mtiData = null;
+            try
+            {
+                var pluginManager = SafeGetProperty(core, "PluginManager");
+                if (pluginManager != null)
+                {
+                    var getPluginsMethod = pluginManager.GetType().GetMethod("GetPlugins");
+                    if (getPluginsMethod != null)
+                    {
+                        var iPluginType = getPluginsMethod.ReturnType.IsGenericType
+                            ? getPluginsMethod.ReturnType.GetGenericArguments().FirstOrDefault()
+                            : null;
+                        if (iPluginType == null)
+                        {
+                            var asm = pluginManager.GetType().Assembly;
+                            try
+                            {
+                                iPluginType = asm.GetTypes().FirstOrDefault(t => t.Name == "IPlugin");
+                            }
+                            catch (System.Reflection.ReflectionTypeLoadException rtle)
+                            {
+                                iPluginType = rtle.Types?.FirstOrDefault(t => t != null && t.Name == "IPlugin");
+                            }
+                        }
+                        if (iPluginType != null)
+                        {
+                            var pluginCollection = getPluginsMethod.Invoke(pluginManager, new object[] { iPluginType });
+                            if (pluginCollection is System.Collections.IEnumerable enumerable)
+                            {
+                                foreach (var plugin in enumerable)
+                                {
+                                    var pluginName = SafeStringProperty(plugin, "Name");
+                                    if (pluginName.Contains("NetworkAnalysis") || pluginName.Contains("Network Analysis"))
+                                    {
+                                        var manager = SafeGetProperty(plugin, "Manager");
+                                        if (manager != null)
+                                        {
+                                            var mtiProp = manager.GetType().GetProperty("MixedTrophicImpacts");
+                                            if (mtiProp != null && mtiProp.GetIndexParameters().Length == 2)
+                                            {
+                                                mtiData = new float[nGroups + 1, nGroups + 1];
+                                                for (var i = 1; i <= nGroups; i++)
+                                                {
+                                                    for (var j = 1; j <= nGroups; j++)
+                                                    {
+                                                        try
+                                                        {
+                                                            var val = mtiProp.GetValue(manager, new object[] { i, j });
+                                                            if (val is float fval)
+                                                                mtiData[i, j] = fval;
+                                                            else if (val is double dval)
+                                                                mtiData[i, j] = (float)dval;
+                                                            else if (val != null)
+                                                                float.TryParse(val.ToString(), out mtiData[i, j]);
+                                                        }
+                                                        catch { /* leave as zero */ }
+                                                    }
+                                                }
+                                            }
+                                            break; // Found the Network Analysis plugin
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            catch { /* MTI not available from plugin */ }
+
+            // Build the matrix as JArray of JArrays
+            var matrix = new JArray();
+            for (var i = 1; i <= nGroups; i++)
+            {
+                var row = new JArray();
+                for (var j = 1; j <= nGroups; j++)
+                {
+                    var val = (mtiData != null) ? mtiData[i, j] : 0.0f;
+                    row.Add(Math.Round((double)val, 6));
+                }
+                matrix.Add(row);
+            }
+
+            return new JObject
+            {
+                ["status"] = (mtiData != null) ? "available" : "zero_fallback",
+                ["group_names"] = groupNames,
+                ["n_groups"] = nGroups,
+                ["matrix"] = matrix
+            };
+        }
+
         private static string ToCsvValue(object val)
         {
             if (val == null) return "";
@@ -3084,6 +4271,28 @@ namespace EwE_MCP_Plugin
             return new JObject { ["stopped"] = true, ["run_type"] = "ecosim" };
         }
 
+        private JObject WaitForEcosimCompletion(JObject parameters)
+        {
+            var core = RequireCore();
+            int timeoutSeconds = OptionalInt(parameters, "timeout_seconds") ?? 120;
+            int pollIntervalMs = (OptionalInt(parameters, "poll_interval_seconds") ?? 1) * 1000;
+            var sm = SafeGetProperty(core, "StateMonitor");
+            var deadline = DateTime.UtcNow.AddSeconds(timeoutSeconds);
+            while (DateTime.UtcNow < deadline)
+            {
+                if (SafeInvokeBool(sm, "HasEcosimRan"))
+                {
+                    return new JObject { ["completed"] = true, ["has_ecosim_ran"] = true };
+                }
+                if (SafeInvokeBool(sm, "HasEcosimInitialized"))
+                {
+                    // Still running
+                }
+                System.Threading.Thread.Sleep(pollIntervalMs);
+            }
+            throw new EwEMcpException("timeout", $"Ecosim did not complete within {timeoutSeconds}s");
+        }
+
         private static readonly HashSet<string> BatchBlockedCommands = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
             "execute_ewe_code",
@@ -3105,6 +4314,9 @@ namespace EwE_MCP_Plugin
             "copy_ecospace_scenario",
             "delete_ecospace_scenario",
             "save_ecospace_scenario",
+            "create_ecospace_mpa",
+            "set_ecospace_mpa_cells",
+            "create_regions_from_mpas",
             "run_ecospace",
             "stop_ecospace",
             "load_ecotracer_scenario",
@@ -3117,10 +4329,14 @@ namespace EwE_MCP_Plugin
             "stop_mse",
             "run_monte_carlo",
             "stop_monte_carlo",
-        "export_ecopath_results",
-        "shutdown_server",
-        "invoke_ui_command",
-    };
+            "set_ecosim_forcing_shape",
+            "export_ecopath_results",
+            "create_ecopath_group",
+            "create_ecopath_fleet",
+            "shutdown_server",
+            "invoke_ui_command",
+            "import_time_series",
+        };
 
         private JObject Batch(JObject parameters)
         {

@@ -535,6 +535,157 @@ async def get_ecopath_fleet(index: int) -> dict[str, Any]:
     return await _send("get_ecopath_fleet", {"index": index})
 
 
+@mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
+async def create_ecopath_group(
+    name: str,
+    biomass: float | None = None,
+    pb_ratio: float | None = None,
+    qb_ratio: float | None = None,
+    ee: float | None = None,
+    group_type: int | None = None,
+) -> dict[str, Any]:
+    """Create a new Ecopath functional group.
+
+    Args:
+        name: Name for the new group.
+        biomass: Initial biomass value.
+        pb_ratio: Production/biomass ratio.
+        qb_ratio: Consumption/biomass ratio.
+        ee: Ecotrophic efficiency.
+        group_type: Group type (0=consumer, 1=producer, 2=detritus).
+    """
+    params: dict[str, Any] = {"name": name}
+    if biomass is not None:
+        params["biomass"] = biomass
+    if pb_ratio is not None:
+        params["pb_ratio"] = pb_ratio
+    if qb_ratio is not None:
+        params["qb_ratio"] = qb_ratio
+    if ee is not None:
+        params["ee"] = ee
+    if group_type is not None:
+        params["type"] = group_type
+    return await _send("create_ecopath_group", params)
+
+
+@mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
+async def create_ecopath_fleet(name: str) -> dict[str, Any]:
+    """Create a new Ecopath fishing fleet."""
+    return await _send("create_ecopath_fleet", {"name": name})
+
+
+@mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
+async def import_time_series(
+    data: str,
+    import_type: str = "biomass",
+    dataset_name: str = "MCP Import",
+    delimiter: str = ",",
+    decimal_separator: str = ".",
+    interval: str = "annual",
+    enable_on_load: bool = True,
+    pool_indices: list[int] | None = None,
+) -> dict[str, Any]:
+    """Import time series data programmatically into EwE, bypassing the file dialog.
+
+    Accepts CSV-formatted time series data as a string. Two formats are
+    auto-detected by inspecting the first row:
+
+    * Simple row‑per‑year layout (detected when the first column header starts
+      with \"year\"): Converts to EwE's native column-oriented CSV. Each
+      remaining column becomes a time series named after the column header.
+      Pool indices default to 1, 2, … sequentially. Type from import_type.
+
+      Example:  Year,Group1,Group2
+                1990,100,200
+                1991,110,210
+
+    * EwE native column‑oriented format (first cell empty or not \"year\"):
+
+      ,Series1,Series2,…     ← first cell optional; col count – 1 = n series
+      weight,1,1,…           ← optional per‑series weights
+      pool,idx1,idx2,…       ← per‑series group/fleet indices (1‑based)
+      type,biomass,catch,…   ← per‑series type names or integer codes
+      y1,val,val,…           ← first year + per‑series values
+
+    Requires an Ecosim scenario to be loaded first.
+
+    Args:
+        data: CSV-formatted time series data as a string.
+        import_type: Default type for simple format: \"catch\", \"effort\",
+            \"biomass\", or \"forcing\".
+        dataset_name: Name for the new time series dataset.
+        delimiter: Column delimiter character (default: comma).
+        decimal_separator: Decimal separator character (default: period).
+        interval: Time step interval: \"annual\" or \"timestep\".
+        enable_on_load: Whether to enable time series after loading.
+        pool_indices: Optional per-series 1‑based group or fleet index list.
+            Only used with simple format. Defaults to 1, 2, 3, … sequentially.
+            For \"effort\" type, indices reference fleets; all other types
+            reference groups.
+    """
+    import csv
+    import io as _io
+
+    # Auto-detect format: if the first cell of the header starts with "year"
+    # (case-insensitive), treat as simple row-per-year and transform it.
+    reader = csv.reader(_io.StringIO(data), delimiter=delimiter)
+    rows = list(reader)
+    if len(rows) >= 2 and rows[0] and rows[0][0].strip().lower().startswith("year"):
+        # Simple row-per-year format — transform to EwE column-oriented CSV
+        header = rows[0]
+        series_names = [h.strip() for h in header[1:]]
+        n_series = len(series_names)
+        if n_series == 0:
+            raise ValueError("Simple CSV must have at least one data column after the year column")
+
+        # Pool indices: use provided list or default to sequential
+        if pool_indices is None:
+            pool_indices = list(range(1, n_series + 1))
+        elif len(pool_indices) != n_series:
+            raise ValueError(f"pool_indices length {len(pool_indices)} must match number of series {n_series}")
+
+        # Map import_type to EwE type string or integer code
+        _TYPE_MAP: dict[str, str] = {
+            "biomass": "biomass_abs",
+            "catch": "catch",
+            "effort": "effort",
+            "forcing": "f",
+        }
+        type_code = _TYPE_MAP.get(import_type.lower(), import_type)
+        # Effort time series reference fleets; all others reference groups
+        pool_label = "fleet" if import_type.lower() == "effort" else "group"
+
+        # Build the EwE CSV
+        ewe_lines: list[str] = []
+        ewe_lines.append(delimiter + delimiter.join(series_names))
+        ewe_lines.append("weight" + delimiter + delimiter.join(["1"] * n_series))
+        ewe_lines.append(pool_label + delimiter + delimiter.join(str(p) for p in pool_indices))
+        ewe_lines.append("type" + delimiter + delimiter.join([type_code] * n_series))
+        for row in rows[1:]:
+            if not any(cell.strip() for cell in row):
+                continue
+            year = row[0].strip()
+            values = [cell.strip() for cell in row[1:]]
+            if len(values) < n_series:
+                values.extend(["0"] * (n_series - len(values)))
+            ewe_lines.append(year + delimiter + delimiter.join(values[:n_series]))
+        data = "\n".join(ewe_lines)
+
+    return await _send(
+        "import_time_series",
+        {
+            "data": data,
+            "import_type": import_type,
+            "dataset_name": dataset_name,
+            "delimiter": delimiter,
+            "decimal_separator": decimal_separator,
+            "interval": interval,
+            "enable_on_load": enable_on_load,
+        },
+        timeout=TIMEOUT_LONG,
+    )
+
+
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
 async def list_ecosim_scenarios() -> dict[str, Any]:
     """List Ecosim scenarios in the loaded model."""
@@ -761,6 +912,57 @@ async def wait_for_ecospace_completion(
     raise RuntimeError(
         f"Ecospace did not complete within {timeout_seconds}s. Last state: {last_state}"
     )
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+async def get_ecospace_map_summary() -> dict[str, Any]:
+    """Get Ecospace basemap dimensional metadata without the full grid.
+
+    Returns rows, cols, land_cells, water_cells, n_mpa, n_habitats, and n_regions.
+    """
+    return await _send("get_ecospace_map_summary")
+
+
+@mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
+async def create_ecospace_mpa(name: str, is_active: bool = True) -> dict[str, Any]:
+    """Create a new MPA in the active Ecospace scenario.
+
+    Args:
+        name: Name for the new MPA.
+        is_active: Whether the MPA is enforced (closed to fishing). Defaults to True.
+    """
+    return await _send("create_ecospace_mpa", {"name": name, "is_active": is_active}, timeout=TIMEOUT_LONG)
+
+
+@mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
+async def set_ecospace_mpa_cells(mpa_index: int, cells: list[list[int]]) -> dict[str, Any]:
+    """Set MPA cell assignments on the Ecospace basemap.
+
+    Each cell is a [row, col] pair (one-based indices). Cells are marked as
+    part of the specified MPA.
+
+    Args:
+        mpa_index: One-based MPA index.
+        cells: List of [row, col] pairs to assign to the MPA.
+    """
+    return await _send("set_ecospace_mpa_cells", {"mpa_index": mpa_index, "cells": cells}, timeout=TIMEOUT_LONG)
+
+
+@mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
+async def create_regions_from_mpas(region_count: int | None = None) -> dict[str, Any]:
+    """Create Ecospace regions from MPA boundaries.
+
+    Copies MPA cell assignments to the region layer so that each MPA
+    becomes a region. If region_count is not specified, defaults to the
+    number of MPAs.
+
+    Args:
+        region_count: Optional override for the number of regions.
+    """
+    params: dict[str, Any] = {}
+    if region_count is not None:
+        params["region_count"] = region_count
+    return await _send("create_regions_from_mpas", params, timeout=TIMEOUT_LONG)
 
 
 @mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
@@ -1076,6 +1278,41 @@ async def get_ecosim_fleet_input(index: int) -> dict[str, Any]:
 
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+async def list_ecosim_forcing_shapes() -> dict[str, Any]:
+    """List Ecosim forcing shape functions for the active scenario."""
+    return await _send("list_ecosim_forcing_shapes")
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+async def get_ecosim_forcing_shape(index: int) -> dict[str, Any]:
+    """Get data points for one Ecosim forcing shape."""
+    return await _send("get_ecosim_forcing_shape", {"index": index})
+
+
+@mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
+async def set_ecosim_forcing_shape(
+    index: int, shape_data: list[float]
+) -> dict[str, Any]:
+    """Modify Ecosim forcing shape data points."""
+    return await _send(
+        "set_ecosim_forcing_shape",
+        {"index": index, "shape_data": shape_data},
+    )
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+async def list_ecosim_pp_forcing() -> dict[str, Any]:
+    """List primary production forcing assignments for Ecosim groups."""
+    return await _send("list_ecosim_pp_forcing")
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+async def get_ecosim_pp_forcing(index: int) -> dict[str, Any]:
+    """Get primary production forcing data for an Ecosim group."""
+    return await _send("get_ecosim_pp_forcing", {"index": index})
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
 async def get_ecosim_group_results(
     index: int,
     variables: list[str] | None = None,
@@ -1152,6 +1389,23 @@ async def get_ecopath_group_diagnostics() -> dict[str, Any]:
 async def get_ecopath_fleet_diagnostics() -> dict[str, Any]:
     """Fetch fleet-level Ecopath catch, landings, and discard breakdowns after an Ecopath run."""
     return await _send("get_ecopath_fleet_diagnostics")
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+async def get_mti_matrix() -> dict[str, Any]:
+    """Get the Mixed Trophic Impact (MTI) matrix from Ecopath.
+
+    Returns group names and the MTI matrix as structured JSON data, showing
+    how each group impacts every other group trophically. Requires Ecopath to
+    have been run first.
+
+    The matrix[i][j] value represents the impact of group j on group i.
+    A positive value indicates a beneficial impact, negative indicates a
+    detrimental impact. Values near zero indicate negligible trophic
+    interaction. If the Network Analysis plugin is not available, a zero
+    matrix is returned with status "zero_fallback".
+    """
+    return await _send("get_mti_matrix")
 
 
 @mcp.tool()

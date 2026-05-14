@@ -169,6 +169,14 @@ _RUN_STOP_PATTERN = re.compile(r"^(run_|stop_)")
 _SCENARIO_CRUD_PATTERN = re.compile(
     r"^(create_|copy_|delete_|save_|load_|close_).*scenario$"
 )
+_ECOPATH_ENTITY_CREATE_PATTERN = re.compile(
+    r"^create_ecopath_(group|fleet)$"
+)
+_ECOSPACE_SPATIAL_MUTATION_PATTERN = re.compile(
+    r"^(create_ecospace_mpa|set_ecospace_mpa_cells|create_regions_from_mpas)$"
+)
+_SET_MUTATION_PATTERN = re.compile(r"^set_")
+_IMPORT_MUTATION_PATTERN = re.compile(r"^import_")
 _MODEL_LIFECYCLE = {"load_model", "save_model", "save_model_as", "close_model"}
 _CAPTURE_TOOLS = {"capture_view", "save_screenshot"}
 
@@ -192,6 +200,14 @@ def test_batch_blocked_commands_are_destructive_or_sensitive():
         if _RUN_STOP_PATTERN.match(cmd):
             continue
         if _SCENARIO_CRUD_PATTERN.match(cmd):
+            continue
+        if _ECOPATH_ENTITY_CREATE_PATTERN.match(cmd):
+            continue
+        if _ECOSPACE_SPATIAL_MUTATION_PATTERN.match(cmd):
+            continue
+        if _SET_MUTATION_PATTERN.match(cmd):
+            continue
+        if _IMPORT_MUTATION_PATTERN.match(cmd):
             continue
         pytest.fail(
             f"Command {cmd!r} is in BATCH_BLOCKED_COMMANDS but does not match "
@@ -284,12 +300,15 @@ _CSHARP_BATCH_BLOCKED = frozenset(
         "delete_ecosim_scenario",
         "load_ecosim_scenario",
         "load_ecospace_scenario",
-        "run_ecospace",
-        "stop_ecospace",
         "create_ecospace_scenario",
         "copy_ecospace_scenario",
         "delete_ecospace_scenario",
         "save_ecospace_scenario",
+        "create_ecospace_mpa",
+        "set_ecospace_mpa_cells",
+        "create_regions_from_mpas",
+        "run_ecospace",
+        "stop_ecospace",
         "load_ecotracer_scenario",
         "create_ecotracer_scenario",
         "copy_ecotracer_scenario",
@@ -300,9 +319,13 @@ _CSHARP_BATCH_BLOCKED = frozenset(
         "stop_mse",
         "run_monte_carlo",
         "stop_monte_carlo",
+        "set_ecosim_forcing_shape",
         "export_ecopath_results",
+        "create_ecopath_group",
+        "create_ecopath_fleet",
         "shutdown_server",
         "invoke_ui_command",
+        "import_time_series",
     }
 )
 

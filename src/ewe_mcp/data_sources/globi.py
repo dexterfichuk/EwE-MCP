@@ -3,19 +3,26 @@
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
 
 import httpx
+from httpx import HTTPStatusError, ConnectError, TimeoutException
+
+from ewe_mcp.data_sources._shared import _TAXON_PATTERN, _VALID_GLOBI_INTERACTION_TYPES
 
 logger = logging.getLogger("ewe_mcp")
+
+
+def _validate_taxon_name(name: str, param_name: str) -> None:
+    if not name or not name.strip():
+        raise ValueError(f"{param_name} must be a non-empty string")
+    if not _TAXON_PATTERN.match(name.strip()):
+        raise ValueError(f"{param_name} contains invalid characters: {name!r}")
 
 GLOBI_BASE_URL = "https://api.globalbioticinteractions.org"
 MAX_INTERACTIONS = 100
 HTTP_TIMEOUT = 15.0
-COMMON_INTERACTION_TYPES = {
-    "preysOn", "eatenBy", "parasiteOf", "hostOf",
-    "pollinates", "pollinatedBy", "symbiontOf", "kills",
-}
 
 EXTRACT_COLUMNS = [
     "source_taxon_name",
@@ -31,6 +38,9 @@ def _parse_response(data: dict[str, Any]) -> list[dict[str, Any]]:
     columns = data.get("columns", [])
     rows = data.get("data", [])
     indices = {col: i for i, col in enumerate(columns) if col in EXTRACT_COLUMNS}
+    if not indices:
+        logger.warning("GLOBI response missing expected columns: %s", EXTRACT_COLUMNS)
+        return []
     interactions = []
     for row in rows:
         entry = {}
@@ -66,6 +76,15 @@ def query_globi(
         Dict with source, interaction_type, interactions list, count, and
         optional note if results were capped. Returns {"error": "..."} on failure.
     """
+    _validate_taxon_name(taxon_name, "taxon_name")
+    if not interaction_type or not re.match(r"^[A-Za-z]+$", interaction_type):
+        raise ValueError(f"interaction_type contains invalid characters: {interaction_type!r}")
+    if interaction_type not in _VALID_GLOBI_INTERACTION_TYPES:
+        raise ValueError(
+            f"Unknown interaction_type {interaction_type!r}. "
+            f"Valid types: {', '.join(sorted(_VALID_GLOBI_INTERACTION_TYPES))}"
+        )
+
     try:
         response = httpx.get(
             f"{GLOBI_BASE_URL}/interaction",
@@ -77,8 +96,17 @@ def query_globi(
         )
         response.raise_for_status()
         data = response.json()
+    except HTTPStatusError as exc:
+        logger.error("GLOBI HTTP error: %s", exc)
+        return {"error": f"GLOBI HTTP error: {exc.response.status_code}"}
+    except ConnectError as exc:
+        logger.error("GLOBI connection error: %s", exc)
+        return {"error": f"GLOBI connection failed: {exc}"}
+    except TimeoutException as exc:
+        logger.error("GLOBI timeout: %s", exc)
+        return {"error": f"GLOBI request timed out: {exc}"}
     except Exception as exc:
-        logger.error("GLOBI query failed: %s", exc)
+        logger.exception("GLOBI unexpected error")
         return {"error": f"GLOBI query failed: {exc}"}
 
     all_interactions = _parse_response(data)
@@ -91,13 +119,7 @@ def query_globi(
         "interactions": capped,
         "count": total,
     }
-    if interaction_type not in COMMON_INTERACTION_TYPES:
-        result["note"] = (
-            f"Interaction type '{interaction_type}' is uncommon. "
-            f"Common types: {', '.join(sorted(COMMON_INTERACTION_TYPES))}"
-        )
     if total > MAX_INTERACTIONS:
-        cap_note = f"Showing {MAX_INTERACTIONS} of {total} interactions"
-        result["note"] = f"{result.get('note', '')} {cap_note}".strip()
+        result["note"] = f"Showing {MAX_INTERACTIONS} of {total} interactions"
 
     return result

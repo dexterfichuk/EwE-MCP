@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Net;
 using System.Net.Sockets;
@@ -57,6 +58,9 @@ namespace EwE_MCP_Plugin
 
         private const uint GW_OWNER = 4;
         private const uint BM_CLICK = 0x00F5;
+        private const uint WM_KEYDOWN = 0x0100;
+        private const uint WM_COMMAND = 0x0111;
+        private const int VK_RETURN = 0x0D;
         private const int IDOK = 1;
         private const int IDYES = 6;
         private const uint SMTO_ABORTIFHUNG = 0x0002;
@@ -475,25 +479,84 @@ namespace EwE_MCP_Plugin
                 }
                 else
                 {
-                    var okBtn = FindWindowEx(hWnd, IntPtr.Zero, "Button", "OK");
-                    if (okBtn == IntPtr.Zero)
+                    var clicked = TryFindAndClickButton(hWnd, new HashSet<IntPtr>(), out var foundText);
+                    if (clicked)
                     {
-                        okBtn = FindWindowEx(hWnd, IntPtr.Zero, "Button", "&OK");
+                        EwEMcpFileLog.Info($"Dialog watcher clicked '{foundText}' on WinForms modal '{displayTitle}' (class {cls})");
+                        dismissed++;
                     }
-                    if (okBtn != IntPtr.Zero)
+                    else if (IsSafeToDismiss(displayTitle))
                     {
-                        ClickDialogButton(okBtn, $"WinForms dialog '{displayTitle}' (OK)");
+                        // Known-safe dialog type that we can safely dismiss
+                        PostMessage(hWnd, WM_KEYDOWN, (IntPtr)VK_RETURN, IntPtr.Zero);
+                        Task.Delay(100).Wait();
+                        PostMessage(hWnd, WM_COMMAND, (IntPtr)IDYES, IntPtr.Zero);
+                        Task.Delay(100).Wait();
+                        PostMessage(hWnd, WM_COMMAND, (IntPtr)IDOK, IntPtr.Zero);
+                        EwEMcpFileLog.Info($"Dialog watcher sent Enter/Yes/OK to known-safe dialog '{displayTitle}'");
                         dismissed++;
                     }
                     else
                     {
-                        EwEMcpFileLog.Warn($"Dialog watcher found WinForms modal '{displayTitle}' (class {cls}) with no OK button - leaving it alone");
+                        EwEMcpFileLog.Warn($"Dialog watcher found WinForms modal '{displayTitle}' (class {cls}) with no clickable button — leaving it alone");
                     }
                 }
 
                 return true;
             }, IntPtr.Zero);
             return dismissed;
+        }
+
+        private static readonly HashSet<string> _safeDialogTitles = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "Ecopath with Ecosim",
+            "EwE",
+            "Ecopath",
+        };
+
+        private static bool IsSafeToDismiss(string title)
+        {
+            foreach (var safe in _safeDialogTitles)
+            {
+                if (title.IndexOf(safe, StringComparison.OrdinalIgnoreCase) >= 0)
+                    return true;
+            }
+            return false;
+        }
+
+        /// <summary>Recursively search all descendants for a clickable button
+        /// with Yes/OK text. Clicks the first match and returns true.</summary>
+        private static bool TryFindAndClickButton(IntPtr parent, HashSet<IntPtr> visited, out string buttonText)
+        {
+            buttonText = null;
+            var child = FindWindowEx(parent, IntPtr.Zero, null, null);
+            while (child != IntPtr.Zero)
+            {
+                if (!visited.Add(child))
+                {
+                    child = FindWindowEx(parent, child, null, null);
+                    continue;
+                }
+                var bt = new StringBuilder(256);
+                GetWindowText(child, bt, bt.Capacity);
+                var text = bt.ToString().Trim();
+                if (string.Equals(text, "Yes", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(text, "&Yes", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(text, "OK", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(text, "&OK", StringComparison.OrdinalIgnoreCase))
+                {
+                    buttonText = text;
+                    ClickDialogButton(child, $"WinForms button '{text}'");
+                    return true;
+                }
+                if (TryFindAndClickButton(child, visited, out var deeperText))
+                {
+                    buttonText = deeperText;
+                    return true;
+                }
+                child = FindWindowEx(parent, child, null, null);
+            }
+            return false;
         }
 
         private static void ClickDialogButton(IntPtr buttonHandle, string description)

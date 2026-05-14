@@ -15,6 +15,7 @@ def test_ecopath_commands_not_in_batch_blocked():
         "get_ecopath_stats",
         "get_ecopath_group_diagnostics",
         "get_ecopath_fleet_diagnostics",
+        "get_mti_matrix",
     ]:
         assert cmd not in BATCH_BLOCKED_COMMANDS, (
             f"{cmd} should not be in BATCH_BLOCKED_COMMANDS"

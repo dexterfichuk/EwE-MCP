@@ -322,6 +322,5 @@ class TestQueryGlobi:
 
         with patch("ewe_mcp.data_sources.globi.httpx") as mock_httpx:
             mock_httpx.get.return_value = mock_response
-            result = query_globi("Gadus morhua", interaction_type="someObscureType")
-
-        assert "uncommon" in result["note"].lower()
+            with pytest.raises(ValueError, match="interaction_type"):
+                query_globi("Gadus morhua", interaction_type="someObscureType")

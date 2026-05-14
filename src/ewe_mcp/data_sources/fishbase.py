@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import logging
-import re
+
 from typing import Any
 
 import duckdb
+
+from ewe_mcp.data_sources._shared import _TAXON_PATTERN
 
 logger = logging.getLogger("ewe_mcp")
 
@@ -19,8 +21,6 @@ ECOLOGY_COLUMNS = ["DietTroph", "DietSeTroph", "FoodTroph", "FoodSeTroph", "Feed
 DIET_ITEM_COLUMNS = ["FoodI", "FoodII", "FoodIII", "Stage", "DietPercent", "ItemName"]
 
 MAX_ROWS = 500
-
-_TAXON_PATTERN = re.compile(r"^[A-Za-z][A-Za-z\-\. ]*$")
 
 
 def _validate_taxon_name(name: str, label: str) -> None:

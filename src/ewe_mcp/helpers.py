@@ -64,6 +64,9 @@ BATCH_BLOCKED_COMMANDS = frozenset(
         "copy_ecospace_scenario",
         "delete_ecospace_scenario",
         "save_ecospace_scenario",
+        "create_ecospace_mpa",
+        "set_ecospace_mpa_cells",
+        "create_regions_from_mpas",
         "run_ecospace",
         "stop_ecospace",
         "load_ecotracer_scenario",
@@ -76,9 +79,13 @@ BATCH_BLOCKED_COMMANDS = frozenset(
         "stop_mse",
         "run_monte_carlo",
         "stop_monte_carlo",
+        "set_ecosim_forcing_shape",
         "export_ecopath_results",
+        "create_ecopath_group",
+        "create_ecopath_fleet",
         "shutdown_server",
         "invoke_ui_command",
+        "import_time_series",
     }
 )
 
