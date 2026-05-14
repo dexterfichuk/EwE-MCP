@@ -28,6 +28,8 @@ from ewe_mcp.data_sources.sealifebase import query_sealifebase as _query_sealife
 from ewe_mcp.data_sources.globi import query_globi as _query_globi
 from ewe_mcp.helpers import (
     BATCH_BLOCKED_COMMANDS,
+    ECOSIM_FLEET_RESULT_VARS,
+    ECOSIM_GROUP_RESULT_VARS,
     STATUS_CODE_MAP,
     TIMEOUT_DEFAULT,
     TIMEOUT_LONG,
@@ -1320,7 +1322,11 @@ async def get_ecosim_group_results(
     end_time: int | None = None,
     fleet_index: int | None = None,
 ) -> dict[str, Any]:
-    """Read Ecosim group result time-series after a run."""
+    """Read Ecosim group result time-series after a run.
+
+    Valid variable names: biomass, biomass_rel, catch, feeding_time, fish_mort, pred_mort.
+    If variables is None, all available variables are returned.
+    """
     params: dict[str, Any] = {"index": index}
     if variables is not None:
         params["variables"] = variables
@@ -1340,7 +1346,11 @@ async def get_ecosim_fleet_results(
     start_time: int | None = None,
     end_time: int | None = None,
 ) -> dict[str, Any]:
-    """Read Ecosim fleet result time-series after a run."""
+    """Read Ecosim fleet result time-series after a run.
+
+    Valid variable names: catch_biomass, value.
+    If variables is None, all available variables are returned.
+    """
     params: dict[str, Any] = {"index": index}
     if variables is not None:
         params["variables"] = variables
