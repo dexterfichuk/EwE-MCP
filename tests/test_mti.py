@@ -73,7 +73,7 @@ def test_mti_matrix_zero_fallback_result():
             "n_groups": 3,
             "matrix": [[0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]],
         }
-        with patch("ewe_mcp.server._send", return_value=mock_result) as mock_send:
+        with patch("ewe_mcp.server._send", return_value=mock_result):
             from ewe_mcp.server import get_mti_matrix
 
             result = await get_mti_matrix()
