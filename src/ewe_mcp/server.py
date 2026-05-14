@@ -804,14 +804,58 @@ async def get_ecospace_fleet_results(
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
 async def list_ecospace_habitats() -> dict[str, Any]:
-    """List Ecospace habitats in the active scenario."""
-    return await _send("list_ecospace_habitats")
+    """List Ecospace habitats in the active scenario.
+
+    Note: Habitats may not be fully initialized for newly created Ecospace
+    scenarios. Entities that cannot be resolved are filtered out with a
+    warning.
+    """
+    result = await _send("list_ecospace_habitats")
+    # Filter out entities that cannot be resolved
+    if isinstance(result, dict) and "habitats" in result:
+        valid = []
+        for h in result["habitats"]:
+            # Keep entities that don't have an error status
+            if not (isinstance(h, dict) and h.get("status") == "entity_unavailable"):
+                valid.append(h)
+            else:
+                logger.warning(
+                    "Filtered unresolved Ecospace habitat: %s (index %s)",
+                    h.get("name", "unknown"),
+                    h.get("index", "unknown"),
+                )
+        if len(valid) != len(result["habitats"]):
+            result["filtered_count"] = len(result["habitats"]) - len(valid)
+        result["habitats"] = valid
+    return result
 
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
 async def get_ecospace_habitat(index: int) -> dict[str, Any]:
-    """Get one Ecospace habitat by one-based index."""
-    return await _send("get_ecospace_habitat", {"index": index})
+    """Get one Ecospace habitat by one-based index.
+
+    Note: Habitats may not be initialized for newly created Ecospace
+    scenarios. If the habitat data cannot be resolved, a clear error
+    message is returned.
+    """
+    result = await _send("get_ecospace_habitat", {"index": index})
+    # Check for entity_unavailable errors and provide a clearer message
+    if isinstance(result, dict):
+        if result.get("status") == "entity_unavailable" or (
+            isinstance(result.get("error"), dict)
+            and result["error"].get("code") == "entity_unavailable"
+        ):
+            return {
+                "error": (
+                    f"Ecospace habitat at index {index} could not be resolved. "
+                    "This typically happens when the Ecospace scenario was recently "
+                    "created and habitats have not been fully initialized. "
+                    "Ensure the scenario has been saved and the basemap is configured."
+                ),
+                "index": index,
+                "status": "entity_unavailable",
+            }
+    return result
 
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
