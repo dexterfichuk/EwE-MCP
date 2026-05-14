@@ -1377,6 +1377,13 @@ async def get_ecosim_group_results(
     Valid variable names: biomass, biomass_rel, catch, feeding_time, fish_mort, pred_mort.
     If variables is None, all available variables are returned.
     """
+    if variables is not None:
+        invalid = [v for v in variables if v not in ECOSIM_GROUP_RESULT_VARS]
+        if invalid:
+            raise ValueError(
+                f"Invalid Ecosim group result variable(s): {invalid}. "
+                f"Valid names: {ECOSIM_GROUP_RESULT_VARS}"
+            )
     params: dict[str, Any] = {"index": index}
     if variables is not None:
         params["variables"] = variables
@@ -1401,6 +1408,13 @@ async def get_ecosim_fleet_results(
     Valid variable names: catch_biomass, value.
     If variables is None, all available variables are returned.
     """
+    if variables is not None:
+        invalid = [v for v in variables if v not in ECOSIM_FLEET_RESULT_VARS]
+        if invalid:
+            raise ValueError(
+                f"Invalid Ecosim fleet result variable(s): {invalid}. "
+                f"Valid names: {ECOSIM_FLEET_RESULT_VARS}"
+            )
     params: dict[str, Any] = {"index": index}
     if variables is not None:
         params["variables"] = variables
@@ -1573,8 +1587,6 @@ async def capture_view(
         params["max_height"] = max_height
 
     result = await _send("capture_view", params, timeout=TIMEOUT_LONG)
-
-    image_data = base64.b64decode(result["data"])
 
     # Build metadata summary (everything except the raw data).
     meta = {key: value for key, value in result.items() if key != "data"}
