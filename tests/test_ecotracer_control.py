@@ -1,6 +1,5 @@
 import os
 import pytest
-from ewe_mcp.client import EwEMCPError
 from ewe_mcp.helpers import BATCH_BLOCKED_COMMANDS
 
 live = pytest.mark.skipif(

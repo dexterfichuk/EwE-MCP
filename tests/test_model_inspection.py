@@ -1,6 +1,4 @@
-import os
 import pytest
-from ewe_mcp.client import EwEMCPClient
 
 
 def test_stanzas_inspection(live_client, sample_model_path):

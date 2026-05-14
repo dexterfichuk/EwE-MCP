@@ -6,7 +6,6 @@ import pytest
 
 from ewe_mcp.server import (
     capture_view,
-    get_active_view,
     load_model,
     navigate_to_node,
     save_screenshot,

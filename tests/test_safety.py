@@ -21,7 +21,7 @@ from ewe_mcp.helpers import (
     get_token,
     HEADER_STRUCT,
 )
-from ewe_mcp.server import export_ecopath_results, save_screenshot
+from ewe_mcp.server import save_screenshot
 
 
 def test_plugin_defaults_to_localhost():
@@ -487,7 +487,6 @@ def test_dialog_watcher_logs_errors_and_does_not_foreground():
 def test_config_file_requires_ewe_mcp_section_header():
     """The C# ReadConfigFile() only reads key=value pairs under [EwE_MCP].
     The installer must write this section header in the default config file."""
-    from ewe_mcp.helpers import EVAL_DENY_PATTERNS
 
     expected_header = "[EwE_MCP]"
     installer_path = os.path.join(
