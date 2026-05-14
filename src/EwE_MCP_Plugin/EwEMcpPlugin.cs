@@ -247,6 +247,8 @@ namespace EwE_MCP_Plugin
                     return OnUiThread(GetActiveView);
                 case "load_model":
                     return OnUiThread(() => LoadModel(request.Params));
+                case "create_model":
+                    return OnUiThread(() => CreateModel(request.Params));
                 case "save_model":
                     return OnUiThread(() => SaveModel(request.Params, false));
                 case "save_model_as":
@@ -3857,6 +3859,60 @@ case "list_ecosim_scenarios":
             return string.Empty;
         }
 
+        private JObject CreateModel(JObject parameters)
+        {
+            var core = RequireCore();
+            var path = RequiredString(parameters, "path");
+            var modelName = OptionalString(parameters, "model_name") ??
+                System.IO.Path.GetFileNameWithoutExtension(path);
+            var author = OptionalString(parameters, "author") ?? core.GetType()
+                .GetProperty("DefaultAuthor")?.GetValue(core)?.ToString() ?? "";
+
+            // Create a new Access database via cEwEAccessDatabase.Create
+            // Try several possible type names for cEwEAccessDatabase
+            Type dbType = null;
+            var assembly = core.GetType().Assembly;
+            foreach (var tn in new[] {
+                "EwECore.cEwEAccessDatabase",
+                "EwECore.Database.cEwEAccessDatabase",
+                "EwECore.DataSource.cEwEAccessDatabase",
+                "EwECore.DataSources.cEwEAccessDatabase",
+            })
+            {
+                dbType = assembly.GetType(tn);
+                if (dbType != null) break;
+            }
+            if (dbType == null)
+                throw new EwEMcpException("unsupported_operation", "cEwEAccessDatabase not available in this EwE build");
+
+            object db = Activator.CreateInstance(dbType);
+            // eDataSourceTypes.Access2007 = 1
+            var dsTypeEnum = core.GetType().Assembly.GetType("EwECore.eDataSourceTypes")
+                ?? core.GetType().Assembly.GetType("EwECore.DataSources.eDataSourceTypes");
+            object dsType = dsTypeEnum != null ? Enum.ToObject(dsTypeEnum, 1) : 1;
+
+            var createMethod = dbType.GetMethods()
+                .FirstOrDefault(m => m.Name == "Create" && m.GetParameters().Length >= 4);
+            if (createMethod == null)
+                throw new EwEMcpException("unsupported_operation", "cEwEAccessDatabase.Create method not available");
+
+            var result = createMethod.Invoke(db, new object[] { path, modelName, true, dsType, author });
+            // eDatasourceAccessType.Success = 0
+            var successVal = Convert.ToInt32(result);
+            if (successVal != 0)
+                throw new EwEMcpException("create_failed", $"Failed to create model (result={successVal})");
+
+            // Load the newly created model
+            bool loaded = core.LoadModel(path);
+            return new JObject
+            {
+                ["created"] = true,
+                ["loaded"] = loaded,
+                ["path"] = path,
+                ["model_name"] = modelName,
+            };
+        }
+
         private JObject LoadModel(JObject parameters)
         {
             var path = RequiredString(parameters, "path");
@@ -4319,6 +4375,7 @@ case "list_ecosim_scenarios":
             "execute_ewe_code",
             "close_model",
             "load_model",
+            "create_model",
             "save_model",
             "save_model_as",
             "run_ecopath",
