@@ -1363,8 +1363,23 @@ async def get_ecosim_fleet_results(
 
 @mcp.tool()
 async def export_ecosim_results(path: str) -> dict[str, Any]:
-    """Export Ecosim model results to a file path on the EwE host."""
-    return await _send("export_ecosim_results", {"path": path}, timeout=TIMEOUT_LONG)
+    """Export Ecosim model results to a file path on the EwE host.
+
+    This tool may not be available in all EwE builds. If the C# plugin
+    does not expose dumpEcosimModelResults, an error will be returned
+    indicating the feature is unavailable. As an alternative, use
+    get_ecosim_group_results or get_ecosim_fleet_results to extract
+    individual result time-series.
+    """
+    result = await _send("export_ecosim_results", {"path": path}, timeout=TIMEOUT_LONG)
+    if isinstance(result, dict) and result.get("error") and "dumpEcosimModelResults" in str(result.get("error", "")):
+        result["error"] = (
+            f"{result['error']} "
+            "This tool requires the C# plugin to expose dumpEcosimModelResults, "
+            "which is not available in all EwE builds. "
+            "Use get_ecosim_group_results or get_ecosim_fleet_results instead."
+        )
+    return result
 
 
 @mcp.tool()

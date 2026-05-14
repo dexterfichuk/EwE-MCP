@@ -131,6 +131,8 @@ def error_hint(message: str) -> str | None:
         return "EwE rejected this value as out of range. Use validate_values first and check EwE's range constraints for the specific variable."
     if "'data'" in lower and "keyerror" in lower:
         return "A modal dialog may be blocking the EwE GUI. Try enabling dialog_watcher_enabled in the plugin config, or dismiss the dialog manually on the Windows VM."
+    if "dumpecosimmodelresults" in lower or "export_ecosim_results" in lower and "not available" in lower:
+        return "The EwE build does not support dumpEcosimModelResults. Use get_ecosim_group_results or get_ecosim_fleet_results to extract results instead."
     return None
 
 
