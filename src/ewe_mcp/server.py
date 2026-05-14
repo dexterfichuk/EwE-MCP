@@ -28,8 +28,6 @@ from ewe_mcp.data_sources.sealifebase import query_sealifebase as _query_sealife
 from ewe_mcp.data_sources.globi import query_globi as _query_globi
 from ewe_mcp.helpers import (
     BATCH_BLOCKED_COMMANDS,
-    ECOSIM_FLEET_RESULT_VARS,
-    ECOSIM_GROUP_RESULT_VARS,
     STATUS_CODE_MAP,
     TIMEOUT_DEFAULT,
     TIMEOUT_LONG,
@@ -344,6 +342,10 @@ async def create_model(
         model_name: Optional display name (defaults to filename).
         author: Optional author string (defaults to EwE's current default).
     """
+    if not path.lower().endswith(".ewemdb"):
+        raise ValueError("path must have a .EwEmdb extension")
+    if ".." in path:
+        raise ValueError("path must not contain directory traversal")
     params: dict[str, Any] = {"path": path}
     if model_name is not None:
         params["model_name"] = model_name
@@ -869,24 +871,17 @@ async def get_ecospace_habitat(index: int) -> dict[str, Any]:
     scenarios. If the habitat data cannot be resolved, a clear error
     message is returned.
     """
-    result = await _send("get_ecospace_habitat", {"index": index})
-    # Check for entity_unavailable errors and provide a clearer message
-    if isinstance(result, dict):
-        if result.get("status") == "entity_unavailable" or (
-            isinstance(result.get("error"), dict)
-            and result["error"].get("code") == "entity_unavailable"
-        ):
-            return {
-                "error": (
-                    f"Ecospace habitat at index {index} could not be resolved. "
-                    "This typically happens when the Ecospace scenario was recently "
-                    "created and habitats have not been fully initialized. "
-                    "Ensure the scenario has been saved and the basemap is configured."
-                ),
-                "index": index,
-                "status": "entity_unavailable",
-            }
-    return result
+    try:
+        return await _send("get_ecospace_habitat", {"index": index})
+    except RuntimeError as exc:
+        if "entity_unavailable" in str(exc).lower():
+            raise RuntimeError(
+                f"Ecospace habitat at index {index} could not be resolved. "
+                "This typically happens when the Ecospace scenario was recently "
+                "created and habitats have not been fully initialized. "
+                "Ensure the scenario has been saved and the basemap is configured."
+            ) from exc
+        raise
 
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
@@ -1399,16 +1394,14 @@ async def get_ecosim_group_results(
 ) -> dict[str, Any]:
     """Read Ecosim group result time-series after a run.
 
-    Valid variable names: biomass, biomass_rel, catch, feeding_time, fish_mort, pred_mort.
-    If variables is None, all available variables are returned.
+    Known variable names: biomass, biomass_rel, catch, catch_rel,
+    feeding_time, fish_mort, pred_mort, total_mort, tl,
+    consump_biomass, avg_weight, prod_consump, catch_by_fleet,
+    fishing_mort_by_fleet. Additional variables may be available
+    depending on the EwE build. If variables is None, all available
+    variables are returned. Unknown variable names will be rejected
+    by the EwE plugin with a descriptive error.
     """
-    if variables is not None:
-        invalid = [v for v in variables if v not in ECOSIM_GROUP_RESULT_VARS]
-        if invalid:
-            raise ValueError(
-                f"Invalid Ecosim group result variable(s): {invalid}. "
-                f"Valid names: {ECOSIM_GROUP_RESULT_VARS}"
-            )
     params: dict[str, Any] = {"index": index}
     if variables is not None:
         params["variables"] = variables
@@ -1430,16 +1423,12 @@ async def get_ecosim_fleet_results(
 ) -> dict[str, Any]:
     """Read Ecosim fleet result time-series after a run.
 
-    Valid variable names: catch_biomass, value.
+    Known variable names: catch_biomass, value, effort, profit, risk.
+    Additional variables may be available depending on the EwE build.
     If variables is None, all available variables are returned.
+    Unknown variable names will be rejected by the EwE plugin with
+    a descriptive error.
     """
-    if variables is not None:
-        invalid = [v for v in variables if v not in ECOSIM_FLEET_RESULT_VARS]
-        if invalid:
-            raise ValueError(
-                f"Invalid Ecosim fleet result variable(s): {invalid}. "
-                f"Valid names: {ECOSIM_FLEET_RESULT_VARS}"
-            )
     params: dict[str, Any] = {"index": index}
     if variables is not None:
         params["variables"] = variables
@@ -1460,15 +1449,7 @@ async def export_ecosim_results(path: str) -> dict[str, Any]:
     get_ecosim_group_results or get_ecosim_fleet_results to extract
     individual result time-series.
     """
-    result = await _send("export_ecosim_results", {"path": path}, timeout=TIMEOUT_LONG)
-    if isinstance(result, dict) and result.get("error") and "dumpEcosimModelResults" in str(result.get("error", "")):
-        result["error"] = (
-            f"{result['error']} "
-            "This tool requires the C# plugin to expose dumpEcosimModelResults, "
-            "which is not available in all EwE builds. "
-            "Use get_ecosim_group_results or get_ecosim_fleet_results instead."
-        )
-    return result
+    return await _send("export_ecosim_results", {"path": path}, timeout=TIMEOUT_LONG)
 
 
 @mcp.tool()
@@ -1525,7 +1506,7 @@ async def get_ecopath_fleet_diagnostics() -> dict[str, Any]:
                 groups = fleet.get("groups", [])
                 for fg in groups:
                     group_idx = fg.get("group_index")
-                    catch_val = fg.get("catch")
+                    catch_val = fg.get("catch_total")
                     if (
                         group_idx is not None
                         and group_idx in group_biomass

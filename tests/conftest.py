@@ -28,7 +28,7 @@ def sample_model_path():
         if os.environ.get("EWE_MODEL_PATH"):
             return os.environ["EWE_MODEL_PATH"]
         root = _remote_root().rstrip("/\\")
-        return root + "\\tests\\fixtures\\Tampa_Bay.EwEmdb"
+        return f"{root}\\tests\\fixtures\\Tampa_Bay.EwEmdb"
     return FIXTURE_MODEL
 
 
@@ -37,7 +37,7 @@ def spatial_model_path():
     """Path to an EwE model with Ecospace scenarios (.eweaccdb format)."""
     if os.environ.get("EWE_LIVE_TESTS") == "1":
         root = _remote_root().rstrip("/\\")
-        return root + "\\tests\\fixtures\\Anchovy_Bay_Spatial_Mosaic.eweaccdb"
+        return f"{root}\\tests\\fixtures\\Anchovy_Bay_Spatial_Mosaic.eweaccdb"
     return SPATIAL_MODEL
 
 

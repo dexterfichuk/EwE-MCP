@@ -205,9 +205,14 @@ def filter_sentinels(value: Any) -> Any:
 # 4-tuple: (min_val, max_val, min_exclusive, max_exclusive)
 # min_exclusive=True means value must be > min_val (not >=)
 # max_exclusive=True means value must be < max_val (not <=)
-# Valid variable names for Ecosim/Ecospace result tools.
-ECOSIM_GROUP_RESULT_VARS = ("biomass", "biomass_rel", "catch", "feeding_time", "fish_mort", "pred_mort")
-ECOSIM_FLEET_RESULT_VARS = ("catch_biomass", "value")
+# Known variable names for Ecosim/Ecospace result tools (documentation only;
+# not used for runtime validation — the C# plugin rejects unknown names).
+ECOSIM_GROUP_RESULT_VARS = (
+    "biomass", "biomass_rel", "catch", "catch_rel", "feeding_time",
+    "fish_mort", "pred_mort", "total_mort", "tl", "consump_biomass",
+    "avg_weight", "prod_consump", "catch_by_fleet", "fishing_mort_by_fleet",
+)
+ECOSIM_FLEET_RESULT_VARS = ("catch_biomass", "value", "effort", "profit", "risk")
 
 EWE_RANGE_CONSTRAINTS: dict[str, dict[str, tuple[float, float, bool, bool]]] = {
     "ecosim_group_inputs": {
