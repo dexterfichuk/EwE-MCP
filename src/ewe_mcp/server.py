@@ -1412,8 +1412,43 @@ async def get_ecopath_group_diagnostics() -> dict[str, Any]:
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
 async def get_ecopath_fleet_diagnostics() -> dict[str, Any]:
-    """Fetch fleet-level Ecopath catch, landings, and discard breakdowns after an Ecopath run."""
-    return await _send("get_ecopath_fleet_diagnostics")
+    """Fetch fleet-level Ecopath catch, landings, and discard breakdowns after an Ecopath run.
+
+    Also computes fishing mortality (F = catch / biomass) for each fleet/group pair
+    when group biomass is available from Ecopath group diagnostics.
+    """
+    fleet_diag = await _send("get_ecopath_fleet_diagnostics")
+    fleet_diag["status_code_map"] = STATUS_CODE_MAP
+
+    # Enrich with fishing mortality (F = catch / biomass) from group diagnostics
+    try:
+        group_diag = await _send("get_ecopath_group_diagnostics")
+        group_biomass: dict[int, float] = {}
+        for g in group_diag.get("groups", []):
+            gidx = g.get("index")
+            values = g.get("values", {})
+            bio = values.get("Biomass")
+            if gidx is not None and bio is not None and isinstance(bio, (int, float)):
+                group_biomass[gidx] = float(bio)
+
+        if group_biomass and "fleets" in fleet_diag:
+            for fleet in fleet_diag["fleets"]:
+                groups = fleet.get("groups", [])
+                for fg in groups:
+                    group_idx = fg.get("group_index")
+                    catch_val = fg.get("catch")
+                    if (
+                        group_idx is not None
+                        and group_idx in group_biomass
+                        and catch_val is not None
+                        and isinstance(catch_val, (int, float))
+                        and group_biomass[group_idx] > 0
+                    ):
+                        fg["fishing_mortality"] = catch_val / group_biomass[group_idx]
+    except Exception:
+        logger.warning("Failed to enrich fleet diagnostics with fishing mortality", exc_info=True)
+
+    return fleet_diag
 
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
