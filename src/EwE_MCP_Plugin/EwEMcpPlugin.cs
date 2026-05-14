@@ -1531,74 +1531,95 @@ case "list_ecosim_scenarios":
                     stepLog.Add($"Using active dataset (forcing), iDataset={iDataset}");
                 }
 
-                // Import each time series record
-                var importMethod = core.GetType().GetMethod("ImportEcosimTimeSeries",
-                    new[] { core.GetType().Assembly.GetType("EwECore.cTimeSeriesImport"), typeof(int) });
-                if (importMethod == null)
+                // Release batch lock before importing — AddTimeSeries acquires
+                // its own lock internally and nesting would deadlock.
+                var releaseBatchLock = core.GetType().GetMethod("ReleaseBatchLock",
+                    new[] { batchLockType ?? typeof(int), typeof(bool) });
+                if (releaseBatchLock != null && setBatchLockMethod != null)
                 {
-                    // Fallback: try with just object and int
-                    importMethod = core.GetType().GetMethod("ImportEcosimTimeSeries");
-                }
-                stepLog.Add($"ImportEcosimTimeSeries method: {(importMethod != null ? "found" : "NOT FOUND")}, iDataset={iDataset}");
-
-                for (int i = 0; i < tsCount; i++)
-                {
-                    var tsItem = SafeGetPropertyWithIndex(reader, "Item", i);
-                    if (tsItem == null) { numErrors++; continue; }
-
-            try
-            {
-                // Set the interval on each time series record
-                SafeSetProperty(tsItem, "Interval", intervalEnumValue ?? intervalInt);
-
-                bool imported = false;
-                if (importMethod != null)
-                {
-                    imported = Convert.ToBoolean(importMethod.Invoke(core, new object[] { tsItem, iDataset }));
+                    try { releaseBatchLock.Invoke(core, new object[] { restructureLock ?? 1, true }); } catch { }
+                    setBatchLockMethod = null;
                 }
 
-                if (imported)
+                // Load the dataset before importing so ActiveDatasetIndex >= 0.
+                var preloadMethod = core.GetType().GetMethod("LoadTimeSeries",
+                    new[] { typeof(int), typeof(bool) });
+                if (preloadMethod != null)
                 {
-                    // Check if this is a forcing time series
-                    bool isForcing = false;
-                    var tsType = SafeGetProperty(tsItem, "TimeSeriesType");
-                    if (tsType != null && timeSeriesClass != null)
+                    try
                     {
-                        var categoryMethod = timeSeriesClass.GetMethod("Category", new[] { tsType.GetType() });
-                        if (categoryMethod != null)
+                        preloadMethod.Invoke(core, new object[] { 1, false });
+                        stepLog.Add("Preload dataset 1: OK");
+                    }
+                    catch (Exception le) { stepLog.Add($"Preload dataset 1: {le.Message}"); }
+                }
+
+                // Use AddTimeSeries instead of ImportEcosimTimeSeries because
+                // the latter's AddAsTimeSeries path fails when the EcosimTimeSeries
+                // table is empty (MAX(TimeSeriesID) returns DBNull).
+                var addTSMethod = core.GetType().GetMethod("AddTimeSeries",
+                    new[] { typeof(string), typeof(int), typeof(int),
+                            core.GetType().Assembly.GetType("EwECore.eTimeSeriesType"),
+                            typeof(float), typeof(float[]), typeof(int).MakeByRefType() });
+                stepLog.Add($"AddTimeSeries method: {(addTSMethod != null ? "found" : "NOT FOUND")}");
+
+                // Reader has no public Item indexer — iterate via GetEnumerator.
+                var readerEnum = reader.GetType().GetMethod("GetEnumerator")?.Invoke(reader, null);
+                var moveNext = readerEnum?.GetType().GetMethod("MoveNext");
+                var getCurrent = readerEnum?.GetType().GetProperty("Current")?.GetGetMethod();
+                int importIdx = 0;
+                while (moveNext != null && (bool)moveNext.Invoke(readerEnum, null))
+                {
+                    var tsItem = getCurrent?.Invoke(readerEnum, null);
+                    importIdx++;
+                    if (tsItem == null || addTSMethod == null) { numErrors++; continue; }
+
+                    try
+                    {
+                        var name = SafeStringProperty(tsItem, "Name") ?? $"Imported_{importIdx}";
+                        var pool = SafeIntProperty(tsItem, "DatPool");
+                        var poolSec = SafeIntProperty(tsItem, "DatPoolSec");
+                        var tsTypeVal = SafeGetProperty(tsItem, "TimeSeriesType");
+                        var weight = Convert.ToSingle(SafeIntProperty(tsItem, "WtType"));
+                        var nPts = SafeIntProperty(tsItem, "nPoints");
+                        var values = new float[nPts];
+                        for (int vi = 1; vi <= nPts; vi++)
                         {
-                            var cat = categoryMethod.Invoke(null, new object[] { tsType });
-                            if (cat != null && Convert.ToInt32(cat) == 0) // Forcing = 0
-                            {
-                                isForcing = true;
-                            }
+                            var v = SafeGetPropertyWithIndex(tsItem, "ShapeData", vi);
+                            values[vi - 1] = v != null ? Convert.ToSingle(v) : 0f;
+                        }
+                        int newDBID = 0;
+                        object[] addArgs = new object[] { name, pool, poolSec, tsTypeVal, weight, values, newDBID };
+                        bool added = Convert.ToBoolean(addTSMethod.Invoke(core, addArgs));
+                        if (added)
+                        {
+                            numTS++;
+                            stepLog.Add($"AddTimeSeries({importIdx}): OK, dbid={addArgs[6]}");
+                        }
+                        else
+                        {
+                            numErrors++;
+                            stepLog.Add($"AddTimeSeries({importIdx}): returned false");
                         }
                     }
-                    if (isForcing) numForcing++; else numTS++;
-                }
-                else
-                {
-                    numErrors++;
-                }
-            }
-            catch
-            {
-                numErrors++;
-            }
+                    catch (Exception iex)
+                    {
+                        numErrors++;
+                        stepLog.Add($"AddTimeSeries({importIdx}) threw: {iex.InnerException?.Message ?? iex.Message}");
+                    }
                 }
             }
             finally
             {
-                // Release batch lock
-                var releaseMethod = core.GetType().GetMethod("ReleaseBatchLock",
-                    new[] { batchLockType ?? typeof(int), typeof(bool) });
-                if (releaseMethod != null)
+                // Release batch lock (may have been released early before import)
+                if (setBatchLockMethod != null)
                 {
-                    try
+                    var releaseMethod = core.GetType().GetMethod("ReleaseBatchLock",
+                        new[] { batchLockType ?? typeof(int), typeof(bool) });
+                    if (releaseMethod != null)
                     {
-                        releaseMethod.Invoke(core, new object[] { restructureLock ?? 1, numErrors == 0 });
+                        try { releaseMethod.Invoke(core, new object[] { restructureLock ?? 1, numErrors == 0 }); } catch { }
                     }
-                    catch { }
                 }
             }
 
