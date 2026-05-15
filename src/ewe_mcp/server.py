@@ -178,7 +178,9 @@ async def estimate_average_longevity(pb_ratio: float) -> float:
 
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
-async def query_fishbase(genus: str, species: str, tables: list[str] | None = None) -> dict[str, Any]:
+async def query_fishbase(
+    genus: str, species: str, tables: list[str] | None = None
+) -> dict[str, Any]:
     """Query FishBase for fish species trait data (growth, mortality, trophic level, diet).
 
     Queries FishBase via DuckDB against Source Cooperative S3 Parquet files.
@@ -198,7 +200,9 @@ async def query_fishbase(genus: str, species: str, tables: list[str] | None = No
 
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
-async def query_sealifebase(genus: str, species: str, tables: list[str] | None = None) -> dict[str, Any]:
+async def query_sealifebase(
+    genus: str, species: str, tables: list[str] | None = None
+) -> dict[str, Any]:
     """Query SeaLifeBase for non-fish marine species trait data (growth, mortality, trophic level, diet).
 
     Queries SeaLifeBase via DuckDB against Source Cooperative S3 Parquet files.
@@ -219,7 +223,9 @@ async def query_sealifebase(genus: str, species: str, tables: list[str] | None =
 
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
-async def query_globi(taxon_name: str, interaction_type: str = "preysOn") -> dict[str, Any]:
+async def query_globi(
+    taxon_name: str, interaction_type: str = "preysOn"
+) -> dict[str, Any]:
     """Query GLOBI for species interaction data (predator-prey relationships).
 
     Searches the Global Biotic Interactions database for trophic and other
@@ -801,13 +807,17 @@ async def import_time_series(
         series_names = [h.strip() for h in header[1:]]
         n_series = len(series_names)
         if n_series == 0:
-            raise ValueError("Simple CSV must have at least one data column after the year column")
+            raise ValueError(
+                "Simple CSV must have at least one data column after the year column"
+            )
 
         # Pool indices: use provided list or default to sequential
         if pool_indices is None:
             pool_indices = list(range(1, n_series + 1))
         elif len(pool_indices) != n_series:
-            raise ValueError(f"pool_indices length {len(pool_indices)} must match number of series {n_series}")
+            raise ValueError(
+                f"pool_indices length {len(pool_indices)} must match number of series {n_series}"
+            )
 
         # Map import_type to EwE type string or integer code
         _TYPE_MAP: dict[str, str] = {
@@ -824,7 +834,9 @@ async def import_time_series(
         ewe_lines: list[str] = []
         ewe_lines.append(delimiter + delimiter.join(series_names))
         ewe_lines.append("weight" + delimiter + delimiter.join(["1"] * n_series))
-        ewe_lines.append(pool_label + delimiter + delimiter.join(str(p) for p in pool_indices))
+        ewe_lines.append(
+            pool_label + delimiter + delimiter.join(str(p) for p in pool_indices)
+        )
         ewe_lines.append("type" + delimiter + delimiter.join([type_code] * n_series))
         for row in rows[1:]:
             if not any(cell.strip() for cell in row):
@@ -1133,11 +1145,17 @@ async def create_ecospace_mpa(name: str, is_active: bool = True) -> dict[str, An
         name: Name for the new MPA.
         is_active: Whether the MPA is enforced (closed to fishing). Defaults to True.
     """
-    return await _send("create_ecospace_mpa", {"name": name, "is_active": is_active}, timeout=TIMEOUT_LONG)
+    return await _send(
+        "create_ecospace_mpa",
+        {"name": name, "is_active": is_active},
+        timeout=TIMEOUT_LONG,
+    )
 
 
 @mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
-async def set_ecospace_mpa_cells(mpa_index: int, cells: list[list[int]]) -> dict[str, Any]:
+async def set_ecospace_mpa_cells(
+    mpa_index: int, cells: list[list[int]]
+) -> dict[str, Any]:
     """Set MPA cell assignments on the Ecospace basemap.
 
     Each cell is a [row, col] pair (one-based indices). Cells are marked as
@@ -1147,7 +1165,11 @@ async def set_ecospace_mpa_cells(mpa_index: int, cells: list[list[int]]) -> dict
         mpa_index: One-based MPA index.
         cells: List of [row, col] pairs to assign to the MPA.
     """
-    return await _send("set_ecospace_mpa_cells", {"mpa_index": mpa_index, "cells": cells}, timeout=TIMEOUT_LONG)
+    return await _send(
+        "set_ecospace_mpa_cells",
+        {"mpa_index": mpa_index, "cells": cells},
+        timeout=TIMEOUT_LONG,
+    )
 
 
 @mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
@@ -1646,7 +1668,9 @@ async def get_ecopath_fleet_diagnostics() -> dict[str, Any]:
                     ):
                         fg["fishing_mortality"] = catch_val / group_biomass[group_idx]
     except Exception:
-        logger.warning("Failed to enrich fleet diagnostics with fishing mortality", exc_info=True)
+        logger.warning(
+            "Failed to enrich fleet diagnostics with fishing mortality", exc_info=True
+        )
 
     return fleet_diag
 

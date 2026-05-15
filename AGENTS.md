@@ -146,7 +146,7 @@ The MCP server exposes tools backed by the running EwE plugin. Current tools inc
 - **Ecotracer:** `list_ecotracer_scenarios`, `get_ecotracer_scenario`, `load_ecotracer_scenario`, `get_ecotracer_run_state`, `get_ecotracer_model_parameters`, `list_ecotracer_group_inputs`, `get_ecotracer_group_input`, `get_ecotracer_group_results`, `create_ecotracer_scenario`, `copy_ecotracer_scenario`, `delete_ecotracer_scenario`, `save_ecotracer_scenario`, `close_ecotracer_scenario`
 - **MSE:** `get_mse_parameters`, `list_mse_group_inputs`, `get_mse_group_input`, `list_mse_fleet_inputs`, `get_mse_fleet_input`, `get_mse_run_state`, `run_mse`, `stop_mse`, `get_mse_group_results`, `get_mse_fleet_results`
 - **Monte Carlo:** `get_monte_carlo_parameters`, `list_monte_carlo_groups`, `get_monte_carlo_group`, `get_monte_carlo_run_state`, `run_monte_carlo`, `stop_monte_carlo`
-- **Generic entity/value:** `list_domains`, `list_entities`, `get_entity`, `list_variables`, `get_variable_metadata`, `get_values`, `validate_values`, `get_indexed_value`, `validate_indexed_value`, `set_values`, `set_indexed_value`
+- **Generic entity/value:** `list_domains`, `list_entities`, `get_entity`, `list_variables`, `get_variable_metadata`, `get_values`, `validate_values`, `get_indexed_value`, `validate_indexed_value`, `set_values`, `set_indexed_value`, `search_entities`, `get_values_range`, `set_values_range`
 - **Navigation/UI:** `list_navigation_nodes`, `navigate_to_node`, `get_active_view`, `invoke_ui_command`, `list_ui_commands`, `refresh_ui`, `capture_view`, `save_screenshot`
 - **Server control:** `shutdown_server`
 - **Batching:** `batch_commands`
