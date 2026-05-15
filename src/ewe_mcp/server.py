@@ -14,7 +14,7 @@ import pathlib
 from mcp.server.fastmcp import FastMCP
 from mcp.types import ImageContent, TextContent, ToolAnnotations
 
-from ewe_mcp.client import EwEMCPClient, ResponseTooLargeError
+from ewe_mcp.client import EwEMCPClient, EwEMCPError, ResponseTooLargeError
 from ewe_mcp.ecopath import (
     estimate_average_longevity as ecopath_estimate_average_longevity,
     estimate_catch as ecopath_estimate_catch,
@@ -268,6 +268,7 @@ async def get_dialog_events() -> list[dict[str, Any]]:
     try:
         return await asyncio.to_thread(_get_connection().get_dialog_events)
     except Exception:
+        logger.debug("get_dialog_events failed", exc_info=True)
         return []
 
 
@@ -993,8 +994,11 @@ async def list_ecospace_habitats() -> dict[str, Any]:
     warning.
     """
     result = await _send("list_ecospace_habitats")
+    # Normalize the plugin payload to the tool's habitat naming.
+    if isinstance(result, dict) and "habitats" not in result and "entities" in result:
+        result["habitats"] = result.pop("entities")
     # Filter out entities that cannot be resolved
-    if isinstance(result, dict) and "habitats" in result:
+    if isinstance(result, dict) and isinstance(result.get("habitats"), list):
         valid = []
         for h in result["habitats"]:
             is_unavailable = isinstance(h, dict) and (
@@ -1025,8 +1029,8 @@ async def get_ecospace_habitat(index: int) -> dict[str, Any]:
     """
     try:
         return await _send("get_ecospace_habitat", {"index": index})
-    except RuntimeError as exc:
-        if "entity_unavailable" in str(exc).lower():
+    except EwEMCPError as exc:
+        if exc.code == "entity_unavailable":
             raise RuntimeError(
                 f"Ecospace habitat at index {index} could not be resolved. "
                 "This typically happens when the Ecospace scenario was recently "

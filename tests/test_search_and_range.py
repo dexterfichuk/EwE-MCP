@@ -31,7 +31,7 @@ async def test_search_entities_by_name(sample_model_path):
     result = await search_entities(domain="ecopath_groups", name_contains="Snook")
     assert result["match_count"] >= 1
     assert all(
-        "Snook" in e.get("name", "").lower() or "snook" in e.get("name", "")
+        "snook" in e.get("name", "").lower()
         for e in result["results"]
     )
 
@@ -76,7 +76,7 @@ async def test_search_entities_max_results(sample_model_path):
 async def test_search_entities_unknown_domain():
     from ewe_mcp.server import search_entities
 
-    with pytest.raises(Exception, match="unknown_domain"):
+    with pytest.raises(Exception, match="Unknown domain"):
         await search_entities(domain="nonexistent_domain")
 
 
@@ -147,39 +147,39 @@ async def test_set_values_range_restore(sample_model_path):
 
     original = await get_values_range(
         domain="ecopath_groups",
-        variables=["remark"],
+        variables=["name"],
         start_index=1,
         end_index=2,
     )
-    original_remarks = [e["values"].get("remark", "") for e in original["entities"]]
+    original_names = [e["values"].get("name", "") for e in original["entities"]]
 
     try:
         result = await set_values_range(
             domain="ecopath_groups",
-            values={"remark": "TEST_RANGE"},
+            values={"name": "TEST_RANGE"},
             start_index=1,
             end_index=2,
         )
         assert result["entity_count"] == 2
         for e in result["entities"]:
-            assert e["results"]["remark"] == "updated"
+            assert e["results"]["name"] == "updated"
 
         after = await get_values_range(
             domain="ecopath_groups",
-            variables=["remark"],
+            variables=["name"],
             start_index=1,
             end_index=2,
         )
         for e in after["entities"]:
-            assert e["values"]["remark"] == "TEST_RANGE"
+            assert e["values"]["name"] == "TEST_RANGE"
     finally:
-        for i, remark in enumerate(original_remarks, start=1):
+        for i, name in enumerate(original_names, start=1):
             from ewe_mcp.server import set_values
 
-        await set_values(
-            domain="ecopath_groups",
-            index=i,
-            values={"remark": remark if remark else ""},
-            navigate=False,
-        )
+            await set_values(
+                domain="ecopath_groups",
+                index=i,
+                values={"name": name if name else ""},
+                navigate=False,
+            )
         await discard_changes()

@@ -5,13 +5,15 @@ from unittest.mock import patch
 
 import pytest
 
+from ewe_mcp.client import EwEMCPError
+
 
 def test_list_ecospace_habitats_filters_unavailable_nested_error():
     """entity_unavailable habitats with nested error.code should be filtered."""
 
     async def _run():
         mock_result = {
-            "habitats": [
+            "entities": [
                 {"index": 1, "name": "Seagrass"},
                 {
                     "index": 2,
@@ -39,7 +41,7 @@ def test_list_ecospace_habitats_filters_unavailable_flat_status():
 
     async def _run():
         mock_result = {
-            "habitats": [
+            "entities": [
                 {"index": 1, "name": "Seagrass", "status": "available"},
                 {"index": 2, "name": "Unresolved", "status": "entity_unavailable"},
             ]
@@ -61,7 +63,7 @@ def test_list_ecospace_habitats_no_filter_when_all_available():
 
     async def _run():
         mock_result = {
-            "habitats": [
+            "entities": [
                 {"index": 1, "name": "Seagrass"},
                 {"index": 2, "name": "Mangrove"},
             ]
@@ -82,7 +84,7 @@ def test_get_ecospace_habitat_raises_friendly_error_on_unavailable():
 
     async def _run():
         async def mock_send(cmd, params=None):
-            raise RuntimeError("entity_unavailable: Could not resolve ecospace_habitats[1]")
+            raise EwEMCPError("entity_unavailable", "Could not resolve ecospace_habitats[1]")
 
         with patch("ewe_mcp.server._send", side_effect=mock_send):
             import ewe_mcp.server as srv

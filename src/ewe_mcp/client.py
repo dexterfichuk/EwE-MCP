@@ -143,7 +143,7 @@ class EwEMCPClient:
             # If the socket times out, it is poisoned with an unread response.
             # We must disconnect to force a fresh connection on the next call.
             self.disconnect()
-            raise TimeoutError(
+            raise socket.timeout(
                 f"EwE MCP command '{command_type}' timed out after {timeout}s. "
                 "This may indicate EwE is showing a modal dialog. "
                 "Try enabling dialog_watcher_enabled or increasing the timeout."
