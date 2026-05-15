@@ -570,6 +570,8 @@ async def search_entities(
             Only entities where ALL filters match are returned.
         max_results: Maximum number of matching entities to return (default 100).
     """
+    if max_results < 1:
+        raise ValueError("max_results must be a positive integer")
     params: dict[str, Any] = {"domain": domain, "max_results": max_results}
     if name_contains is not None:
         params["name_contains"] = name_contains
@@ -604,6 +606,8 @@ async def get_values_range(
         max_entities: Safety cap on number of entities returned (default 50).
         navigate: Whether to navigate the EwE UI (default False for bulk reads).
     """
+    if max_entities < 1:
+        raise ValueError("max_entities must be a positive integer")
     params: dict[str, Any] = {
         "domain": domain,
         "start_index": start_index,
@@ -641,6 +645,8 @@ async def set_values_range(
         max_entities: Safety cap on number of entities modified (default 50).
         navigate: Whether to navigate the EwE UI (default False for bulk writes).
     """
+    if max_entities < 1:
+        raise ValueError("max_entities must be a positive integer")
     params: dict[str, Any] = {
         "domain": domain,
         "values": values,
@@ -990,12 +996,9 @@ async def list_ecospace_habitats() -> dict[str, Any]:
     if isinstance(result, dict) and "habitats" in result:
         valid = []
         for h in result["habitats"]:
-            is_unavailable = (
-                isinstance(h, dict)
-                and (
-                    h.get("status") == "entity_unavailable"
-                    or h.get("error", {}).get("code") == "entity_unavailable"
-                )
+            is_unavailable = isinstance(h, dict) and (
+                h.get("status") == "entity_unavailable"
+                or h.get("error", {}).get("code") == "entity_unavailable"
             )
             if not is_unavailable:
                 valid.append(h)

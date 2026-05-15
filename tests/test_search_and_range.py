@@ -176,10 +176,10 @@ async def test_set_values_range_restore(sample_model_path):
         for i, remark in enumerate(original_remarks, start=1):
             from ewe_mcp.server import set_values
 
-            await set_values(
-                domain="ecopath_group",
-                index=i,
-                values={"remark": remark if remark else ""},
-                navigate=False,
-            )
+        await set_values(
+            domain="ecopath_groups",
+            index=i,
+            values={"remark": remark if remark else ""},
+            navigate=False,
+        )
         await discard_changes()
