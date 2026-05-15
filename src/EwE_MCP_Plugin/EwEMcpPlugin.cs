@@ -937,7 +937,7 @@ private JObject GetVariableMetadata(JObject parameters)
             var normalized = NormalizeDomain(domain);
             var nameContains = OptionalString(parameters, "name_contains")?.Trim();
             var propertyFilters = parameters["property_filters"] as JObject;
-            var maxResults = OptionalInt(parameters, "max_results") ?? 100;
+            var maxResults = Math.Min(OptionalInt(parameters, "max_results") ?? 100, 500);
 
             var core = RequireCore();
             var count = GetDomainCount(core, normalized);
@@ -1032,67 +1032,68 @@ private JObject GetVariableMetadata(JObject parameters)
             var variables = OptionalStringArray(parameters, "variables");
             var startIndex = OptionalInt(parameters, "start_index") ?? 1;
             var endIndex = OptionalInt(parameters, "end_index");
-            var maxEntities = OptionalInt(parameters, "max_entities") ?? 50;
-            var navigate = OptionalBool(parameters, "navigate", false);
+    var maxEntities = Math.Min(OptionalInt(parameters, "max_entities") ?? 50, 500);
+    var navigate = OptionalBool(parameters, "navigate", false);
 
-            var core = RequireCore();
-            if (normalized == "core")
+    var core = RequireCore();
+    if (normalized == "core")
+    {
+        var target = ResolveEntity("core", null);
+        return new JObject
+        {
+            ["domain"] = normalized,
+            ["entities"] = new JArray
             {
-                var target = ResolveEntity("core", null);
-                return new JObject
+                new JObject
                 {
-                    ["domain"] = normalized,
-                    ["entities"] = new JArray
-                    {
-                        new JObject
-                        {
-                            ["index"] = JValue.CreateNull(),
-                            ["values"] = ReadScalarValues(target.Entity, variables, true, normalized)
-                        }
-                    },
-                    ["entity_count"] = 1,
-                    ["truncated"] = false
-                };
-            }
+                    ["index"] = JValue.CreateNull(),
+                    ["name"] = "core",
+                    ["values"] = ReadScalarValues(target.Entity, variables, true, normalized)
+                }
+            },
+            ["entity_count"] = 1,
+            ["truncated"] = false
+        };
+    }
 
-            var count = GetDomainCount(core, normalized);
-            var effectiveEnd = endIndex ?? count;
-            if (startIndex < 1) startIndex = 1;
-            if (effectiveEnd > count) effectiveEnd = count;
+    var count = GetDomainCount(core, normalized);
+    var effectiveEnd = endIndex ?? count;
+    if (startIndex < 1) startIndex = 1;
+    if (effectiveEnd > count) effectiveEnd = count;
 
-            var results = new JArray();
-            var truncated = false;
-            var entityCount = 0;
+    var results = new JArray();
+    var truncated = false;
+    var entityCount = 0;
 
-            for (var i = startIndex; i <= effectiveEnd; i++)
+    for (var i = startIndex; i <= effectiveEnd; i++)
+    {
+        if (entityCount >= maxEntities)
+        {
+            truncated = true;
+            break;
+        }
+
+        try
+        {
+            var target = ResolveEntity(normalized, i);
+            results.Add(new JObject
             {
-                if (entityCount >= maxEntities)
-                {
-                    truncated = true;
-                    break;
-                }
-
-                try
-                {
-                    var target = ResolveEntity(normalized, i);
-                    results.Add(new JObject
-                    {
-                        ["index"] = i,
-                        ["name"] = SafeStringProperty(target.Entity, "Name") ?? "",
-                        ["values"] = ReadScalarValues(target.Entity, variables, true, normalized)
-                    });
-                    entityCount++;
-                }
-                catch (EwEMcpException)
-                {
-                    results.Add(new JObject
-                    {
-                        ["index"] = i,
-                        ["error"] = "entity_unavailable"
-                    });
-                    entityCount++;
-                }
-            }
+                ["index"] = i,
+                ["name"] = SafeStringProperty(target.Entity, "Name") ?? "",
+                ["values"] = ReadScalarValues(target.Entity, variables, true, normalized)
+            });
+            entityCount++;
+        }
+        catch (EwEMcpException)
+        {
+            results.Add(new JObject
+            {
+                ["index"] = i,
+                ["name"] = "",
+                ["error"] = "entity_unavailable"
+            });
+        }
+    }
 
             return new JObject
             {
@@ -1113,57 +1114,57 @@ private JObject GetVariableMetadata(JObject parameters)
             var values = parameters["values"] as JObject ?? throw new EwEMcpException("missing_parameter", "Missing 'values' object");
             var startIndex = OptionalInt(parameters, "start_index") ?? 1;
             var endIndex = OptionalInt(parameters, "end_index");
-            var maxEntities = OptionalInt(parameters, "max_entities") ?? 50;
-            var navigate = OptionalBool(parameters, "navigate", false);
+    var maxEntities = Math.Min(OptionalInt(parameters, "max_entities") ?? 20, 500);
+    var navigate = OptionalBool(parameters, "navigate", false);
 
-            var core = RequireCore();
-            if (normalized == "core")
+    var core = RequireCore();
+    if (normalized == "core")
+    {
+        var target = ResolveEntity("core", null);
+        var singleResult = SetGenericValues(normalized, target.Entity, null, values);
+        return new JObject
+        {
+            ["domain"] = normalized,
+            ["entities"] = new JArray { singleResult },
+            ["entity_count"] = 1,
+            ["truncated"] = false
+        };
+    }
+
+    var count = GetDomainCount(core, normalized);
+    var effectiveEnd = endIndex ?? count;
+    if (startIndex < 1) startIndex = 1;
+    if (effectiveEnd > count) effectiveEnd = count;
+
+    var results = new JArray();
+    var truncated = false;
+    var entityCount = 0;
+
+    for (var i = startIndex; i <= effectiveEnd; i++)
+    {
+        if (entityCount >= maxEntities)
+        {
+            truncated = true;
+            break;
+        }
+
+        try
+        {
+            var target = ResolveEntity(normalized, i);
+            results.Add(SetGenericValues(normalized, target.Entity, i, values));
+            entityCount++;
+        }
+        catch (EwEMcpException ex)
+        {
+            results.Add(new JObject
             {
-                var target = ResolveEntity("core", null);
-                var singleResult = SetGenericValues(normalized, target.Entity, null, values);
-                return new JObject
-                {
-                    ["domain"] = normalized,
-                    ["entities"] = new JArray { singleResult },
-                    ["entity_count"] = 1,
-                    ["truncated"] = false
-                };
-            }
-
-            var count = GetDomainCount(core, normalized);
-            var effectiveEnd = endIndex ?? count;
-            if (startIndex < 1) startIndex = 1;
-            if (effectiveEnd > count) effectiveEnd = count;
-
-            var results = new JArray();
-            var truncated = false;
-            var entityCount = 0;
-
-            for (var i = startIndex; i <= effectiveEnd; i++)
-            {
-                if (entityCount >= maxEntities)
-                {
-                    truncated = true;
-                    break;
-                }
-
-                try
-                {
-                    var target = ResolveEntity(normalized, i);
-                    results.Add(SetGenericValues(normalized, target.Entity, i, values));
-                    entityCount++;
-                }
-                catch (EwEMcpException ex)
-                {
-                    results.Add(new JObject
-                    {
-                        ["domain"] = normalized,
-                        ["index"] = i,
-                        ["results"] = new JObject { ["_entity_error"] = ex.Code }
-                    });
-                    entityCount++;
-                }
-            }
+                ["domain"] = normalized,
+                ["index"] = i,
+                ["name"] = "",
+                ["results"] = new JObject { ["_entity_error"] = ex.Code }
+            });
+        }
+    }
 
             if (navigate)
             {

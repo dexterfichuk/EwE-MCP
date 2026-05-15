@@ -257,6 +257,7 @@ async def get_dialog_events() -> list[dict[str, Any]]:
     Returns a list of dialog events, each containing:
     - title: dialog window title
     - text: dialog body text (from STATIC controls)
+    - is_risky: whether the dialog contains risky keywords
     - safe_to_dismiss: whether the watcher considered it safe
     - has_ok_button: whether an OK/Yes button was found
     - timestamp_utc: when the dialog was detected
@@ -265,7 +266,7 @@ async def get_dialog_events() -> list[dict[str, Any]]:
     Returns an empty list if no dialogs were detected.
     """
     try:
-        return _get_connection().get_dialog_events()
+        return await asyncio.to_thread(_get_connection().get_dialog_events)
     except Exception:
         return []
 

@@ -168,6 +168,6 @@ class EwEMCPClient:
         """Fetch pending dialog events. Sends a no-op ping to trigger piggyback delivery."""
         try:
             self.send_command("ping", timeout=5)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("get_dialog_events ping failed: %s", exc)
         return self.notifications

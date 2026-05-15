@@ -211,6 +211,7 @@ def test_client_extracts_events_from_response():
         "data": {
             "title": "Warning",
             "text": "Are you sure?",
+            "is_risky": True,
             "safe_to_dismiss": False,
             "has_ok_button": True,
             "timestamp_utc": "2026-05-14T12:00:00.0000000Z",
@@ -246,7 +247,7 @@ def test_client_clear_notifications():
     """clear_notifications should empty the notification queue."""
     dialog_event = {
         "event": "dialog_detected",
-        "data": {"title": "Test", "text": "", "safe_to_dismiss": True, "has_ok_button": True, "timestamp_utc": "2026-05-14T12:00:00.0000000Z"},
+        "data": {"title": "Test", "text": "", "is_risky": False, "safe_to_dismiss": True, "has_ok_button": True, "timestamp_utc": "2026-05-14T12:00:00.0000000Z"},
     }
 
     def handler(request):
@@ -265,5 +266,42 @@ def test_client_clear_notifications():
     client.clear_notifications()
     assert client._notifications == []
     assert client.notifications == []
+    client.disconnect()
+    thread.join(timeout=2)
+
+
+def test_client_extracts_events_from_error_response():
+    """_events should also be extracted from error responses."""
+    dialog_event = {
+        "event": "dialog_detected",
+        "data": {
+            "title": "Warning",
+            "text": "Unsaved changes",
+            "is_risky": True,
+            "safe_to_dismiss": False,
+            "has_ok_button": True,
+            "timestamp_utc": "2026-05-14T12:00:00.0000000Z",
+        },
+    }
+
+    def handler(request):
+        return {
+            "id": request["id"],
+            "status": "error",
+            "error": {"code": "timeout", "message": "Command timed out"},
+            "_events": [dialog_event],
+        }
+
+    port, thread = _serve_once(handler)
+    client = EwEMCPClient(host="127.0.0.1", port=port, token="secret")
+    assert client.connect()
+    with pytest.raises(EwEMCPError) as excinfo:
+        client.command_result("ping")
+    assert excinfo.value.code == "timeout"
+    # Dialog events should still be captured even from error responses
+    notifs = client.notifications
+    assert len(notifs) == 1
+    assert notifs[0]["data"]["title"] == "Warning"
+    assert notifs[0]["data"]["is_risky"] is True
     client.disconnect()
     thread.join(timeout=2)
