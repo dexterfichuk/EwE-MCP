@@ -5149,7 +5149,7 @@ private static object MapPropertyNameToVarNameFlag(string propertyName, Type enu
         return Enum.Parse(enumType, propertyName);
     }
 
-    // Status suffix: "EEInputStatus" → try "EEInput"
+    // Status suffix: "EEInputStatus" -> try "EEInput"
     if (propertyName.EndsWith("Status") && propertyName.Length > 6)
     {
         var baseName = propertyName.Substring(0, propertyName.Length - 6);

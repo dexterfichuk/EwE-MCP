@@ -1,8 +1,11 @@
 import pytest
 
 from ewe_mcp.server import (
+    _AGENT_INSTRUCTIONS,
+    agent_instructions_resource,
     balance_model,
     compare_scenarios,
+    ewe_setup_guide,
     export_report,
     run_ecosim_scenario,
 )
@@ -58,3 +61,27 @@ async def test_export_report_prompt_structure():
         or repr(r"C:\test\model.EwEmdb") in msg["content"]
     )
     assert "export_ecopath_results" in msg["content"]
+
+
+@pytest.mark.asyncio
+async def test_ewe_setup_guide_prompt_structure():
+    """ewe_setup_guide prompt should describe the server and key tools."""
+    result = await ewe_setup_guide()
+    assert isinstance(result, list)
+    assert len(result) >= 1
+    msg = result[0]
+    assert msg["role"] == "user"
+    assert "persistent server session" in msg["content"]
+    assert "load_model" in msg["content"]
+    assert "ping" in msg["content"]
+    assert "execute_ewe_code" in msg["content"]
+
+
+@pytest.mark.asyncio
+async def test_agent_instructions_resource():
+    """agent_instructions resource should return instruction text."""
+    result = await agent_instructions_resource()
+    assert isinstance(result, str)
+    assert "persistent server session" in result
+    assert "load_model" in result
+    assert result == _AGENT_INSTRUCTIONS

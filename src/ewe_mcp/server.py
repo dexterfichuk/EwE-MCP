@@ -110,12 +110,15 @@ async def _send(
     timeout: int = TIMEOUT_DEFAULT,
 ):
     try:
+        logger.info("CMD: %s %s", command_type, params if params else "")
         result = await asyncio.to_thread(_send_sync, command_type, params, timeout)
         if should_filter_sentinels():
             result = filter_sentinels(result)
+        logger.info("OK:  %s", command_type)
         return result
     except Exception as exc:
         hint = error_hint(str(exc))
+        logger.warning("ERR: %s — %s", command_type, exc)
         if hint:
             raise RuntimeError(f"{exc}\n\nHINT: {hint}") from exc
         raise
@@ -1015,7 +1018,7 @@ async def list_ecospace_habitats() -> dict[str, Any]:
                 )
         if len(valid) != len(result["habitats"]):
             result["filtered_count"] = len(result["habitats"]) - len(valid)
-            result["habitats"] = valid
+        result["habitats"] = valid
     return result
 
 
@@ -1940,7 +1943,55 @@ async def ecopath_fleets_resource() -> str:
     return str(await _send("list_ecopath_fleets"))
 
 
+_AGENT_INSTRUCTIONS = (
+    "You are connected to an EwE MCP server. This server bridges an AI agent "
+    "to a live Ecopath with Ecosim (EwE) desktop process for ecosystem modeling.\n\n"
+    "## Connection Model\n"
+    "The MCP protocol requires a persistent server session. The ewe-mcp.exe server "
+    "process must remain running for the duration of the workflow. Do not restart "
+    "it between commands.\n\n"
+    "## Key Tools\n"
+    "- **Model lifecycle**: load_model, save_model, save_model_as, close_model, "
+    "get_model_info, has_changes, discard_changes\n"
+    "- **Ecopath**: run_ecopath, get_ecopath_run_state, get_ecopath_stats, "
+    "get_ecopath_group_diagnostics, get_ecopath_fleet_diagnostics, "
+    "list_ecopath_groups, get_ecopath_group, list_ecopath_fleets, get_ecopath_fleet\n"
+    "- **Ecosim**: list_ecosim_scenarios, load_ecosim_scenario, run_ecosim, "
+    "wait_for_ecosim_completion, get_ecosim_group_results, get_ecosim_fleet_results\n"
+    "- **Ecospace**: list_ecospace_scenarios, load_ecospace_scenario, run_ecospace, "
+    "get_ecospace_group_results, get_ecospace_fleet_results\n"
+    "- **Value access**: get_values, set_values, get_indexed_value, "
+    "set_indexed_value, validate_values (pass navigate=False for background access)\n"
+    "- **Diagnostics**: ping, diagnose, get_ewe_info, get_runtime_state\n\n"
+    "## Safety Rules\n"
+    "- execute_ewe_code and shutdown_server are disabled by default\n"
+    "- Do not batch model lifecycle, simulation run/stop, export/capture, "
+    "or scenario mutation commands\n"
+    "- Use validate_values before set_values\n"
+    "- Prefer save_model_as to a copy path when mutating models\n\n"
+    "## First Steps\n"
+    "1. Call ping to verify connectivity\n"
+    "2. Call diagnose to check server configuration\n"
+    "3. Call load_model with the path to an EwE model file\n"
+    "4. Call list_ecopath_groups to explore the model structure\n"
+    "5. Call run_ecopath to balance the model\n"
+    "6. Proceed to Ecosim or Ecospace scenarios for dynamic simulations"
+)
+
+
+@mcp.resource("ewe://agent_instructions")
+async def agent_instructions_resource() -> str:
+    """How to use this EwE MCP server: persistent session, key tools, safety rules, and first steps."""
+    return _AGENT_INSTRUCTIONS
+
+
 # ── Prompt templates ──────────────────────────────────────────────
+
+
+@mcp.prompt()
+async def ewe_setup_guide() -> list[dict[str, str]]:
+    """Onboarding guide: how to connect to and use this EwE MCP server."""
+    return [{"role": "user", "content": _AGENT_INSTRUCTIONS}]
 
 
 @mcp.prompt()
@@ -2029,6 +2080,12 @@ async def export_report(path: str) -> list[dict[str, str]]:
 
 
 def main() -> None:
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(message)s",
+        datefmt="%H:%M:%S",
+    )
+    logger.info("EwE MCP server starting")
     mcp.run()
 
 
