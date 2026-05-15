@@ -247,6 +247,8 @@ namespace EwE_MCP_Plugin
                     return OnUiThread(GetActiveView);
                 case "load_model":
                     return OnUiThread(() => LoadModel(request.Params));
+                case "create_model":
+                    return OnUiThread(() => CreateModel(request.Params));
                 case "save_model":
                     return OnUiThread(() => SaveModel(request.Params, false));
                 case "save_model_as":
@@ -1531,74 +1533,95 @@ case "list_ecosim_scenarios":
                     stepLog.Add($"Using active dataset (forcing), iDataset={iDataset}");
                 }
 
-                // Import each time series record
-                var importMethod = core.GetType().GetMethod("ImportEcosimTimeSeries",
-                    new[] { core.GetType().Assembly.GetType("EwECore.cTimeSeriesImport"), typeof(int) });
-                if (importMethod == null)
+                // Release batch lock before importing — AddTimeSeries acquires
+                // its own lock internally and nesting would deadlock.
+                var releaseBatchLock = core.GetType().GetMethod("ReleaseBatchLock",
+                    new[] { batchLockType ?? typeof(int), typeof(bool) });
+                if (releaseBatchLock != null && setBatchLockMethod != null)
                 {
-                    // Fallback: try with just object and int
-                    importMethod = core.GetType().GetMethod("ImportEcosimTimeSeries");
-                }
-                stepLog.Add($"ImportEcosimTimeSeries method: {(importMethod != null ? "found" : "NOT FOUND")}, iDataset={iDataset}");
-
-                for (int i = 0; i < tsCount; i++)
-                {
-                    var tsItem = SafeGetPropertyWithIndex(reader, "Item", i);
-                    if (tsItem == null) { numErrors++; continue; }
-
-            try
-            {
-                // Set the interval on each time series record
-                SafeSetProperty(tsItem, "Interval", intervalEnumValue ?? intervalInt);
-
-                bool imported = false;
-                if (importMethod != null)
-                {
-                    imported = Convert.ToBoolean(importMethod.Invoke(core, new object[] { tsItem, iDataset }));
+                    try { releaseBatchLock.Invoke(core, new object[] { restructureLock ?? 1, true }); } catch { }
+                    setBatchLockMethod = null;
                 }
 
-                if (imported)
+                // Load the dataset before importing so ActiveDatasetIndex >= 0.
+                var preloadMethod = core.GetType().GetMethod("LoadTimeSeries",
+                    new[] { typeof(int), typeof(bool) });
+                if (preloadMethod != null)
                 {
-                    // Check if this is a forcing time series
-                    bool isForcing = false;
-                    var tsType = SafeGetProperty(tsItem, "TimeSeriesType");
-                    if (tsType != null && timeSeriesClass != null)
+                    try
                     {
-                        var categoryMethod = timeSeriesClass.GetMethod("Category", new[] { tsType.GetType() });
-                        if (categoryMethod != null)
+                        preloadMethod.Invoke(core, new object[] { 1, false });
+                        stepLog.Add("Preload dataset 1: OK");
+                    }
+                    catch (Exception le) { stepLog.Add($"Preload dataset 1: {le.Message}"); }
+                }
+
+                // Use AddTimeSeries instead of ImportEcosimTimeSeries because
+                // the latter's AddAsTimeSeries path fails when the EcosimTimeSeries
+                // table is empty (MAX(TimeSeriesID) returns DBNull).
+                var addTSMethod = core.GetType().GetMethod("AddTimeSeries",
+                    new[] { typeof(string), typeof(int), typeof(int),
+                            core.GetType().Assembly.GetType("EwECore.eTimeSeriesType"),
+                            typeof(float), typeof(float[]), typeof(int).MakeByRefType() });
+                stepLog.Add($"AddTimeSeries method: {(addTSMethod != null ? "found" : "NOT FOUND")}");
+
+                // Reader has no public Item indexer — iterate via GetEnumerator.
+                var readerEnum = reader.GetType().GetMethod("GetEnumerator")?.Invoke(reader, null);
+                var moveNext = readerEnum?.GetType().GetMethod("MoveNext");
+                var getCurrent = readerEnum?.GetType().GetProperty("Current")?.GetGetMethod();
+                int importIdx = 0;
+                while (moveNext != null && (bool)moveNext.Invoke(readerEnum, null))
+                {
+                    var tsItem = getCurrent?.Invoke(readerEnum, null);
+                    importIdx++;
+                    if (tsItem == null || addTSMethod == null) { numErrors++; continue; }
+
+                    try
+                    {
+                        var name = SafeStringProperty(tsItem, "Name") ?? $"Imported_{importIdx}";
+                        var pool = SafeIntProperty(tsItem, "DatPool");
+                        var poolSec = SafeIntProperty(tsItem, "DatPoolSec");
+                        var tsTypeVal = SafeGetProperty(tsItem, "TimeSeriesType");
+                        var weight = Convert.ToSingle(SafeIntProperty(tsItem, "WtType"));
+                        var nPts = SafeIntProperty(tsItem, "nPoints");
+                        var values = new float[nPts];
+                        for (int vi = 1; vi <= nPts; vi++)
                         {
-                            var cat = categoryMethod.Invoke(null, new object[] { tsType });
-                            if (cat != null && Convert.ToInt32(cat) == 0) // Forcing = 0
-                            {
-                                isForcing = true;
-                            }
+                            var v = SafeGetPropertyWithIndex(tsItem, "ShapeData", vi);
+                            values[vi - 1] = v != null ? Convert.ToSingle(v) : 0f;
+                        }
+                        int newDBID = 0;
+                        object[] addArgs = new object[] { name, pool, poolSec, tsTypeVal, weight, values, newDBID };
+                        bool added = Convert.ToBoolean(addTSMethod.Invoke(core, addArgs));
+                        if (added)
+                        {
+                            numTS++;
+                            stepLog.Add($"AddTimeSeries({importIdx}): OK, dbid={addArgs[6]}");
+                        }
+                        else
+                        {
+                            numErrors++;
+                            stepLog.Add($"AddTimeSeries({importIdx}): returned false");
                         }
                     }
-                    if (isForcing) numForcing++; else numTS++;
-                }
-                else
-                {
-                    numErrors++;
-                }
-            }
-            catch
-            {
-                numErrors++;
-            }
+                    catch (Exception iex)
+                    {
+                        numErrors++;
+                        stepLog.Add($"AddTimeSeries({importIdx}) threw: {iex.InnerException?.Message ?? iex.Message}");
+                    }
                 }
             }
             finally
             {
-                // Release batch lock
-                var releaseMethod = core.GetType().GetMethod("ReleaseBatchLock",
-                    new[] { batchLockType ?? typeof(int), typeof(bool) });
-                if (releaseMethod != null)
+                // Release batch lock (may have been released early before import)
+                if (setBatchLockMethod != null)
                 {
-                    try
+                    var releaseMethod = core.GetType().GetMethod("ReleaseBatchLock",
+                        new[] { batchLockType ?? typeof(int), typeof(bool) });
+                    if (releaseMethod != null)
                     {
-                        releaseMethod.Invoke(core, new object[] { restructureLock ?? 1, numErrors == 0 });
+                        try { releaseMethod.Invoke(core, new object[] { restructureLock ?? 1, numErrors == 0 }); } catch { }
                     }
-                    catch { }
                 }
             }
 
@@ -3836,6 +3859,60 @@ case "list_ecosim_scenarios":
             return string.Empty;
         }
 
+        private JObject CreateModel(JObject parameters)
+        {
+            var core = RequireCore();
+            var path = RequiredString(parameters, "path");
+            var modelName = OptionalString(parameters, "model_name") ??
+                System.IO.Path.GetFileNameWithoutExtension(path);
+            var author = OptionalString(parameters, "author") ?? core.GetType()
+                .GetProperty("DefaultAuthor")?.GetValue(core)?.ToString() ?? "";
+
+            // Create a new Access database via cEwEAccessDatabase.Create
+            // Try several possible type names for cEwEAccessDatabase
+            Type dbType = null;
+            var assembly = core.GetType().Assembly;
+            foreach (var tn in new[] {
+                "EwECore.cEwEAccessDatabase",
+                "EwECore.Database.cEwEAccessDatabase",
+                "EwECore.DataSource.cEwEAccessDatabase",
+                "EwECore.DataSources.cEwEAccessDatabase",
+            })
+            {
+                dbType = assembly.GetType(tn);
+                if (dbType != null) break;
+            }
+            if (dbType == null)
+                throw new EwEMcpException("unsupported_operation", "cEwEAccessDatabase not available in this EwE build");
+
+            object db = Activator.CreateInstance(dbType);
+            // Get the Create method by matching exact parameter types from
+            // the first candidate we find.  The 4th param is eDataSourceTypes.
+            var createMethod = dbType.GetMethods()
+                .FirstOrDefault(m => m.Name == "Create" && m.GetParameters().Length == 5);
+            if (createMethod == null)
+                throw new EwEMcpException("unsupported_operation", "cEwEAccessDatabase.Create method not available");
+            // Use the actual parameter type from the method for the enum
+            var actualDsType = createMethod.GetParameters()[3].ParameterType;
+            object dsType = Enum.ToObject(actualDsType, 3); // eDataSourceTypes.Access2007 = 3
+
+            var result = createMethod.Invoke(db, new object[] { path, modelName, true, dsType, author });
+            // eDatasourceAccessType.Success = 0
+            var successVal = Convert.ToInt32(result);
+            if (successVal != 0)
+                throw new EwEMcpException("create_failed", $"Failed to create model (result={successVal})");
+
+            // Load the newly created model
+            bool loaded = core.LoadModel(path);
+            return new JObject
+            {
+                ["created"] = true,
+                ["loaded"] = loaded,
+                ["path"] = path,
+                ["model_name"] = modelName,
+            };
+        }
+
         private JObject LoadModel(JObject parameters)
         {
             var path = RequiredString(parameters, "path");
@@ -4298,6 +4375,7 @@ case "list_ecosim_scenarios":
             "execute_ewe_code",
             "close_model",
             "load_model",
+            "create_model",
             "save_model",
             "save_model_as",
             "run_ecopath",
@@ -4764,55 +4842,96 @@ case "list_ecosim_scenarios":
             };
         }
 
-        private static string ValidatePropertyValue(object entity, PropertyInfo property, object value)
-        {
-            if (value == null || !IsNumericType(value.GetType())) return null;
+ private static string ValidatePropertyValue(object entity, PropertyInfo property, object value)
+ {
+ if (value == null || !IsNumericType(value.GetType())) return null;
 
-            double numericValue = Convert.ToDouble(value);
+ double numericValue = Convert.ToDouble(value);
 
-            try
-            {
-                var metadata = SafeGetProperty(entity, "Metadata");
-                if (metadata == null) return null;
+ try
+ {
+ var metadata = SafeGetProperty(entity, "Metadata");
+ if (metadata == null) return null;
 
-                var minObj = SafeGetProperty(metadata, "Min");
-                var maxObj = SafeGetProperty(metadata, "Max");
-                if (minObj == null && maxObj == null) return null;
+ var minObj = SafeGetProperty(metadata, "Min");
+ var maxObj = SafeGetProperty(metadata, "Max");
+ if (minObj == null && maxObj == null) return null;
 
-                double min = minObj != null ? Convert.ToDouble(minObj) : double.MinValue;
-                double max = maxObj != null ? Convert.ToDouble(maxObj) : double.MaxValue;
+ double min = minObj != null ? Convert.ToDouble(minObj) : double.MinValue;
+ double max = maxObj != null ? Convert.ToDouble(maxObj) : double.MaxValue;
 
-                if (numericValue < min || numericValue > max)
-                {
-                    return $"Value {numericValue} is outside valid range [{min}, {max}]";
-                }
-            }
-            catch { }
+ // Check MinOperator/MaxOperator for inclusive/exclusive bounds
+ bool minExclusive = IsOperatorExclusive(SafeGetProperty(metadata, "MinOperator"), isMin: true);
+ bool maxExclusive = IsOperatorExclusive(SafeGetProperty(metadata, "MaxOperator"), isMin: false);
 
-            try
-            {
-                var varNameProp = SafeGetProperty(entity, "VariableName");
-                if (varNameProp != null && varNameProp is string varName && !string.IsNullOrEmpty(varName))
-                {
-                    var metadataProp = entity.GetType().GetProperty("VariableMetadata(" + varName + ")");
-                    if (metadataProp == null) return null;
-                    var metadata = metadataProp.GetValue(entity);
-                    if (metadata == null) return null;
-                    var minObj = SafeGetProperty(metadata, "Min");
-                    var maxObj = SafeGetProperty(metadata, "Max");
-                    if (minObj == null && maxObj == null) return null;
-                    double min = minObj != null ? Convert.ToDouble(minObj) : double.MinValue;
-                    double max = maxObj != null ? Convert.ToDouble(maxObj) : double.MaxValue;
-                    if (numericValue < min || numericValue > max)
-                    {
-                        return $"Value {numericValue} is outside valid range [{min}, {max}] for {varName}";
-                    }
-                }
-            }
-            catch { }
+ bool violatesMin = minExclusive ? numericValue <= min : numericValue < min;
+ bool violatesMax = maxExclusive ? numericValue >= max : numericValue > max;
 
-            return null;
-        }
+ if (violatesMin || violatesMax)
+ {
+ string minDesc = minExclusive ? $"> {min}" : $">= {min}";
+ string maxDesc = maxExclusive ? $"< {max}" : $"<= {max}";
+ return $"Value {numericValue} is outside valid range ({minDesc}, {maxDesc})";
+ }
+ }
+ catch { }
+
+ try
+ {
+ var varNameProp = SafeGetProperty(entity, "VariableName");
+ if (varNameProp != null && varNameProp is string varName && !string.IsNullOrEmpty(varName))
+ {
+ var metadataProp = entity.GetType().GetProperty("VariableMetadata(" + varName + ")");
+ if (metadataProp == null) return null;
+ var metadata = metadataProp.GetValue(entity);
+ if (metadata == null) return null;
+ var minObj = SafeGetProperty(metadata, "Min");
+ var maxObj = SafeGetProperty(metadata, "Max");
+ if (minObj == null && maxObj == null) return null;
+ double min = minObj != null ? Convert.ToDouble(minObj) : double.MinValue;
+ double max = maxObj != null ? Convert.ToDouble(maxObj) : double.MaxValue;
+
+ // Check MinOperator/MaxOperator for inclusive/exclusive bounds
+ bool minExclusive = IsOperatorExclusive(SafeGetProperty(metadata, "MinOperator"), isMin: true);
+ bool maxExclusive = IsOperatorExclusive(SafeGetProperty(metadata, "MaxOperator"), isMin: false);
+
+ bool violatesMin = minExclusive ? numericValue <= min : numericValue < min;
+ bool violatesMax = maxExclusive ? numericValue >= max : numericValue > max;
+
+ if (violatesMin || violatesMax)
+ {
+ string minDesc = minExclusive ? $"> {min}" : $">= {min}";
+ string maxDesc = maxExclusive ? $"< {max}" : $"<= {max}";
+ return $"Value {numericValue} is outside valid range ({minDesc}, {maxDesc}) for {varName}";
+ }
+ }
+ }
+ catch { }
+
+ return null;
+ }
+
+ /// <summary>
+ /// Determine if a Min/Max operator is exclusive (strict comparison).
+ /// For MinOperator: GreaterThan (= exclusive, value must be > min)
+ /// For MaxOperator: LessThan (= exclusive, value must be < max)
+ /// Returns true if the operator enforces strict (exclusive) comparison.
+ /// </summary>
+ private static bool IsOperatorExclusive(object operatorObj, bool isMin)
+ {
+ if (operatorObj == null) return true; // Default to exclusive if operator missing
+ var typeName = operatorObj.GetType().Name;
+ if (isMin)
+ {
+ // MinOperator: GreaterThan means exclusive (value > min), GreaterThanOrEqualTo means inclusive (value >= min)
+ return typeName == "cGreaterThan";
+ }
+ else
+ {
+ // MaxOperator: LessThan means exclusive (value < max), LessThanOrEqualTo means inclusive (value <= max)
+ return typeName == "cLessThan";
+ }
+ }
 
         private static bool IsNumericType(Type type)
         {

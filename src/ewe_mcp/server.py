@@ -110,12 +110,15 @@ async def _send(
     timeout: int = TIMEOUT_DEFAULT,
 ):
     try:
+        logger.info("CMD: %s %s", command_type, params if params else "")
         result = await asyncio.to_thread(_send_sync, command_type, params, timeout)
         if should_filter_sentinels():
             result = filter_sentinels(result)
+        logger.info("OK:  %s", command_type)
         return result
     except Exception as exc:
         hint = error_hint(str(exc))
+        logger.warning("ERR: %s — %s", command_type, exc)
         if hint:
             raise RuntimeError(f"{exc}\n\nHINT: {hint}") from exc
         raise
@@ -315,8 +318,43 @@ async def get_active_view() -> dict[str, Any]:
 
 @mcp.tool()
 async def load_model(path: str) -> dict[str, Any]:
-    """Load an EwE model file inside the running EwE instance."""
+    """Load an EwE model file inside the running EwE instance.
+
+    If the load times out, EwE may be showing a modal dialog
+    (e.g., a database conversion prompt). Try restarting EwE
+    with dialog watcher enabled (EWE_MCP_DIALOG_WATCHER=1) or
+    convert the model manually before loading.
+    """
     return await _send("load_model", {"path": path}, timeout=TIMEOUT_LONG)
+
+
+@mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
+async def create_model(
+    path: str,
+    model_name: str | None = None,
+    author: str | None = None,
+) -> dict[str, Any]:
+    """Create a new empty EwE model at the specified path.
+
+    Uses the access database engine to create a blank EwE model with
+    the required schema (one default Detritus group).  After creation
+    the model is automatically loaded in the running EwE instance.
+
+    Args:
+        path: Full path where the .EwEmdb file will be created.
+        model_name: Optional display name (defaults to filename).
+        author: Optional author string (defaults to EwE's current default).
+    """
+    if not path.lower().endswith(".ewemdb"):
+        raise ValueError("path must have a .EwEmdb extension")
+    if ".." in path:
+        raise ValueError("path must not contain directory traversal")
+    params: dict[str, Any] = {"path": path}
+    if model_name is not None:
+        params["model_name"] = model_name
+    if author is not None:
+        params["author"] = author
+    return await _send("create_model", params, timeout=TIMEOUT_LONG)
 
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
@@ -802,14 +840,51 @@ async def get_ecospace_fleet_results(
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
 async def list_ecospace_habitats() -> dict[str, Any]:
-    """List Ecospace habitats in the active scenario."""
-    return await _send("list_ecospace_habitats")
+    """List Ecospace habitats in the active scenario.
+
+    Note: Habitats may not be fully initialized for newly created Ecospace
+    scenarios. Entities that cannot be resolved are filtered out with a
+    warning.
+    """
+    result = await _send("list_ecospace_habitats")
+    # Filter out entities that cannot be resolved
+    if isinstance(result, dict) and "habitats" in result:
+        valid = []
+        for h in result["habitats"]:
+            # Keep entities that don't have an error status
+            if not (isinstance(h, dict) and h.get("status") == "entity_unavailable"):
+                valid.append(h)
+            else:
+                logger.warning(
+                    "Filtered unresolved Ecospace habitat: %s (index %s)",
+                    h.get("name", "unknown"),
+                    h.get("index", "unknown"),
+                )
+        if len(valid) != len(result["habitats"]):
+            result["filtered_count"] = len(result["habitats"]) - len(valid)
+        result["habitats"] = valid
+    return result
 
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
 async def get_ecospace_habitat(index: int) -> dict[str, Any]:
-    """Get one Ecospace habitat by one-based index."""
-    return await _send("get_ecospace_habitat", {"index": index})
+    """Get one Ecospace habitat by one-based index.
+
+    Note: Habitats may not be initialized for newly created Ecospace
+    scenarios. If the habitat data cannot be resolved, a clear error
+    message is returned.
+    """
+    try:
+        return await _send("get_ecospace_habitat", {"index": index})
+    except RuntimeError as exc:
+        if "entity_unavailable" in str(exc).lower():
+            raise RuntimeError(
+                f"Ecospace habitat at index {index} could not be resolved. "
+                "This typically happens when the Ecospace scenario was recently "
+                "created and habitats have not been fully initialized. "
+                "Ensure the scenario has been saved and the basemap is configured."
+            ) from exc
+        raise
 
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
@@ -1320,7 +1395,16 @@ async def get_ecosim_group_results(
     end_time: int | None = None,
     fleet_index: int | None = None,
 ) -> dict[str, Any]:
-    """Read Ecosim group result time-series after a run."""
+    """Read Ecosim group result time-series after a run.
+
+    Known variable names: biomass, biomass_rel, catch, catch_rel,
+    feeding_time, fish_mort, pred_mort, total_mort, tl,
+    consump_biomass, avg_weight, prod_consump, catch_by_fleet,
+    fishing_mort_by_fleet. Additional variables may be available
+    depending on the EwE build. If variables is None, all available
+    variables are returned. Unknown variable names will be rejected
+    by the EwE plugin with a descriptive error.
+    """
     params: dict[str, Any] = {"index": index}
     if variables is not None:
         params["variables"] = variables
@@ -1340,7 +1424,14 @@ async def get_ecosim_fleet_results(
     start_time: int | None = None,
     end_time: int | None = None,
 ) -> dict[str, Any]:
-    """Read Ecosim fleet result time-series after a run."""
+    """Read Ecosim fleet result time-series after a run.
+
+    Known variable names: catch_biomass, value, effort, profit, risk.
+    Additional variables may be available depending on the EwE build.
+    If variables is None, all available variables are returned.
+    Unknown variable names will be rejected by the EwE plugin with
+    a descriptive error.
+    """
     params: dict[str, Any] = {"index": index}
     if variables is not None:
         params["variables"] = variables
@@ -1353,7 +1444,14 @@ async def get_ecosim_fleet_results(
 
 @mcp.tool()
 async def export_ecosim_results(path: str) -> dict[str, Any]:
-    """Export Ecosim model results to a file path on the EwE host."""
+    """Export Ecosim model results to a file path on the EwE host.
+
+    This tool may not be available in all EwE builds. If the C# plugin
+    does not expose dumpEcosimModelResults, an error will be returned
+    indicating the feature is unavailable. As an alternative, use
+    get_ecosim_group_results or get_ecosim_fleet_results to extract
+    individual result time-series.
+    """
     return await _send("export_ecosim_results", {"path": path}, timeout=TIMEOUT_LONG)
 
 
@@ -1387,8 +1485,43 @@ async def get_ecopath_group_diagnostics() -> dict[str, Any]:
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
 async def get_ecopath_fleet_diagnostics() -> dict[str, Any]:
-    """Fetch fleet-level Ecopath catch, landings, and discard breakdowns after an Ecopath run."""
-    return await _send("get_ecopath_fleet_diagnostics")
+    """Fetch fleet-level Ecopath catch, landings, and discard breakdowns after an Ecopath run.
+
+    Also computes fishing mortality (F = catch / biomass) for each fleet/group pair
+    when group biomass is available from Ecopath group diagnostics.
+    """
+    fleet_diag = await _send("get_ecopath_fleet_diagnostics")
+    fleet_diag["status_code_map"] = STATUS_CODE_MAP
+
+    # Enrich with fishing mortality (F = catch / biomass) from group diagnostics
+    try:
+        group_diag = await _send("get_ecopath_group_diagnostics")
+        group_biomass: dict[int, float] = {}
+        for g in group_diag.get("groups", []):
+            gidx = g.get("index")
+            values = g.get("values", {})
+            bio = values.get("Biomass")
+            if gidx is not None and bio is not None and isinstance(bio, (int, float)):
+                group_biomass[gidx] = float(bio)
+
+        if group_biomass and "fleets" in fleet_diag:
+            for fleet in fleet_diag["fleets"]:
+                groups = fleet.get("groups", [])
+                for fg in groups:
+                    group_idx = fg.get("group_index")
+                    catch_val = fg.get("catch_total")
+                    if (
+                        group_idx is not None
+                        and group_idx in group_biomass
+                        and catch_val is not None
+                        and isinstance(catch_val, (int, float))
+                        and group_biomass[group_idx] > 0
+                    ):
+                        fg["fishing_mortality"] = catch_val / group_biomass[group_idx]
+    except Exception:
+        logger.warning("Failed to enrich fleet diagnostics with fishing mortality", exc_info=True)
+
+    return fleet_diag
 
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
@@ -1463,8 +1596,6 @@ async def capture_view(
         params["max_height"] = max_height
 
     result = await _send("capture_view", params, timeout=TIMEOUT_LONG)
-
-    image_data = base64.b64decode(result["data"])
 
     # Build metadata summary (everything except the raw data).
     meta = {key: value for key, value in result.items() if key != "data"}
@@ -1645,7 +1776,55 @@ async def ecopath_fleets_resource() -> str:
     return str(await _send("list_ecopath_fleets"))
 
 
+_AGENT_INSTRUCTIONS = (
+    "You are connected to an EwE MCP server. This server bridges an AI agent "
+    "to a live Ecopath with Ecosim (EwE) desktop process for ecosystem modeling.\n\n"
+    "## Connection Model\n"
+    "The MCP protocol requires a persistent server session. The ewe-mcp.exe server "
+    "process must remain running for the duration of the workflow. Do not restart "
+    "it between commands.\n\n"
+    "## Key Tools\n"
+    "- **Model lifecycle**: load_model, save_model, save_model_as, close_model, "
+    "get_model_info, has_changes, discard_changes\n"
+    "- **Ecopath**: run_ecopath, get_ecopath_run_state, get_ecopath_stats, "
+    "get_ecopath_group_diagnostics, get_ecopath_fleet_diagnostics, "
+    "list_ecopath_groups, get_ecopath_group, list_ecopath_fleets, get_ecopath_fleet\n"
+    "- **Ecosim**: list_ecosim_scenarios, load_ecosim_scenario, run_ecosim, "
+    "wait_for_ecosim_completion, get_ecosim_group_results, get_ecosim_fleet_results\n"
+    "- **Ecospace**: list_ecospace_scenarios, load_ecospace_scenario, run_ecospace, "
+    "get_ecospace_group_results, get_ecospace_fleet_results\n"
+    "- **Value access**: get_values, set_values, get_indexed_value, "
+    "set_indexed_value, validate_values (pass navigate=False for background access)\n"
+    "- **Diagnostics**: ping, diagnose, get_ewe_info, get_runtime_state\n\n"
+    "## Safety Rules\n"
+    "- execute_ewe_code and shutdown_server are disabled by default\n"
+    "- Do not batch model lifecycle, simulation run/stop, export/capture, "
+    "or scenario mutation commands\n"
+    "- Use validate_values before set_values\n"
+    "- Prefer save_model_as to a copy path when mutating models\n\n"
+    "## First Steps\n"
+    "1. Call ping to verify connectivity\n"
+    "2. Call diagnose to check server configuration\n"
+    "3. Call load_model with the path to an EwE model file\n"
+    "4. Call list_ecopath_groups to explore the model structure\n"
+    "5. Call run_ecopath to balance the model\n"
+    "6. Proceed to Ecosim or Ecospace scenarios for dynamic simulations"
+)
+
+
+@mcp.resource("ewe://agent_instructions")
+async def agent_instructions_resource() -> str:
+    """How to use this EwE MCP server: persistent session, key tools, safety rules, and first steps."""
+    return _AGENT_INSTRUCTIONS
+
+
 # ── Prompt templates ──────────────────────────────────────────────
+
+
+@mcp.prompt()
+async def ewe_setup_guide() -> list[dict[str, str]]:
+    """Onboarding guide: how to connect to and use this EwE MCP server."""
+    return [{"role": "user", "content": _AGENT_INSTRUCTIONS}]
 
 
 @mcp.prompt()
@@ -1734,6 +1913,12 @@ async def export_report(path: str) -> list[dict[str, str]]:
 
 
 def main() -> None:
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(message)s",
+        datefmt="%H:%M:%S",
+    )
+    logger.info("EwE MCP server starting")
     mcp.run()
 
 

@@ -4,10 +4,8 @@ import pytest
 from ewe_mcp.client import EwEMCPError
 from ewe_mcp.server import (
     set_values,
-    get_ecopath_group,
     batch_commands,
     load_model,
-    get_model_info,
     _send,
 )
 from ewe_mcp.helpers import BATCH_BLOCKED_COMMANDS

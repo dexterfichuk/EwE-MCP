@@ -1,6 +1,3 @@
-import os
-import pytest
-from ewe_mcp.client import EwEMCPClient
 
 
 def test_model_metadata_and_save_workflow(live_client, sample_model_path):

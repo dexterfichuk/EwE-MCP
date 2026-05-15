@@ -1,6 +1,5 @@
 """Unit tests for Ecospace spatial, MPA, and region tools."""
 
-import asyncio
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -174,8 +173,8 @@ async def test_create_regions_from_mpas_with_count_zero():
         "mpas_processed": 0,
     }
     with patch("ewe_mcp.server._send", new_callable=AsyncMock, return_value=expected) as mock_send:
-        result = await create_regions_from_mpas(region_count=0)
-    mock_send.assert_called_once_with(
+        await create_regions_from_mpas(region_count=0)
+        mock_send.assert_called_once_with(
         "create_regions_from_mpas",
         {"region_count": 0},
         timeout=120,

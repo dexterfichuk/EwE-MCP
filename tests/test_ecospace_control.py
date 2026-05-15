@@ -1,7 +1,6 @@
 import os
 import time
 import pytest
-from ewe_mcp.client import EwEMCPError
 from ewe_mcp.helpers import BATCH_BLOCKED_COMMANDS
 
 live = pytest.mark.skipif(
@@ -127,7 +126,7 @@ def test_ecospace_run_to_completion_with_results(live_client, spatial_model_path
 
         assert state["has_ecospace_ran"] is True
 
-        groups = live_client.command_result(
+        _groups = live_client.command_result(
             "list_entities", {"domain": "ecospace_group_inputs"}
         )
         first_group_index = 1

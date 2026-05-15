@@ -48,6 +48,7 @@ BATCH_BLOCKED_COMMANDS = frozenset(
         "execute_ewe_code",
         "close_model",
         "load_model",
+        "create_model",
         "save_model",
         "save_model_as",
         "run_ecopath",
@@ -131,6 +132,24 @@ def error_hint(message: str) -> str | None:
         return "EwE rejected this value as out of range. Use validate_values first and check EwE's range constraints for the specific variable."
     if "'data'" in lower and "keyerror" in lower:
         return "A modal dialog may be blocking the EwE GUI. Try enabling dialog_watcher_enabled in the plugin config, or dismiss the dialog manually on the Windows VM."
+    if "dumpecosimmodelresults" in lower or "export_ecosim_results" in lower and "not available" in lower:
+        return "The EwE build does not support dumpEcosimModelResults. Use get_ecosim_group_results or get_ecosim_fleet_results to extract results instead."
+    if "timed out" in lower or "timeout" in lower:
+        return (
+            "Model load timed out. This can happen when EwE shows a modal dialog "
+            "(e.g., database conversion prompt). Try: "
+            "(1) restart EwE with dialog watcher enabled (EWE_MCP_DIALOG_WATCHER=1), "
+            "(2) check if the model requires manual conversion first, "
+            "(3) increase the timeout with TIMEOUT_LONG or a custom timeout value."
+        )
+    if "connection closed" in lower or "broken pipe" in lower or "reset" in lower:
+        return (
+            "The EwE plugin connection was corrupted. Recovery steps: "
+            "(1) Verify EwE is still running on the Windows VM, "
+            "(2) Check the plugin log at %APPDATA%\\Ecopath with Ecosim\\EwE_MCP_Plugin.log, "
+            "(3) Restart EwE with ./scripts/launch-ewe-vm.sh, "
+            "(4) Re-establish the SSH tunnel with ./scripts/vm-live-smoke.sh."
+        )
     return None
 
 
@@ -186,6 +205,15 @@ def filter_sentinels(value: Any) -> Any:
 # 4-tuple: (min_val, max_val, min_exclusive, max_exclusive)
 # min_exclusive=True means value must be > min_val (not >=)
 # max_exclusive=True means value must be < max_val (not <=)
+# Known variable names for Ecosim/Ecospace result tools (documentation only;
+# not used for runtime validation — the C# plugin rejects unknown names).
+ECOSIM_GROUP_RESULT_VARS = (
+    "biomass", "biomass_rel", "catch", "catch_rel", "feeding_time",
+    "fish_mort", "pred_mort", "total_mort", "tl", "consump_biomass",
+    "avg_weight", "prod_consump", "catch_by_fleet", "fishing_mort_by_fleet",
+)
+ECOSIM_FLEET_RESULT_VARS = ("catch_biomass", "value", "effort", "profit", "risk")
+
 EWE_RANGE_CONSTRAINTS: dict[str, dict[str, tuple[float, float, bool, bool]]] = {
     "ecosim_group_inputs": {
         # (min, max, min_exclusive, max_exclusive)
