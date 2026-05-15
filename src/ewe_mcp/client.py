@@ -45,6 +45,7 @@ class EwEMCPClient:
         self.token = token or get_token()
         self.socket: socket.socket | None = None
         self._current_timeout: int | float | None = None
+        self._notifications: list[dict[str, Any]] = []
 
     def connect(self) -> bool:
         try:
@@ -63,6 +64,16 @@ class EwEMCPClient:
             self.socket.close()
             self.socket = None
             self._current_timeout = None
+
+    @property
+    def notifications(self) -> list[dict[str, Any]]:
+        """Return pending dialog/event notifications and clear the queue."""
+        result = list(self._notifications)
+        self._notifications.clear()
+        return result
+
+    def clear_notifications(self) -> None:
+        self._notifications.clear()
 
     def _set_timeout(self, timeout: int | float | None) -> None:
         if self.socket is None:
@@ -124,7 +135,10 @@ class EwEMCPClient:
                     command_type,
                 )
             self._set_timeout(None)
-            return json.loads(data.decode("utf-8"))
+            response = json.loads(data.decode("utf-8"))
+            if "_events" in response:
+                self._notifications.extend(response.pop("_events"))
+            return response
         except socket.timeout:
             # If the socket times out, it is poisoned with an unread response.
             # We must disconnect to force a fresh connection on the next call.
@@ -149,3 +163,11 @@ class EwEMCPClient:
                 error.get("message") or "EwE MCP command failed",
             )
         return response.get("result") or {}
+
+    def get_dialog_events(self) -> list[dict[str, Any]]:
+        """Fetch pending dialog events. Sends a no-op ping to trigger piggyback delivery."""
+        try:
+            self.send_command("ping", timeout=5)
+        except Exception:
+            pass
+        return self.notifications

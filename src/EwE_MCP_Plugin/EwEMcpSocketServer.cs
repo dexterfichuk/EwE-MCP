@@ -227,14 +227,28 @@ namespace EwE_MCP_Plugin
                     {
                         try
                         {
-                            var result = _router.Dispatch(request);
-                            _auditLog.Add(request.Type, "success", request.Params?.ToString(Formatting.None));
-                            tcs.TrySetResult(new JObject
+                var result = _router.Dispatch(request);
+                        _auditLog.Add(request.Type, "success", request.Params?.ToString(Formatting.None));
+
+                        var responseObj = new JObject
+                        {
+                            ["id"] = request.Id,
+                            ["status"] = "success",
+                            ["result"] = result ?? new JObject()
+                        };
+
+                        // Piggyback pending dialog events onto the response
+                        if (!_pendingDialogEvents.IsEmpty)
+                        {
+                            var events = new JArray();
+                            while (_pendingDialogEvents.TryDequeue(out var evt))
                             {
-                                ["id"] = request.Id,
-                                ["status"] = "success",
-                                ["result"] = result ?? new JObject()
-                            });
+                                events.Add(evt);
+                            }
+                            responseObj["_events"] = events;
+                        }
+
+                        tcs.TrySetResult(responseObj);
                         }
                         catch (Exception ex)
                         {
