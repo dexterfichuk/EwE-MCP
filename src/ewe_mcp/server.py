@@ -14,7 +14,7 @@ import pathlib
 from mcp.server.fastmcp import FastMCP
 from mcp.types import ImageContent, TextContent, ToolAnnotations
 
-from ewe_mcp.client import EwEMCPClient, ResponseTooLargeError
+from ewe_mcp.client import EwEMCPClient, EwEMCPError, ResponseTooLargeError
 from ewe_mcp.ecopath import (
     estimate_average_longevity as ecopath_estimate_average_longevity,
     estimate_catch as ecopath_estimate_catch,
@@ -181,7 +181,9 @@ async def estimate_average_longevity(pb_ratio: float) -> float:
 
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
-async def query_fishbase(genus: str, species: str, tables: list[str] | None = None) -> dict[str, Any]:
+async def query_fishbase(
+    genus: str, species: str, tables: list[str] | None = None
+) -> dict[str, Any]:
     """Query FishBase for fish species trait data (growth, mortality, trophic level, diet).
 
     Queries FishBase via DuckDB against Source Cooperative S3 Parquet files.
@@ -201,7 +203,9 @@ async def query_fishbase(genus: str, species: str, tables: list[str] | None = No
 
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
-async def query_sealifebase(genus: str, species: str, tables: list[str] | None = None) -> dict[str, Any]:
+async def query_sealifebase(
+    genus: str, species: str, tables: list[str] | None = None
+) -> dict[str, Any]:
     """Query SeaLifeBase for non-fish marine species trait data (growth, mortality, trophic level, diet).
 
     Queries SeaLifeBase via DuckDB against Source Cooperative S3 Parquet files.
@@ -222,7 +226,9 @@ async def query_sealifebase(genus: str, species: str, tables: list[str] | None =
 
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
-async def query_globi(taxon_name: str, interaction_type: str = "preysOn") -> dict[str, Any]:
+async def query_globi(
+    taxon_name: str, interaction_type: str = "preysOn"
+) -> dict[str, Any]:
     """Query GLOBI for species interaction data (predator-prey relationships).
 
     Searches the Global Biotic Interactions database for trophic and other
@@ -245,6 +251,28 @@ async def query_globi(taxon_name: str, interaction_type: str = "preysOn") -> dic
 async def ping() -> dict[str, Any]:
     """Check connectivity to the EwE plugin."""
     return await _send("ping")
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+async def get_dialog_events() -> list[dict[str, Any]]:
+    """Fetch recent dialog events captured by the EwE dialog watcher.
+
+    Returns a list of dialog events, each containing:
+    - title: dialog window title
+    - text: dialog body text (from STATIC controls)
+    - is_risky: whether the dialog contains risky keywords
+    - safe_to_dismiss: whether the watcher considered it safe
+    - has_ok_button: whether an OK/Yes button was found
+    - timestamp_utc: when the dialog was detected
+
+    Sends a ping to trigger piggyback delivery from the plugin.
+    Returns an empty list if no dialogs were detected.
+    """
+    try:
+        return await asyncio.to_thread(_get_connection().get_dialog_events)
+    except Exception:
+        logger.debug("get_dialog_events failed", exc_info=True)
+        return []
 
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
@@ -524,6 +552,122 @@ async def validate_indexed_value(
 
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+async def search_entities(
+    domain: str,
+    name_contains: str | None = None,
+    property_filters: dict[str, str] | None = None,
+    max_results: int = 100,
+) -> dict[str, Any]:
+    """Search entities in an EwE domain by name substring and/or property value filters.
+
+    Avoids iterating all entities client-side. Returns matching entity indices,
+    names, and optionally the filtered property values. Use this instead of
+    list_entities + client-side filtering when you need to find specific rows
+    on a screen (e.g., groups containing "Snook", fleets with a given
+    effort_conversion_factor).
+
+    Args:
+        domain: EwE entity domain (e.g. "ecopath_groups", "ecopath_fleets",
+            "ecosim_group_inputs", "taxa").
+        name_contains: Case-insensitive substring to match against entity Name.
+        property_filters: Dict of {variable_name: value_substring} for
+            case-insensitive substring matching on scalar properties.
+            Only entities where ALL filters match are returned.
+        max_results: Maximum number of matching entities to return (default 100).
+    """
+    if max_results < 1:
+        raise ValueError("max_results must be a positive integer")
+    params: dict[str, Any] = {"domain": domain, "max_results": max_results}
+    if name_contains is not None:
+        params["name_contains"] = name_contains
+    if property_filters is not None:
+        params["property_filters"] = property_filters
+    result = await _send("search_entities", params)
+    result["domain"] = normalize_domain_name(result.get("domain", domain))
+    return result
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+async def get_values_range(
+    domain: str,
+    variables: list[str] | None = None,
+    start_index: int = 1,
+    end_index: int | None = None,
+    max_entities: int = 50,
+    navigate: bool = False,
+) -> dict[str, Any]:
+    """Read values from a range of entities in an EwE domain in one round-trip.
+
+    More efficient than calling get_values N times for contiguous indices.
+    Returns entity index, name, and requested variable values for each entity
+    in the range [start_index, end_index].
+
+    Args:
+        domain: EwE entity domain (e.g. "ecopath_groups", "ecosim_group_inputs").
+        variables: Optional list of variable names to read. If omitted, reads all
+            scalar properties (same as get_values with no variables).
+        start_index: First 1-based entity index (default 1).
+        end_index: Last 1-based entity index. If omitted, reads to end of domain.
+        max_entities: Safety cap on number of entities returned (default 50).
+        navigate: Whether to navigate the EwE UI (default False for bulk reads).
+    """
+    if max_entities < 1:
+        raise ValueError("max_entities must be a positive integer")
+    params: dict[str, Any] = {
+        "domain": domain,
+        "start_index": start_index,
+        "max_entities": max_entities,
+        "navigate": navigate,
+    }
+    if end_index is not None:
+        params["end_index"] = end_index
+    if variables is not None:
+        params["variables"] = variables
+    result = await _send("get_values_range", params)
+    result["domain"] = normalize_domain_name(result.get("domain", domain))
+    return result
+
+
+@mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
+async def set_values_range(
+    domain: str,
+    values: dict[str, Any],
+    start_index: int = 1,
+    end_index: int | None = None,
+    max_entities: int = 50,
+    navigate: bool = False,
+) -> dict[str, Any]:
+    """Set the same values on a range of entities in an EwE domain in one round-trip.
+
+    Applies the same value dict to every entity in the range [start_index, end_index].
+    More efficient than calling set_values N times for bulk updates.
+
+    Args:
+        domain: EwE entity domain (e.g. "ecopath_groups", "ecosim_group_inputs").
+        values: Dict of {variable_name: value} to set on each entity.
+        start_index: First 1-based entity index (default 1).
+        end_index: Last 1-based entity index. If omitted, sets on all entities.
+        max_entities: Safety cap on number of entities modified (default 50).
+        navigate: Whether to navigate the EwE UI (default False for bulk writes).
+    """
+    if max_entities < 1:
+        raise ValueError("max_entities must be a positive integer")
+    params: dict[str, Any] = {
+        "domain": domain,
+        "values": values,
+        "start_index": start_index,
+        "max_entities": max_entities,
+        "navigate": navigate,
+    }
+    if end_index is not None:
+        params["end_index"] = end_index
+    result = await _send("set_values_range", params, timeout=TIMEOUT_LONG)
+    result["domain"] = normalize_domain_name(result.get("domain", domain))
+    await refresh_ui()
+    return result
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
 async def list_ecopath_groups() -> dict[str, Any]:
     """List Ecopath functional groups with key read-only input/output values."""
     return await _send("list_ecopath_groups")
@@ -674,13 +818,17 @@ async def import_time_series(
         series_names = [h.strip() for h in header[1:]]
         n_series = len(series_names)
         if n_series == 0:
-            raise ValueError("Simple CSV must have at least one data column after the year column")
+            raise ValueError(
+                "Simple CSV must have at least one data column after the year column"
+            )
 
         # Pool indices: use provided list or default to sequential
         if pool_indices is None:
             pool_indices = list(range(1, n_series + 1))
         elif len(pool_indices) != n_series:
-            raise ValueError(f"pool_indices length {len(pool_indices)} must match number of series {n_series}")
+            raise ValueError(
+                f"pool_indices length {len(pool_indices)} must match number of series {n_series}"
+            )
 
         # Map import_type to EwE type string or integer code
         _TYPE_MAP: dict[str, str] = {
@@ -697,7 +845,9 @@ async def import_time_series(
         ewe_lines: list[str] = []
         ewe_lines.append(delimiter + delimiter.join(series_names))
         ewe_lines.append("weight" + delimiter + delimiter.join(["1"] * n_series))
-        ewe_lines.append(pool_label + delimiter + delimiter.join(str(p) for p in pool_indices))
+        ewe_lines.append(
+            pool_label + delimiter + delimiter.join(str(p) for p in pool_indices)
+        )
         ewe_lines.append("type" + delimiter + delimiter.join([type_code] * n_series))
         for row in rows[1:]:
             if not any(cell.strip() for cell in row):
@@ -847,12 +997,18 @@ async def list_ecospace_habitats() -> dict[str, Any]:
     warning.
     """
     result = await _send("list_ecospace_habitats")
+    # Normalize the plugin payload to the tool's habitat naming.
+    if isinstance(result, dict) and "habitats" not in result and "entities" in result:
+        result["habitats"] = result.pop("entities")
     # Filter out entities that cannot be resolved
-    if isinstance(result, dict) and "habitats" in result:
+    if isinstance(result, dict) and isinstance(result.get("habitats"), list):
         valid = []
         for h in result["habitats"]:
-            # Keep entities that don't have an error status
-            if not (isinstance(h, dict) and h.get("status") == "entity_unavailable"):
+            is_unavailable = isinstance(h, dict) and (
+                h.get("status") == "entity_unavailable"
+                or h.get("error", {}).get("code") == "entity_unavailable"
+            )
+            if not is_unavailable:
                 valid.append(h)
             else:
                 logger.warning(
@@ -876,8 +1032,8 @@ async def get_ecospace_habitat(index: int) -> dict[str, Any]:
     """
     try:
         return await _send("get_ecospace_habitat", {"index": index})
-    except RuntimeError as exc:
-        if "entity_unavailable" in str(exc).lower():
+    except EwEMCPError as exc:
+        if exc.code == "entity_unavailable":
             raise RuntimeError(
                 f"Ecospace habitat at index {index} could not be resolved. "
                 "This typically happens when the Ecospace scenario was recently "
@@ -1006,11 +1162,17 @@ async def create_ecospace_mpa(name: str, is_active: bool = True) -> dict[str, An
         name: Name for the new MPA.
         is_active: Whether the MPA is enforced (closed to fishing). Defaults to True.
     """
-    return await _send("create_ecospace_mpa", {"name": name, "is_active": is_active}, timeout=TIMEOUT_LONG)
+    return await _send(
+        "create_ecospace_mpa",
+        {"name": name, "is_active": is_active},
+        timeout=TIMEOUT_LONG,
+    )
 
 
 @mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
-async def set_ecospace_mpa_cells(mpa_index: int, cells: list[list[int]]) -> dict[str, Any]:
+async def set_ecospace_mpa_cells(
+    mpa_index: int, cells: list[list[int]]
+) -> dict[str, Any]:
     """Set MPA cell assignments on the Ecospace basemap.
 
     Each cell is a [row, col] pair (one-based indices). Cells are marked as
@@ -1020,7 +1182,11 @@ async def set_ecospace_mpa_cells(mpa_index: int, cells: list[list[int]]) -> dict
         mpa_index: One-based MPA index.
         cells: List of [row, col] pairs to assign to the MPA.
     """
-    return await _send("set_ecospace_mpa_cells", {"mpa_index": mpa_index, "cells": cells}, timeout=TIMEOUT_LONG)
+    return await _send(
+        "set_ecospace_mpa_cells",
+        {"mpa_index": mpa_index, "cells": cells},
+        timeout=TIMEOUT_LONG,
+    )
 
 
 @mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
@@ -1506,8 +1672,7 @@ async def get_ecopath_fleet_diagnostics() -> dict[str, Any]:
 
         if group_biomass and "fleets" in fleet_diag:
             for fleet in fleet_diag["fleets"]:
-                groups = fleet.get("groups", [])
-                for fg in groups:
+                for fg in fleet.get("catch_by_group", []):
                     group_idx = fg.get("group_index")
                     catch_val = fg.get("catch_total")
                     if (
@@ -1519,7 +1684,9 @@ async def get_ecopath_fleet_diagnostics() -> dict[str, Any]:
                     ):
                         fg["fishing_mortality"] = catch_val / group_biomass[group_idx]
     except Exception:
-        logger.warning("Failed to enrich fleet diagnostics with fishing mortality", exc_info=True)
+        logger.warning(
+            "Failed to enrich fleet diagnostics with fishing mortality", exc_info=True
+        )
 
     return fleet_diag
 

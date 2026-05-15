@@ -48,6 +48,8 @@ Response-size guard: plugin and Python defaults are aligned at 10 MB. The C# plu
 
 Dialog watcher: set `EWE_MCP_DIALOG_WATCHER=1` or add `dialog_watcher_enabled=true` to the config file to enable the in-plugin dialog watcher that auto-dismisses blocking modal dialogs. Disabled by default; prefer leaving it off unless a supervised workflow explicitly needs it. Extend the dialog-opening command denylist with `EWE_MCP_DIALOG_BLOCKED_COMMANDS=cmd1,cmd2` or `dialog_blocked_commands=cmd1,cmd2` in the config file. `ImportTimeSeries` and `m_cmdImportTimeSeries` are blocked by default through `dialog_command_blocked`.
 
+**Dialog Events:** When the in-plugin dialog watcher is enabled (`dialog_watcher_enabled=true` or `EWE_MCP_DIALOG_WATCHER=1`), the plugin captures modal dialog title + body text, classifies it as safe or risky, and delivers it as `_events` on the next command response. Safe informational dialogs (OK-only, no destructive keywords) are auto-dismissed; risky dialogs (Yes/No, destructive actions) are reported but not dismissed. Use `get_dialog_events` to fetch pending events, or check `_events` in any command response.
+
 If you are working from a separate worktree whose directory name is not `EwE-MCP`, either use scripts that derive the remote root from the worktree name or set:
 
 ```bash
@@ -136,7 +138,7 @@ uv run ewe-mcp
 
 The MCP server exposes tools backed by the running EwE plugin. Current tools include:
 
-- **Diagnostics:** `ping`, `diagnose`, `get_ewe_info`, `get_runtime_state`, `get_message_log`, `get_core_counters`, `get_installed_plugins`, `export_active_plot`
+- **Diagnostics:** `ping`, `diagnose`, `get_ewe_info`, `get_runtime_state`, `get_message_log`, `get_core_counters`, `get_installed_plugins`, `export_active_plot`, `get_dialog_events`
 - **Model lifecycle:** `load_model`, `save_model`, `save_model_as`, `close_model`, `get_model_info`, `has_changes`, `discard_changes`
 - **Ecopath:** `run_ecopath`, `get_ecopath_run_state`, `get_ecopath_stats`, `get_ecopath_group_diagnostics`, `get_ecopath_fleet_diagnostics`, `export_ecopath_results`, `list_ecopath_groups`, `get_ecopath_group`, `list_ecopath_fleets`, `get_ecopath_fleet`. Ecopath run state uses `StateMonitor.HasEcopathRan` + `IsModelBalanced`; `ecopath_detail` exposes the raw internal `RunState` for diagnostics.
 - **Ecosim:** `list_ecosim_scenarios`, `get_ecosim_scenario`, `load_ecosim_scenario`, `create_ecosim_scenario`, `copy_ecosim_scenario`, `delete_ecosim_scenario`, `save_ecosim_scenario`, `get_ecosim_run_state`, `wait_for_ecosim_completion`, `run_ecosim`, `stop_ecosim`, `list_ecosim_group_inputs`, `get_ecosim_group_input`, `list_ecosim_fleet_inputs`, `get_ecosim_fleet_input`, `get_ecosim_group_results`, `get_ecosim_fleet_results`, `export_ecosim_results`
@@ -144,7 +146,7 @@ The MCP server exposes tools backed by the running EwE plugin. Current tools inc
 - **Ecotracer:** `list_ecotracer_scenarios`, `get_ecotracer_scenario`, `load_ecotracer_scenario`, `get_ecotracer_run_state`, `get_ecotracer_model_parameters`, `list_ecotracer_group_inputs`, `get_ecotracer_group_input`, `get_ecotracer_group_results`, `create_ecotracer_scenario`, `copy_ecotracer_scenario`, `delete_ecotracer_scenario`, `save_ecotracer_scenario`, `close_ecotracer_scenario`
 - **MSE:** `get_mse_parameters`, `list_mse_group_inputs`, `get_mse_group_input`, `list_mse_fleet_inputs`, `get_mse_fleet_input`, `get_mse_run_state`, `run_mse`, `stop_mse`, `get_mse_group_results`, `get_mse_fleet_results`
 - **Monte Carlo:** `get_monte_carlo_parameters`, `list_monte_carlo_groups`, `get_monte_carlo_group`, `get_monte_carlo_run_state`, `run_monte_carlo`, `stop_monte_carlo`
-- **Generic entity/value:** `list_domains`, `list_entities`, `get_entity`, `list_variables`, `get_variable_metadata`, `get_values`, `validate_values`, `get_indexed_value`, `validate_indexed_value`, `set_values`, `set_indexed_value`
+- **Generic entity/value:** `list_domains`, `list_entities`, `get_entity`, `list_variables`, `get_variable_metadata`, `get_values`, `validate_values`, `get_indexed_value`, `validate_indexed_value`, `set_values`, `set_indexed_value`, `search_entities`, `get_values_range`, `set_values_range`
 - **Navigation/UI:** `list_navigation_nodes`, `navigate_to_node`, `get_active_view`, `invoke_ui_command`, `list_ui_commands`, `refresh_ui`, `capture_view`, `save_screenshot`
 - **Server control:** `shutdown_server`
 - **Batching:** `batch_commands`

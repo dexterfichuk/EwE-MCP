@@ -202,3 +202,106 @@ def test_client_recovers_after_timeout():
     assert client.command_result("fast") == {"fast": True}
 
     client.disconnect()
+
+
+def test_client_extracts_events_from_response():
+    """_events should be stripped from the response and moved to _notifications."""
+    dialog_event = {
+        "event": "dialog_detected",
+        "data": {
+            "title": "Warning",
+            "text": "Are you sure?",
+            "is_risky": True,
+            "safe_to_dismiss": False,
+            "has_ok_button": True,
+            "timestamp_utc": "2026-05-14T12:00:00.0000000Z",
+        },
+    }
+
+    def handler(request):
+        return {
+            "id": request["id"],
+            "status": "success",
+            "result": {"pong": True},
+            "_events": [dialog_event],
+        }
+
+    port, thread = _serve_once(handler)
+    client = EwEMCPClient(host="127.0.0.1", port=port, token="secret")
+    assert client.connect()
+    result = client.command_result("ping")
+    # The _events should be stripped from the result
+    assert result == {"pong": True}
+    # But available via notifications
+    notifs = client.notifications
+    assert len(notifs) == 1
+    assert notifs[0]["event"] == "dialog_detected"
+    assert notifs[0]["data"]["title"] == "Warning"
+    # After reading, notifications should be empty
+    assert client.notifications == []
+    client.disconnect()
+    thread.join(timeout=2)
+
+
+def test_client_clear_notifications():
+    """clear_notifications should empty the notification queue."""
+    dialog_event = {
+        "event": "dialog_detected",
+        "data": {"title": "Test", "text": "", "is_risky": False, "safe_to_dismiss": True, "has_ok_button": True, "timestamp_utc": "2026-05-14T12:00:00.0000000Z"},
+    }
+
+    def handler(request):
+        return {
+            "id": request["id"],
+            "status": "success",
+            "result": {},
+            "_events": [dialog_event],
+        }
+
+    port, thread = _serve_once(handler)
+    client = EwEMCPClient(host="127.0.0.1", port=port, token="secret")
+    assert client.connect()
+    client.command_result("ping")
+    assert len(client._notifications) == 1
+    client.clear_notifications()
+    assert client._notifications == []
+    assert client.notifications == []
+    client.disconnect()
+    thread.join(timeout=2)
+
+
+def test_client_extracts_events_from_error_response():
+    """_events should also be extracted from error responses."""
+    dialog_event = {
+        "event": "dialog_detected",
+        "data": {
+            "title": "Warning",
+            "text": "Unsaved changes",
+            "is_risky": True,
+            "safe_to_dismiss": False,
+            "has_ok_button": True,
+            "timestamp_utc": "2026-05-14T12:00:00.0000000Z",
+        },
+    }
+
+    def handler(request):
+        return {
+            "id": request["id"],
+            "status": "error",
+            "error": {"code": "timeout", "message": "Command timed out"},
+            "_events": [dialog_event],
+        }
+
+    port, thread = _serve_once(handler)
+    client = EwEMCPClient(host="127.0.0.1", port=port, token="secret")
+    assert client.connect()
+    with pytest.raises(EwEMCPError) as excinfo:
+        client.command_result("ping")
+    assert excinfo.value.code == "timeout"
+    # Dialog events should still be captured even from error responses
+    notifs = client.notifications
+    assert len(notifs) == 1
+    assert notifs[0]["data"]["title"] == "Warning"
+    assert notifs[0]["data"]["is_risky"] is True
+    client.disconnect()
+    thread.join(timeout=2)

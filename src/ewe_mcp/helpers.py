@@ -87,6 +87,7 @@ BATCH_BLOCKED_COMMANDS = frozenset(
         "shutdown_server",
         "invoke_ui_command",
         "import_time_series",
+        "set_values_range",
     }
 )
 
@@ -132,7 +133,9 @@ def error_hint(message: str) -> str | None:
         return "EwE rejected this value as out of range. Use validate_values first and check EwE's range constraints for the specific variable."
     if "'data'" in lower and "keyerror" in lower:
         return "A modal dialog may be blocking the EwE GUI. Try enabling dialog_watcher_enabled in the plugin config, or dismiss the dialog manually on the Windows VM."
-    if "dumpecosimmodelresults" in lower or "export_ecosim_results" in lower and "not available" in lower:
+    if (
+        "dumpecosimmodelresults" in lower or "export_ecosim_results" in lower
+    ) and "not available" in lower:
         return "The EwE build does not support dumpEcosimModelResults. Use get_ecosim_group_results or get_ecosim_fleet_results to extract results instead."
     if "timed out" in lower or "timeout" in lower:
         return (
@@ -191,7 +194,11 @@ def should_filter_sentinels() -> bool:
 
 
 def filter_sentinels(value: Any) -> Any:
-    if isinstance(value, (int, float)) and not isinstance(value, bool) and value in _SENTINEL_VALUES:
+    if (
+        isinstance(value, (int, float))
+        and not isinstance(value, bool)
+        and value in _SENTINEL_VALUES
+    ):
         return None
     if isinstance(value, dict):
         return {k: filter_sentinels(v) for k, v in value.items()}
@@ -208,9 +215,20 @@ def filter_sentinels(value: Any) -> Any:
 # Known variable names for Ecosim/Ecospace result tools (documentation only;
 # not used for runtime validation — the C# plugin rejects unknown names).
 ECOSIM_GROUP_RESULT_VARS = (
-    "biomass", "biomass_rel", "catch", "catch_rel", "feeding_time",
-    "fish_mort", "pred_mort", "total_mort", "tl", "consump_biomass",
-    "avg_weight", "prod_consump", "catch_by_fleet", "fishing_mort_by_fleet",
+    "biomass",
+    "biomass_rel",
+    "catch",
+    "catch_rel",
+    "feeding_time",
+    "fish_mort",
+    "pred_mort",
+    "total_mort",
+    "tl",
+    "consump_biomass",
+    "avg_weight",
+    "prod_consump",
+    "catch_by_fleet",
+    "fishing_mort_by_fleet",
 )
 ECOSIM_FLEET_RESULT_VARS = ("catch_biomass", "value", "effort", "profit", "risk")
 
