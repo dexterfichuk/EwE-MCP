@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.Net;
@@ -22,6 +23,9 @@ namespace EwE_MCP_Plugin
         private Task _acceptLoop;
         private CancellationTokenSource _dialogWatcherCts;
         private Task _dialogWatcherLoop;
+        // Concurrent queue of captured dialog events for piggyback delivery
+        private readonly ConcurrentQueue<JObject> _pendingDialogEvents = new ConcurrentQueue<JObject>();
+
         private int _currentPid;
 
         [DllImport("user32.dll")]
@@ -53,6 +57,12 @@ namespace EwE_MCP_Plugin
 
         [DllImport("user32.dll")]
         private static extern int GetDlgCtrlID(IntPtr hWnd);
+
+        [DllImport("user32.dll")]
+        private static extern bool EnumChildWindows(IntPtr hWnd, EnumWindowsProc lpEnumFunc, IntPtr lParam);
+
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+        private static extern int GetWindowTextLength(IntPtr hWnd);
 
         private delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
 
@@ -406,7 +416,7 @@ namespace EwE_MCP_Plugin
                 try
                 {
                     await Task.Delay(2000, token).ConfigureAwait(false);
-                    var dismissed = DismissBlockingDialogs(_currentPid);
+                    var dismissed = CaptureAndDismissDialogs(_currentPid);
                     if (dismissed > 0)
                     {
                         _auditLog.Add("dialog_watcher", "dismissed", $"{dismissed} blocking dialog(s) auto-dismissed");
@@ -423,29 +433,50 @@ namespace EwE_MCP_Plugin
             }
         }
 
+        /// <summary>Capture the body text from a dialog's STATIC child controls.</summary>
+        private static string CaptureDialogText(IntPtr hWnd)
+        {
+            var textBuilder = new StringBuilder(4096);
+            EnumChildWindows(hWnd, (child, _) =>
+            {
+                var className = new StringBuilder(256);
+                GetClassName(child, className, className.Capacity);
+                if (string.Equals(className.ToString(), "Static", StringComparison.OrdinalIgnoreCase))
+                {
+                    var len = GetWindowTextLength(child);
+                    if (len > 0)
+                    {
+                        var buf = new StringBuilder(len + 1);
+                        GetWindowText(child, buf, buf.Capacity);
+                        var t = buf.ToString().Trim();
+                        if (!string.IsNullOrEmpty(t))
+                        {
+                            if (textBuilder.Length > 0)
+                                textBuilder.Append(" | ");
+                            textBuilder.Append(t);
+                        }
+                    }
+                }
+                return true;
+            }, IntPtr.Zero);
+            return textBuilder.ToString().Trim();
+        }
+
         // BM_CLICK via SendMessageTimeout marshals to the dialog's UI thread. The timeout
         // and PostMessage fallback keep the watcher from hanging if a dialog stops pumping.
-        private static int DismissBlockingDialogs(int currentPid)
+        private int CaptureAndDismissDialogs(int currentPid)
         {
             var dismissed = 0;
+            var events = new List<JObject>();
+
             EnumWindows((hWnd, _) =>
             {
                 GetWindowThreadProcessId(hWnd, out var pid);
-                if (pid != currentPid)
-                {
-                    return true;
-                }
-
-                if (!IsWindowVisible(hWnd))
-                {
-                    return true;
-                }
+                if (pid != currentPid) return true;
+                if (!IsWindowVisible(hWnd)) return true;
 
                 var owner = GetWindow(hWnd, GW_OWNER);
-                if (owner == IntPtr.Zero)
-                {
-                    return true;
-                }
+                if (owner == IntPtr.Zero) return true;
 
                 var className = new StringBuilder(256);
                 GetClassName(hWnd, className, className.Capacity);
@@ -456,55 +487,144 @@ namespace EwE_MCP_Plugin
                 var titleText = title.ToString();
                 var displayTitle = string.IsNullOrEmpty(titleText) ? "(untitled)" : titleText;
 
+                var bodyText = CaptureDialogText(hWnd);
+                var safeToDismiss = !IsRiskyDialog(displayTitle, bodyText);
+
+                // Check if there's an OK/Yes button we could click
+                bool hasOkButton = false;
                 if (cls == "#32770")
                 {
                     var btn = FindWindowEx(hWnd, IntPtr.Zero, "Button", null);
-                    var clicked = false;
                     while (btn != IntPtr.Zero)
                     {
                         var btnId = GetDlgCtrlID(btn);
                         if (btnId == IDYES || btnId == IDOK)
                         {
-                            ClickDialogButton(btn, $"Win32 dialog '{displayTitle}' (class #32770, button ID {btnId})");
-                            clicked = true;
-                            dismissed++;
+                            hasOkButton = true;
                             break;
                         }
                         btn = FindWindowEx(hWnd, btn, "Button", null);
                     }
-                    if (!clicked)
+                }
+                else
+                {
+                    hasOkButton = TryFindYesOrOkButton(hWnd, new HashSet<IntPtr>());
+                }
+
+                // Build the dialog event
+                var evt = new JObject
+                {
+                    ["event"] = "dialog_detected",
+                    ["data"] = new JObject
                     {
-                        EwEMcpFileLog.Warn($"Dialog watcher found Win32 dialog '{displayTitle}' (class #32770) with no OK/Yes button - leaving it alone");
+                        ["title"] = displayTitle,
+                        ["text"] = bodyText,
+                        ["safe_to_dismiss"] = safeToDismiss && hasOkButton,
+                        ["has_ok_button"] = hasOkButton,
+                        ["timestamp_utc"] = DateTime.UtcNow.ToString("o")
+                    }
+                };
+                events.Add(evt);
+
+                // Only auto-dismiss if safe
+                if (safeToDismiss && hasOkButton)
+                {
+                    if (cls == "#32770")
+                    {
+                        var btn = FindWindowEx(hWnd, IntPtr.Zero, "Button", null);
+                        while (btn != IntPtr.Zero)
+                        {
+                            var btnId = GetDlgCtrlID(btn);
+                            if (btnId == IDYES || btnId == IDOK)
+                            {
+                                ClickDialogButton(btn, $"Win32 dialog '{displayTitle}' (class #32770, button ID {btnId})");
+                                dismissed++;
+                                break;
+                            }
+                            btn = FindWindowEx(hWnd, btn, "Button", null);
+                        }
+                    }
+                    else
+                    {
+                        var clicked = TryFindAndClickButton(hWnd, new HashSet<IntPtr>(), out var foundText);
+                        if (clicked)
+                        {
+                            EwEMcpFileLog.Info($"Dialog watcher clicked '{foundText}' on WinForms modal '{displayTitle}' (class {cls})");
+                            dismissed++;
+                        }
+                        else if (IsSafeToDismiss(displayTitle))
+                        {
+                            PostMessage(hWnd, WM_KEYDOWN, (IntPtr)VK_RETURN, IntPtr.Zero);
+                            Task.Delay(100).Wait();
+                            PostMessage(hWnd, WM_COMMAND, (IntPtr)IDYES, IntPtr.Zero);
+                            Task.Delay(100).Wait();
+                            PostMessage(hWnd, WM_COMMAND, (IntPtr)IDOK, IntPtr.Zero);
+                            EwEMcpFileLog.Info($"Dialog watcher sent Enter/Yes/OK to known-safe dialog '{displayTitle}'");
+                            dismissed++;
+                        }
                     }
                 }
                 else
                 {
-                    var clicked = TryFindAndClickButton(hWnd, new HashSet<IntPtr>(), out var foundText);
-                    if (clicked)
-                    {
-                        EwEMcpFileLog.Info($"Dialog watcher clicked '{foundText}' on WinForms modal '{displayTitle}' (class {cls})");
-                        dismissed++;
-                    }
-                    else if (IsSafeToDismiss(displayTitle))
-                    {
-                        // Known-safe dialog type that we can safely dismiss
-                        PostMessage(hWnd, WM_KEYDOWN, (IntPtr)VK_RETURN, IntPtr.Zero);
-                        Task.Delay(100).Wait();
-                        PostMessage(hWnd, WM_COMMAND, (IntPtr)IDYES, IntPtr.Zero);
-                        Task.Delay(100).Wait();
-                        PostMessage(hWnd, WM_COMMAND, (IntPtr)IDOK, IntPtr.Zero);
-                        EwEMcpFileLog.Info($"Dialog watcher sent Enter/Yes/OK to known-safe dialog '{displayTitle}'");
-                        dismissed++;
-                    }
-                    else
-                    {
-                        EwEMcpFileLog.Warn($"Dialog watcher found WinForms modal '{displayTitle}' (class {cls}) with no clickable button — leaving it alone");
-                    }
+                    EwEMcpFileLog.Warn($"Dialog watcher found dialog '{displayTitle}' — NOT auto-dismissing (safe={safeToDismiss}, hasOk={hasOkButton}). Text: {bodyText}");
                 }
 
                 return true;
             }, IntPtr.Zero);
+
+            // Queue all captured events
+            foreach (var evt in events)
+            {
+                _pendingDialogEvents.Enqueue(evt);
+                _auditLog.Add("dialog_watcher", "captured", evt["data"]?.ToString(Formatting.None) ?? "unknown");
+            }
+
             return dismissed;
+        }
+
+        private static readonly string[] _riskyTextPatterns = new[]
+        {
+            "delete", "remove", "overwrite", "replace", "discard",
+            "are you sure", "confirm", "warning", "unsaved",
+            "save changes", "do you want to save"
+        };
+
+        private static bool IsRiskyDialog(string title, string text)
+        {
+            var combined = (title + " " + text).ToLowerInvariant();
+            foreach (var pattern in _riskyTextPatterns)
+            {
+                if (combined.Contains(pattern))
+                    return true;
+            }
+            return false;
+        }
+
+        private static bool TryFindYesOrOkButton(IntPtr parent, HashSet<IntPtr> visited)
+        {
+            var child = FindWindowEx(parent, IntPtr.Zero, null, null);
+            while (child != IntPtr.Zero)
+            {
+                if (!visited.Add(child))
+                {
+                    child = FindWindowEx(parent, child, null, null);
+                    continue;
+                }
+                var bt = new StringBuilder(256);
+                GetWindowText(child, bt, bt.Capacity);
+                var text = bt.ToString().Trim();
+                if (string.Equals(text, "Yes", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(text, "&Yes", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(text, "OK", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(text, "&OK", StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+                if (TryFindYesOrOkButton(child, visited))
+                    return true;
+                child = FindWindowEx(parent, child, null, null);
+            }
+            return false;
         }
 
         private static readonly HashSet<string> _safeDialogTitles = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
