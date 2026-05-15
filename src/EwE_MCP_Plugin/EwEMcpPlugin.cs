@@ -884,7 +884,7 @@ case "list_ecosim_scenarios":
 
             foreach (var property in GetReadableProperties(target.Entity))
             {
-                variables.Add(PropertyMetadata(property, target.NormalizedDomain));
+                variables.Add(PropertyMetadata(property, target.NormalizedDomain, target.Entity));
             }
 
             return new JObject
@@ -896,19 +896,19 @@ case "list_ecosim_scenarios":
             };
         }
 
-        private JObject GetVariableMetadata(JObject parameters)
-        {
-            var domain = RequiredString(parameters, "domain");
-            var variable = RequiredString(parameters, "variable");
-            int? index = OptionalInt(parameters, "index");
-            var target = ResolveEntity(domain, index);
-            var property = FindReadableProperty(target.Entity, variable, target.NormalizedDomain);
-            if (property == null)
-            {
-                throw new EwEMcpException("unknown_variable", $"Variable not found: {variable}");
-            }
-            return PropertyMetadata(property, target.NormalizedDomain);
-        }
+private JObject GetVariableMetadata(JObject parameters)
+{
+    var domain = RequiredString(parameters, "domain");
+    var variable = RequiredString(parameters, "variable");
+    int? index = OptionalInt(parameters, "index");
+    var target = ResolveEntity(domain, index);
+    var property = FindReadableProperty(target.Entity, variable, target.NormalizedDomain);
+    if (property == null)
+    {
+        throw new EwEMcpException("unknown_variable", $"Variable not found: {variable}");
+    }
+    return PropertyMetadata(property, target.NormalizedDomain, target.Entity);
+}
 
         private JObject GetValues(JObject parameters)
         {
@@ -5103,74 +5103,72 @@ case "list_ecosim_scenarios":
             };
         }
 
- private static string ValidatePropertyValue(object entity, PropertyInfo property, object value)
- {
- if (value == null || !IsNumericType(value.GetType())) return null;
+private static string ValidatePropertyValue(object entity, PropertyInfo property, object value)
+{
+    if (value == null || !IsNumericType(value.GetType())) return null;
 
- double numericValue = Convert.ToDouble(value);
+    double numericValue = Convert.ToDouble(value);
+    var metadata = ResolveVariableMetadata(entity, property);
+    if (metadata == null) return null;
 
- try
- {
- var metadata = SafeGetProperty(entity, "Metadata");
- if (metadata == null) return null;
+    var minObj = SafeGetProperty(metadata, "Min");
+    var maxObj = SafeGetProperty(metadata, "Max");
+    if (minObj == null && maxObj == null) return null;
 
- var minObj = SafeGetProperty(metadata, "Min");
- var maxObj = SafeGetProperty(metadata, "Max");
- if (minObj == null && maxObj == null) return null;
+    double min = minObj != null ? Convert.ToDouble(minObj) : double.MinValue;
+    double max = maxObj != null ? Convert.ToDouble(maxObj) : double.MaxValue;
 
- double min = minObj != null ? Convert.ToDouble(minObj) : double.MinValue;
- double max = maxObj != null ? Convert.ToDouble(maxObj) : double.MaxValue;
+    bool minExclusive = IsOperatorExclusive(SafeGetProperty(metadata, "MinOperator"), isMin: true);
+    bool maxExclusive = IsOperatorExclusive(SafeGetProperty(metadata, "MaxOperator"), isMin: false);
 
- // Check MinOperator/MaxOperator for inclusive/exclusive bounds
- bool minExclusive = IsOperatorExclusive(SafeGetProperty(metadata, "MinOperator"), isMin: true);
- bool maxExclusive = IsOperatorExclusive(SafeGetProperty(metadata, "MaxOperator"), isMin: false);
+    bool violatesMin = minExclusive ? numericValue <= min : numericValue < min;
+    bool violatesMax = maxExclusive ? numericValue >= max : numericValue > max;
 
- bool violatesMin = minExclusive ? numericValue <= min : numericValue < min;
- bool violatesMax = maxExclusive ? numericValue >= max : numericValue > max;
+    if (violatesMin || violatesMax)
+    {
+        string minDesc = minExclusive ? $"> {min}" : $">= {min}";
+        string maxDesc = maxExclusive ? $"< {max}" : $"<= {max}";
+        return $"Value {numericValue} is outside valid range ({minDesc}, {maxDesc})";
+    }
 
- if (violatesMin || violatesMax)
- {
- string minDesc = minExclusive ? $"> {min}" : $">= {min}";
- string maxDesc = maxExclusive ? $"< {max}" : $"<= {max}";
- return $"Value {numericValue} is outside valid range ({minDesc}, {maxDesc})";
- }
- }
- catch { }
+    return null;
+}
 
- try
- {
- var varNameProp = SafeGetProperty(entity, "VariableName");
- if (varNameProp != null && varNameProp is string varName && !string.IsNullOrEmpty(varName))
- {
- var metadataProp = entity.GetType().GetProperty("VariableMetadata(" + varName + ")");
- if (metadataProp == null) return null;
- var metadata = metadataProp.GetValue(entity);
- if (metadata == null) return null;
- var minObj = SafeGetProperty(metadata, "Min");
- var maxObj = SafeGetProperty(metadata, "Max");
- if (minObj == null && maxObj == null) return null;
- double min = minObj != null ? Convert.ToDouble(minObj) : double.MinValue;
- double max = maxObj != null ? Convert.ToDouble(maxObj) : double.MaxValue;
+/// <summary>
+/// Map a C# property name (e.g. "EEInput", "DenDepCatchability") to an
+/// eVarNameFlags enum value by matching the property name against enum member names.
+/// </summary>
+private static object MapPropertyNameToVarNameFlag(string propertyName, Type enumType)
+{
+    if (string.IsNullOrEmpty(propertyName) || enumType == null || !enumType.IsEnum) return null;
 
- // Check MinOperator/MaxOperator for inclusive/exclusive bounds
- bool minExclusive = IsOperatorExclusive(SafeGetProperty(metadata, "MinOperator"), isMin: true);
- bool maxExclusive = IsOperatorExclusive(SafeGetProperty(metadata, "MaxOperator"), isMin: false);
+    // Direct match: property name == enum member name
+    if (Enum.IsDefined(enumType, propertyName))
+    {
+        return Enum.Parse(enumType, propertyName);
+    }
 
- bool violatesMin = minExclusive ? numericValue <= min : numericValue < min;
- bool violatesMax = maxExclusive ? numericValue >= max : numericValue > max;
+    // Status suffix: "EEInputStatus" → try "EEInput"
+    if (propertyName.EndsWith("Status") && propertyName.Length > 6)
+    {
+        var baseName = propertyName.Substring(0, propertyName.Length - 6);
+        if (Enum.IsDefined(enumType, baseName))
+        {
+            return Enum.Parse(enumType, baseName);
+        }
+    }
 
- if (violatesMin || violatesMax)
- {
- string minDesc = minExclusive ? $"> {min}" : $">= {min}";
- string maxDesc = maxExclusive ? $"< {max}" : $"<= {max}";
- return $"Value {numericValue} is outside valid range ({minDesc}, {maxDesc}) for {varName}";
- }
- }
- }
- catch { }
+    // Try case-insensitive match
+    foreach (var name in Enum.GetNames(enumType))
+    {
+        if (string.Equals(name, propertyName, StringComparison.OrdinalIgnoreCase))
+        {
+            return Enum.Parse(enumType, name);
+        }
+    }
 
- return null;
- }
+    return null;
+}
 
  /// <summary>
  /// Determine if a Min/Max operator is exclusive (strict comparison).
@@ -5522,21 +5520,123 @@ case "list_ecosim_scenarios":
                 .ThenBy(p => p.GetIndexParameters().Length);
         }
 
-        private static JObject PropertyMetadata(PropertyInfo property, string domain)
+private static JObject PropertyMetadata(PropertyInfo property, string domain, object entity = null)
+{
+    var indexParameters = property.GetIndexParameters();
+    var result = new JObject
+    {
+        ["name"] = ToVariableName(property.Name),
+        ["property"] = property.Name,
+        ["domain"] = domain ?? string.Empty,
+        ["type"] = FriendlyTypeName(property.PropertyType),
+        ["readable"] = property.CanRead,
+        ["writable"] = property.CanWrite,
+        ["indexed"] = indexParameters.Length > 0,
+        ["index_count"] = indexParameters.Length
+    };
+
+    // Enrich with range metadata if available
+    if (entity != null && IsNumericType(property.PropertyType))
+    {
+        try
         {
-            var indexParameters = property.GetIndexParameters();
-            return new JObject
+            object metadata = ResolveVariableMetadata(entity, property);
+            if (metadata != null)
             {
-                ["name"] = ToVariableName(property.Name),
-                ["property"] = property.Name,
-                ["domain"] = domain ?? string.Empty,
-                ["type"] = FriendlyTypeName(property.PropertyType),
-                ["readable"] = property.CanRead,
-                ["writable"] = property.CanWrite,
-                ["indexed"] = indexParameters.Length > 0,
-                ["index_count"] = indexParameters.Length
-            };
+                var minObj = SafeGetProperty(metadata, "Min");
+                var maxObj = SafeGetProperty(metadata, "Max");
+                if (minObj != null) result["min"] = Convert.ToDouble(minObj);
+                if (maxObj != null) result["max"] = Convert.ToDouble(maxObj);
+                var minOp = SafeGetProperty(metadata, "MinOperator");
+                var maxOp = SafeGetProperty(metadata, "MaxOperator");
+                if (minOp != null) result["min_operator"] = minOp.GetType().Name;
+                if (maxOp != null) result["max_operator"] = maxOp.GetType().Name;
+            }
         }
+        catch { }
+    }
+
+    return result;
+}
+
+/// <summary>
+/// Resolve variable metadata from an EwE entity by trying entity.Metadata,
+/// GetVariableMetadata(eVarNameFlags), and the static cVariableMetaData repository.
+/// </summary>
+private static object ResolveVariableMetadata(object entity, PropertyInfo property)
+{
+    // Path 1: entity.Metadata
+    try
+    {
+        var metadata = SafeGetProperty(entity, "Metadata");
+        if (metadata != null)
+        {
+            var minObj = SafeGetProperty(metadata, "Min");
+            var maxObj = SafeGetProperty(metadata, "Max");
+            if (minObj != null || maxObj != null) return metadata;
+        }
+    }
+    catch { }
+
+    // Path 2: GetVariableMetadata(eVarNameFlags) via reflection
+    try
+    {
+        var getMetaMethod = entity.GetType().GetMethod("GetVariableMetadata");
+        if (getMetaMethod != null)
+        {
+            var parameters = getMetaMethod.GetParameters();
+            if (parameters.Length == 1)
+            {
+                var enumType = parameters[0].ParameterType;
+                var enumValue = MapPropertyNameToVarNameFlag(property.Name, enumType);
+                if (enumValue != null)
+                {
+                    var metadata = getMetaMethod.Invoke(entity, new object[] { enumValue });
+                    if (metadata != null) return metadata;
+                }
+            }
+        }
+    }
+    catch { }
+
+    // Path 3: Static cVariableMetaData.Get(eVarNameFlags) repository
+    try
+    {
+        var getMetaMethod = entity.GetType().GetMethod("GetVariableMetadata");
+        if (getMetaMethod != null)
+        {
+            var parameters = getMetaMethod.GetParameters();
+            if (parameters.Length == 1)
+            {
+                var enumType = parameters[0].ParameterType;
+                var enumValue = MapPropertyNameToVarNameFlag(property.Name, enumType);
+                if (enumValue != null)
+                {
+                    foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
+                    {
+                        try
+                        {
+                            var staticMetaType = asm.GetType("EwECore.cVariableMetaData");
+                            if (staticMetaType != null)
+                            {
+                                var staticGetMethod = staticMetaType.GetMethod("Get", new[] { enumType });
+                                if (staticGetMethod != null)
+                                {
+                                    var metadata = staticGetMethod.Invoke(null, new object[] { enumValue });
+                                    if (metadata != null) return metadata;
+                                }
+                            }
+                        }
+                        catch { }
+                    }
+                }
+            }
+        }
+    }
+    catch { }
+
+    return null;
+}
 
         private static PropertyInfo FindReadableProperty(object entity, string variable, string domain)
         {

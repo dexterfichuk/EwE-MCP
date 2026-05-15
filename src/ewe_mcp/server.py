@@ -990,8 +990,14 @@ async def list_ecospace_habitats() -> dict[str, Any]:
     if isinstance(result, dict) and "habitats" in result:
         valid = []
         for h in result["habitats"]:
-            # Keep entities that don't have an error status
-            if not (isinstance(h, dict) and h.get("status") == "entity_unavailable"):
+            is_unavailable = (
+                isinstance(h, dict)
+                and (
+                    h.get("status") == "entity_unavailable"
+                    or h.get("error", {}).get("code") == "entity_unavailable"
+                )
+            )
+            if not is_unavailable:
                 valid.append(h)
             else:
                 logger.warning(
@@ -1001,7 +1007,7 @@ async def list_ecospace_habitats() -> dict[str, Any]:
                 )
         if len(valid) != len(result["habitats"]):
             result["filtered_count"] = len(result["habitats"]) - len(valid)
-        result["habitats"] = valid
+            result["habitats"] = valid
     return result
 
 
@@ -1655,8 +1661,7 @@ async def get_ecopath_fleet_diagnostics() -> dict[str, Any]:
 
         if group_biomass and "fleets" in fleet_diag:
             for fleet in fleet_diag["fleets"]:
-                groups = fleet.get("groups", [])
-                for fg in groups:
+                for fg in fleet.get("catch_by_group", []):
                     group_idx = fg.get("group_index")
                     catch_val = fg.get("catch_total")
                     if (

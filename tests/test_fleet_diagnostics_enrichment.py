@@ -9,7 +9,7 @@ import pytest
 def _make_fleet_diag(fleet_groups):
     return {
         "fleets": [
-            {"name": f"Fleet {i+1}", "groups": fleet_groups[i]}
+            {"name": f"Fleet {i+1}", "catch_by_group": fleet_groups[i]}
             for i in range(len(fleet_groups))
         ]
     }
@@ -50,7 +50,7 @@ def test_fishing_mortality_enrichment_basic():
 
             result = await get_ecopath_fleet_diagnostics()
 
-        groups = result["fleets"][0]["groups"]
+        groups = result["fleets"][0]["catch_by_group"]
         assert groups[0].get("fishing_mortality") == pytest.approx(0.2, abs=0.001)
         assert groups[1].get("fishing_mortality") == pytest.approx(0.2, abs=0.001)
 
@@ -88,7 +88,7 @@ def test_fishing_mortality_zero_biomass_skipped():
 
             result = await get_ecopath_fleet_diagnostics()
 
-        groups = result["fleets"][0]["groups"]
+        groups = result["fleets"][0]["catch_by_group"]
         assert "fishing_mortality" not in groups[0]
         assert groups[1].get("fishing_mortality") == pytest.approx(0.2, abs=0.001)
 
@@ -118,7 +118,7 @@ def test_fishing_mortality_missing_biomass_skipped():
 
             result = await get_ecopath_fleet_diagnostics()
 
-        assert "fishing_mortality" not in result["fleets"][0]["groups"][0]
+        assert "fishing_mortality" not in result["fleets"][0]["catch_by_group"][0]
 
     asyncio.get_event_loop().run_until_complete(_run())
 
@@ -148,7 +148,7 @@ def test_fishing_mortality_enrichment_failure_graceful():
             result = await get_ecopath_fleet_diagnostics()
 
         assert "fleets" in result
-        assert "fishing_mortality" not in result["fleets"][0]["groups"][0]
+        assert "fishing_mortality" not in result["fleets"][0]["catch_by_group"][0]
 
     asyncio.get_event_loop().run_until_complete(_run())
 
@@ -176,6 +176,6 @@ def test_fishing_mortality_no_catch_skipped():
 
             result = await get_ecopath_fleet_diagnostics()
 
-        assert "fishing_mortality" not in result["fleets"][0]["groups"][0]
+        assert "fishing_mortality" not in result["fleets"][0]["catch_by_group"][0]
 
     asyncio.get_event_loop().run_until_complete(_run())
