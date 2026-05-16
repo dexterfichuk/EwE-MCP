@@ -1434,7 +1434,7 @@ private JObject GetVariableMetadata(JObject parameters)
         {
             var core = RequireCore();
             var name = RequiredString(parameters, "name");
-            int groupType = OptionalInt(parameters, "group_type") ?? OptionalInt(parameters, "type") ?? 0; // 0=consumer, 1=producer, 2=detritus
+            int groupType = OptionalInt(parameters, "group_type") ?? OptionalInt(parameters, "type") ?? 0; // 0=consumer, 1=producer, 2=detritus; group_type takes precedence over legacy type when both are provided
             int iGroup = SafeIntProperty(core, "nGroups") + 1;
             int iGroupID = 0;
             float sPP = (float)groupType;

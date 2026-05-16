@@ -116,9 +116,9 @@ def error_hint(message: str) -> str | None:
     if ("connection refused" in lower or "failed to connect" in lower or
         "cannot connect" in lower or "not connected" in lower):
         return "Ensure EwE is running and the EwE MCP plugin is loaded and listening."
-    if "unauthorized" in lower or "token" in lower:
+    if "unauthorized" in lower or ("token" in lower and "invalid" in lower):
         return "Set the same EWE_MCP_TOKEN for the EwE plugin and Python MCP server."
-    if "run ecosim before" in lower:
+    if any(phrase in lower for phrase in ("run ecosim before", "ecosim must be run", "before reading ecosim result")):
         return "Ecosim must be run first. Use run_ecosim() then wait_for_ecosim_completion() before reading results."
     if "command" in lower and "not found" in lower:
         return "Call list_ui_commands or get_command_catalog to inspect available EwE UI commands."

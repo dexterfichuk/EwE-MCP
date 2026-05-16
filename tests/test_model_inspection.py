@@ -1,4 +1,12 @@
+import os
+
 import pytest
+
+live = pytest.mark.skipif(
+    os.environ.get("EWE_LIVE_TESTS") != "1",
+    reason="Requires live EwE MCP plugin (set EWE_LIVE_TESTS=1 to run)",
+)
+
 
 
 def test_stanzas_inspection(live_client, sample_model_path):
@@ -51,6 +59,7 @@ def test_ecopath_balancing_diagnostics(live_client, sample_model_path):
     assert "pboutput" in vals
 
 
+@live
 def test_ecopath_output_domains_are_read_only(live_client, sample_model_path):
     live_client.command_result("load_model", {"path": sample_model_path})
     live_client.command_result("run_ecopath")
@@ -75,6 +84,7 @@ def test_ecopath_output_domains_are_read_only(live_client, sample_model_path):
     assert res["results"]["biomass_area"] == "unknown_or_readonly_property"
 
 
+@live
 def test_ecopath_stats_generic_get_values(live_client, sample_model_path):
     live_client.command_result("load_model", {"path": sample_model_path})
     live_client.command_result("run_ecopath")

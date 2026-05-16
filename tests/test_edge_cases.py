@@ -130,7 +130,7 @@ async def test_batch_commands_command_type_alias():
         args, kwargs = mock_send.call_args
         assert args[0] == "batch"
         assert args[1]["commands"][0]["type"] == "ping"
-        assert args[1]["commands"][0].get("command_type") == "ping"
+        # command_type alias is normalized to "type" in the clean dict sent to plugin
     # Also verify that command_type in blocked list raises correctly
     blocked_cmds = [{"command_type": "close_model", "params": {}}]
     with pytest.raises(ValueError, match="is not allowed in batch"):

@@ -826,7 +826,8 @@ async def import_time_series(
     import csv
     import io as _io
 
-    if import_type.lower() not in _VALID_IMPORT_TYPES:
+    import_type = import_type.lower()
+    if import_type not in _VALID_IMPORT_TYPES:
         raise ValueError(f"import_type must be one of {sorted(_VALID_IMPORT_TYPES)}, got '{import_type}'")
     if delimiter == decimal_separator:
         raise ValueError(f"delimiter ('{delimiter}') and decimal_separator ('{decimal_separator}') cannot be the same character")
@@ -862,9 +863,9 @@ async def import_time_series(
             "effort": "effort",
             "forcing": "f",
         }
-        type_code = _TYPE_MAP.get(import_type.lower(), import_type)
+        type_code = _TYPE_MAP.get(import_type, import_type)
         # Effort time series reference fleets; all others reference groups
-        pool_label = "fleet" if import_type.lower() == "effort" else "group"
+        pool_label = "fleet" if import_type == "effort" else "group"
 
         # Build the EwE CSV
         ewe_lines: list[str] = []
@@ -885,7 +886,7 @@ async def import_time_series(
             values = [cell.strip() for cell in row[1:]]
             if len(values) != n_series:
                 raise ValueError(f"Row for year {year!r} has {len(values)} data columns, expected {n_series}")
-            ewe_lines.append(year + delimiter + delimiter.join(values[:n_series]))
+            ewe_lines.append(year + delimiter + delimiter.join(values))
         data = "\n".join(ewe_lines)
 
     return await _send(
@@ -1965,21 +1966,20 @@ async def batch_commands(commands: list[dict[str, Any]]) -> dict[str, Any]:
     view capture, scenario mutations/loads, set_values, set_indexed_value,
     and other destructive operations.
     """
+    normalized_commands = []
     for command in commands:
         command_type = command.get("type") or command.get("command_type")
         if command_type is None:
             raise ValueError("Each batch command must have a 'type' field")
-        command["type"] = command_type
         if command_type in BATCH_BLOCKED_COMMANDS:
             raise ValueError(f"Command {command_type!r} is not allowed in batch")
-    result = await _send("batch", {"commands": commands}, timeout=TIMEOUT_LONG)
+        normalized_commands.append({"type": command_type, "params": command.get("params", {})})
+    result = await _send("batch", {"commands": normalized_commands}, timeout=TIMEOUT_LONG)
     # Normalize domain names in batch results
-    if isinstance(result, list):
-        for entry in result:
+    if isinstance(result, dict):
+        for entry in result.get("results", []):
             if isinstance(entry, dict) and "domain" in entry:
                 entry["domain"] = normalize_domain_name(entry["domain"])
-    elif isinstance(result, dict) and "domain" in result:
-        result["domain"] = normalize_domain_name(result["domain"])
     return result
 
 
