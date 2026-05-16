@@ -1062,6 +1062,11 @@ async def list_ecospace_habitats() -> dict[str, Any]:
                 )
         if len(valid) != len(result["habitats"]):
             result["filtered_count"] = len(result["habitats"]) - len(valid)
+            result["note"] = (
+                f"{result['filtered_count']} habitat(s) could not be resolved because the "
+                "Ecospace scenario was recently created and habitats are not fully initialized. "
+                "Save the scenario and configure the basemap to initialize habitat data."
+            )
         result["habitats"] = valid
     return result
 
