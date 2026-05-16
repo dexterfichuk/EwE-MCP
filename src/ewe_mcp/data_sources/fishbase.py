@@ -8,7 +8,7 @@ from typing import Any
 
 import duckdb
 
-from ewe_mcp.data_sources._shared import _TAXON_PATTERN
+from ewe_mcp.data_sources._shared import _TAXON_PATTERN, sanitize_taxon_name
 
 logger = logging.getLogger("ewe_mcp")
 
@@ -24,9 +24,10 @@ MAX_ROWS = 500
 
 
 def _validate_taxon_name(name: str, label: str) -> None:
-    if not name or not name.strip():
+    sanitized = sanitize_taxon_name(name)
+    if not sanitized:
         raise ValueError(f"{label} must be a non-empty string")
-    if not _TAXON_PATTERN.match(name.strip()):
+    if not _TAXON_PATTERN.match(sanitized):
         raise ValueError(f"{label} contains invalid characters: {name!r}")
 
 
@@ -81,11 +82,10 @@ def _query_diet(base: str, spec_codes: list[int]) -> list[dict[str, Any]]:
     return _row_dicts(DIET_ITEM_COLUMNS, result.fetchall())
 
 
-def _resolve_spec_codes(base: str, genus: str, species: str) -> list[int] | dict[str, Any]:
+def _resolve_spec_codes(base: str, genus: str, species: str) -> list[int]:
     """Look up SpecCode(s) for a binomial name in the species table.
 
-    Returns a list of int SpecCodes on success, or a dict with an ``error`` key
-    on failure.  Shared by FishBase and SeaLifeBase.
+    Returns a list of int SpecCodes.  Shared by FishBase and SeaLifeBase.
     """
     sql = (
         f"SELECT SpecCode FROM read_parquet('{base}/species.parquet') "

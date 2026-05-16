@@ -1434,7 +1434,7 @@ private JObject GetVariableMetadata(JObject parameters)
         {
             var core = RequireCore();
             var name = RequiredString(parameters, "name");
-            int groupType = OptionalInt(parameters, "type") ?? 0; // 0=consumer, 1=producer, 2=detritus
+            int groupType = OptionalInt(parameters, "group_type") ?? OptionalInt(parameters, "type") ?? 0; // 0=consumer, 1=producer, 2=detritus
             int iGroup = SafeIntProperty(core, "nGroups") + 1;
             int iGroupID = 0;
             float sPP = (float)groupType;
@@ -4676,6 +4676,8 @@ private JObject GetVariableMetadata(JObject parameters)
             "shutdown_server",
             "invoke_ui_command",
             "import_time_series",
+            "set_values",
+            "set_indexed_value",
         };
 
         private JObject Batch(JObject parameters)
@@ -5208,6 +5210,23 @@ private static object MapPropertyNameToVarNameFlag(string propertyName, Type enu
                 return new EntityTarget(normalized, core, null);
             }
 
+            if (normalized == "ecopath_stats")
+            {
+                var statsIndex = requestedIndex ?? 1;
+                if (statsIndex != 1)
+                {
+                    throw new EwEMcpException("index_out_of_range", $"{normalized} index {statsIndex} is outside 1..1");
+                }
+
+                var stats = SafeGetProperty(core, "EcopathStats");
+                if (stats == null)
+                {
+                    throw new EwEMcpException("entity_unavailable", $"Could not resolve {normalized} via EcopathStats");
+                }
+
+                return new EntityTarget(normalized, stats, null);
+            }
+
             var count = GetDomainCount(core, normalized);
             var index = requestedIndex ?? 1;
             if (index < 1 || index > count)
@@ -5531,7 +5550,7 @@ private static JObject PropertyMetadata(PropertyInfo property, string domain, ob
         ["domain"] = domain ?? string.Empty,
         ["type"] = FriendlyTypeName(property.PropertyType),
         ["readable"] = property.CanRead,
-        ["writable"] = property.CanWrite,
+        ["writable"] = property.CanWrite && !IsReadOnlyDomain(domain),
         ["indexed"] = indexParameters.Length > 0,
         ["index_count"] = indexParameters.Length
     };
@@ -5656,6 +5675,11 @@ private static object ResolveVariableMetadata(object entity, PropertyInfo proper
 
         private static PropertyInfo FindWritableProperty(object entity, string variable, string domain)
         {
+            if (IsReadOnlyDomain(domain))
+            {
+                return null;
+            }
+
             var alias = AliasPropertyName(variable, domain);
             return GetReadableProperties(entity)
                 .Where(p => p.CanWrite && p.GetIndexParameters().Length == 0)
@@ -5671,6 +5695,11 @@ private static object ResolveVariableMetadata(object entity, PropertyInfo proper
                 return null;
             }
 
+            if (requireWritable && IsReadOnlyDomain(domain))
+            {
+                return null;
+            }
+
             var alias = AliasPropertyName(variable, domain);
             return GetReadableProperties(entity)
                 .Where(p => p.GetIndexParameters().Length == indexCount)
@@ -5678,6 +5707,19 @@ private static object ResolveVariableMetadata(object entity, PropertyInfo proper
                 .FirstOrDefault(p =>
                     string.Equals(p.Name, alias, StringComparison.OrdinalIgnoreCase) ||
                     string.Equals(NormalizeVariableName(p.Name), NormalizeVariableName(alias), StringComparison.OrdinalIgnoreCase));
+        }
+
+        private static bool IsReadOnlyDomain(string domain)
+        {
+            switch ((domain ?? string.Empty).Trim().ToLowerInvariant())
+            {
+                case "ecopath_group_outputs":
+                case "ecopath_fleet_outputs":
+                case "ecopath_stats":
+                    return true;
+                default:
+                    return false;
+            }
         }
 
         private static JObject IndexedValidationResult(EntityTarget target, string variable, int[] indices, bool valid, string reason, PropertyInfo property)

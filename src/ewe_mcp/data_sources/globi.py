@@ -9,15 +9,16 @@ from typing import Any
 import httpx
 from httpx import HTTPStatusError, ConnectError, TimeoutException
 
-from ewe_mcp.data_sources._shared import _TAXON_PATTERN, _VALID_GLOBI_INTERACTION_TYPES
+from ewe_mcp.data_sources._shared import _TAXON_PATTERN, _VALID_GLOBI_INTERACTION_TYPES, sanitize_taxon_name
 
 logger = logging.getLogger("ewe_mcp")
 
 
 def _validate_taxon_name(name: str, param_name: str) -> None:
-    if not name or not name.strip():
+    sanitized = sanitize_taxon_name(name)
+    if not sanitized:
         raise ValueError(f"{param_name} must be a non-empty string")
-    if not _TAXON_PATTERN.match(name.strip()):
+    if not _TAXON_PATTERN.match(sanitized):
         raise ValueError(f"{param_name} contains invalid characters: {name!r}")
 
 GLOBI_BASE_URL = "https://api.globalbioticinteractions.org"

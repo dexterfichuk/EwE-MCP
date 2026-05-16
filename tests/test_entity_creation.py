@@ -44,7 +44,7 @@ async def test_create_ecopath_group_with_all_optional_params(mock_send):
             "pb_ratio": 0.8,
             "qb_ratio": 10.0,
             "ee": 0.5,
-            "type": 1,
+            "group_type": 1,
         },
     )
     assert result == {"created": True}
@@ -64,7 +64,7 @@ async def test_create_ecopath_group_with_some_optional_params(mock_send):
         {
             "name": "DetritusGroup",
             "biomass": 10.0,
-            "type": 2,
+            "group_type": 2,
         },
     )
     assert result == {"created": True}

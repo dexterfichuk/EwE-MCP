@@ -66,8 +66,6 @@ def test_destructive_tools_have_annotations():
     batch_proxy = {
         "discard_changes",
         "save_ecosim_scenario",
-        "set_values",
-        "set_indexed_value",
         "shutdown_server",
     }
     not_in_batch = destructive_annotated - BATCH_BLOCKED_COMMANDS - batch_proxy

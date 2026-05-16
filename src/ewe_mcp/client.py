@@ -57,6 +57,7 @@ class EwEMCPClient:
             return True
         except OSError:
             self.socket = None
+            self._current_timeout = None
             return False
 
     def disconnect(self) -> None:

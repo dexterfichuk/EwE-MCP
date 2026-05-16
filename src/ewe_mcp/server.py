@@ -27,6 +27,7 @@ from ewe_mcp.data_sources.fishbase import query_fishbase as _query_fishbase
 from ewe_mcp.data_sources.sealifebase import query_sealifebase as _query_sealifebase
 from ewe_mcp.data_sources.globi import query_globi as _query_globi
 from ewe_mcp.helpers import (
+
     BATCH_BLOCKED_COMMANDS,
     STATUS_CODE_MAP,
     TIMEOUT_DEFAULT,
@@ -48,6 +49,16 @@ mcp = FastMCP("EwE MCP")
 _connection: EwEMCPClient | None = None
 _validated_at = 0.0
 _connection_ttl = 5.0
+_send_lock = asyncio.Lock()
+_VALID_CAPTURE_TARGETS = {"auto", "main", "active", "content"}
+_VALID_IMPORT_TYPES = {"biomass", "catch", "effort", "forcing"}
+
+
+def _reject_path_traversal(path: str) -> None:
+    """Reject paths containing '..' components. Works for both POSIX and Windows paths on any host."""
+    normalized = path.replace("\\", "/")
+    if ".." in pathlib.Path(normalized).parts:
+        raise ValueError("Path cannot contain '..' components for security.")
 
 
 def _invalidate_connection() -> None:
@@ -94,7 +105,9 @@ def _send_sync(
             return _get_connection().command_result(
                 command_type, params, timeout=timeout
             )
-        except (OSError, ConnectionError, ResponseTooLargeError) as exc:
+        except ResponseTooLargeError:
+            raise
+        except (OSError, ConnectionError) as exc:
             last_error = exc
             _invalidate_connection()
             if attempt < 2:
@@ -109,19 +122,20 @@ async def _send(
     params: dict[str, Any] | None = None,
     timeout: int = TIMEOUT_DEFAULT,
 ):
-    try:
-        logger.info("CMD: %s %s", command_type, params if params else "")
-        result = await asyncio.to_thread(_send_sync, command_type, params, timeout)
-        if should_filter_sentinels():
-            result = filter_sentinels(result)
-        logger.info("OK:  %s", command_type)
-        return result
-    except Exception as exc:
-        hint = error_hint(str(exc))
-        logger.warning("ERR: %s — %s", command_type, exc)
-        if hint:
-            raise RuntimeError(f"{exc}\n\nHINT: {hint}") from exc
-        raise
+    async with _send_lock:
+        try:
+            logger.info("CMD: %s %s", command_type, params if params else "")
+            result = await asyncio.to_thread(_send_sync, command_type, params, timeout)
+            if should_filter_sentinels():
+                result = filter_sentinels(result)
+            logger.info("OK:  %s", command_type)
+            return result
+        except Exception as exc:
+            hint = error_hint(str(exc))
+            logger.warning("ERR: %s — %s", command_type, exc)
+            if hint and not isinstance(exc, EwEMCPError):
+                raise RuntimeError(f"{exc}\n\nHINT: {hint}") from exc
+            raise
 
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
@@ -375,8 +389,7 @@ async def create_model(
     """
     if not path.lower().endswith(".ewemdb"):
         raise ValueError("path must have a .EwEmdb extension")
-    if ".." in path:
-        raise ValueError("path must not contain directory traversal")
+    _reject_path_traversal(path)
     params: dict[str, Any] = {"path": path}
     if model_name is not None:
         params["model_name"] = model_name
@@ -406,6 +419,8 @@ async def discard_changes() -> dict[str, Any]:
 @mcp.tool()
 async def save_model(path: str | None = None) -> dict[str, Any]:
     """Save the current model, optionally to a new path."""
+    if path is not None:
+        _reject_path_traversal(path)
     params = {"path": path} if path else {}
     return await _send("save_model", params, timeout=TIMEOUT_LONG)
 
@@ -413,6 +428,7 @@ async def save_model(path: str | None = None) -> dict[str, Any]:
 @mcp.tool()
 async def save_model_as(path: str) -> dict[str, Any]:
     """Save the current model to a new path."""
+    _reject_path_traversal(path)
     return await _send("save_model_as", {"path": path}, timeout=TIMEOUT_LONG)
 
 
@@ -746,7 +762,7 @@ async def create_ecopath_group(
     if ee is not None:
         params["ee"] = ee
     if group_type is not None:
-        params["type"] = group_type
+        params["group_type"] = group_type
     return await _send("create_ecopath_group", params)
 
 
@@ -808,6 +824,13 @@ async def import_time_series(
     import csv
     import io as _io
 
+    if import_type.lower() not in _VALID_IMPORT_TYPES:
+        raise ValueError(f"import_type must be one of {sorted(_VALID_IMPORT_TYPES)}, got '{import_type}'")
+    if delimiter == decimal_separator:
+        raise ValueError(f"delimiter ('{delimiter}') and decimal_separator ('{decimal_separator}') cannot be the same character")
+    if not data.strip():
+        raise ValueError("data must not be empty")
+
     # Auto-detect format: if the first cell of the header starts with "year"
     # (case-insensitive), treat as simple row-per-year and transform it.
     reader = csv.reader(_io.StringIO(data), delimiter=delimiter)
@@ -853,9 +876,13 @@ async def import_time_series(
             if not any(cell.strip() for cell in row):
                 continue
             year = row[0].strip()
+            try:
+                int(year)
+            except (ValueError, TypeError):
+                raise ValueError(f"Year value {year!r} is not a valid integer")
             values = [cell.strip() for cell in row[1:]]
-            if len(values) < n_series:
-                values.extend(["0"] * (n_series - len(values)))
+            if len(values) != n_series:
+                raise ValueError(f"Row for year {year!r} has {len(values)} data columns, expected {n_series}")
             ewe_lines.append(year + delimiter + delimiter.join(values[:n_series]))
         data = "\n".join(ewe_lines)
 
@@ -1080,6 +1107,8 @@ async def create_ecospace_scenario(
     cell_length: float = 0.0833,
 ) -> dict[str, Any]:
     """Create and load a new Ecospace scenario."""
+    if rows < 1 or cols < 1:
+        raise ValueError(f"rows and cols must be at least 1 (got rows={rows}, cols={cols})")
     return await _send(
         "create_ecospace_scenario",
         {
@@ -1131,9 +1160,9 @@ async def wait_for_ecospace_completion(
     Returns the final Ecospace run state. Polls at the specified interval.
     Raises a timeout error if Ecospace doesn't complete within the timeout.
     """
-    deadline = asyncio.get_running_loop().time() + timeout_seconds
+    deadline = time.monotonic() + timeout_seconds
     last_state: dict[str, Any] = {}
-    while asyncio.get_running_loop().time() < deadline:
+    while time.monotonic() < deadline:
         last_state = await _send("get_ecospace_run_state")
         if not last_state.get("is_ecospace_running") and last_state.get(
             "has_ecospace_loaded"
@@ -1482,11 +1511,11 @@ async def wait_for_ecosim_completion(
     Returns the final Ecosim run state. Polls at the specified interval.
     Raises a timeout error if Ecosim doesn't complete within the timeout.
     """
-    deadline = asyncio.get_running_loop().time() + timeout_seconds
+    deadline = time.monotonic() + timeout_seconds
     last_state: dict[str, Any] = {}
-    while asyncio.get_running_loop().time() < deadline:
+    while time.monotonic() < deadline:
         last_state = await _send("get_ecosim_run_state")
-        if last_state.get("has_ecosim_ran"):
+        if not last_state.get("is_ecosim_running") and last_state.get("has_ecosim_ran"):
             return last_state
         await asyncio.sleep(poll_interval_seconds)
     raise RuntimeError(
@@ -1496,7 +1525,20 @@ async def wait_for_ecosim_completion(
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
 async def list_ecosim_group_inputs() -> dict[str, Any]:
-    """List Ecosim group input parameters for the active scenario."""
+    """List Ecosim group input parameters for the active scenario.
+
+    Key parameters include:
+    - den_dep_catchability: Controls density-dependent catchability
+      (minimum 1.0). Higher values = more catchable at high density.
+    - vul_mult: Vulnerability multiplier (minimum 1.0). Higher values =
+      more vulnerable to predation.
+    - max_rel_feeding_time: Maximum relative feeding time (0 to 100,
+      exclusive lower bound). Higher values = more feeding time available.
+    - feeding_time_adjust_rate: Rate at which feeding time adjusts
+      (0 to < 1.0). 0 = no adjustment.
+    - max_rel_pb: Maximum relative production/biomass ratio
+      (greater than 0).
+    """
     return await _send("list_ecosim_group_inputs")
 
 
@@ -1508,7 +1550,16 @@ async def get_ecosim_group_input(index: int) -> dict[str, Any]:
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
 async def list_ecosim_fleet_inputs() -> dict[str, Any]:
-    """List Ecosim fleet input parameters for the active scenario."""
+    """List Ecosim fleet input parameters for the active scenario.
+
+    Key parameters include:
+    - rel_q: Relative catchability (minimum 1.0). Scales fishing mortality
+      rate for this fleet.
+    - effort_conversion_factor: Scales capital-to-effort conversion in fleet
+      dynamics. Does NOT directly multiply fishing mortality (F). Instead it
+      influences how capital investment translates to effective fishing effort
+      in the fleet size dynamics model.
+    """
     return await _send("list_ecosim_fleet_inputs")
 
 
@@ -1618,6 +1669,9 @@ async def export_ecosim_results(path: str) -> dict[str, Any]:
     get_ecosim_group_results or get_ecosim_fleet_results to extract
     individual result time-series.
     """
+    _reject_path_traversal(path)
+    if not path.lower().endswith(('.csv', '.txt')):
+        raise ValueError("Path must have a .csv or .txt extension")
     return await _send("export_ecosim_results", {"path": path}, timeout=TIMEOUT_LONG)
 
 
@@ -1715,6 +1769,9 @@ async def export_ecopath_results(path: str) -> dict[str, Any]:
     Requires Ecopath to have been run first. The path should be a writable path
     on the Windows machine running EwE.
     """
+    _reject_path_traversal(path)
+    if not path.lower().endswith(('.csv', '.txt')):
+        raise ValueError("Path must have a .csv or .txt extension")
     return await _send("export_ecopath_results", {"path": path}, timeout=TIMEOUT_LONG)
 
 
@@ -1727,7 +1784,7 @@ async def run_ecosim() -> dict[str, Any]:
 @mcp.tool()
 async def stop_ecosim() -> dict[str, Any]:
     """Stop the active Ecosim run."""
-    return await _send("stop_ecosim")
+    return await _send("stop_ecosim", timeout=TIMEOUT_LONG)
 
 
 @mcp.tool()
@@ -1756,6 +1813,9 @@ async def capture_view(
     Returns:
         A 2-element list containing TextContent with metadata and ImageContent with the PNG.
     """
+    target = target.lower()
+    if target not in _VALID_CAPTURE_TARGETS:
+        raise ValueError(f"target must be one of {sorted(_VALID_CAPTURE_TARGETS)}, got {target!r}")
     params: dict[str, Any] = {"target": target}
     if max_width is not None:
         params["max_width"] = max_width
@@ -1764,14 +1824,16 @@ async def capture_view(
 
     result = await _send("capture_view", params, timeout=TIMEOUT_LONG)
 
-    # Build metadata summary (everything except the raw data).
-    meta = {key: value for key, value in result.items() if key != "data"}
-
+    # Build metadata by excluding the base64 data
+    meta = {k: v for k, v in result.items() if k != "data"}
+    image_data = result.get("data")
+    if not image_data:
+        raise RuntimeError(f"Capture returned no image data. Response: {meta}")
     return [
         TextContent(type="text", text=str(meta)),
         ImageContent(
             type="image",
-            data=result["data"],
+            data=image_data,
             mimeType="image/png",
         ),
     ]
@@ -1795,8 +1857,10 @@ async def save_screenshot(
         max_width: Optional max pixel width to downscale to.
         max_height: Optional max pixel height to downscale to.
     """
-    if ".." in pathlib.Path(path).parts:
-        raise ValueError("Path cannot contain '..' components for security.")
+    _reject_path_traversal(path)
+    target = target.lower()
+    if target not in _VALID_CAPTURE_TARGETS:
+        raise ValueError(f"target must be one of {sorted(_VALID_CAPTURE_TARGETS)}, got {target!r}")
 
     params: dict[str, Any] = {"target": target}
     if max_width is not None:
@@ -1893,12 +1957,28 @@ async def set_indexed_value(
     "Blocked commands include eval, model load/save/close, simulation runs/stops, view capture, and scenario mutations/loads.",
 )
 async def batch_commands(commands: list[dict[str, Any]]) -> dict[str, Any]:
-    """Execute multiple non-blocked commands through the EwE plugin."""
+    """Execute multiple non-blocked commands through the EwE plugin.
+
+    Blocked commands include eval, model lifecycle, simulation runs/stops,
+    view capture, scenario mutations/loads, set_values, set_indexed_value,
+    and other destructive operations.
+    """
     for command in commands:
-        command_type = command.get("type")
+        command_type = command.get("type") or command.get("command_type")
+        if command_type is None:
+            raise ValueError("Each batch command must have a 'type' field")
+        command["type"] = command_type
         if command_type in BATCH_BLOCKED_COMMANDS:
             raise ValueError(f"Command {command_type!r} is not allowed in batch")
-    return await _send("batch", {"commands": commands}, timeout=TIMEOUT_LONG)
+    result = await _send("batch", {"commands": commands}, timeout=TIMEOUT_LONG)
+    # Normalize domain names in batch results
+    if isinstance(result, list):
+        for entry in result:
+            if isinstance(entry, dict) and "domain" in entry:
+                entry["domain"] = normalize_domain_name(entry["domain"])
+    elif isinstance(result, dict) and "domain" in result:
+        result["domain"] = normalize_domain_name(result["domain"])
+    return result
 
 
 @mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
