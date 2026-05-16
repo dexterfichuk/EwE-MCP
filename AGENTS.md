@@ -183,11 +183,11 @@ EWE_LIVE_TESTS=1 \
 uv run pytest
 ```
 
-Expected local baseline with live tests skipped is currently `69 passed, 83 skipped`.
+Expected local baseline with live tests skipped is currently `199 passed, 105 skipped`.
 
 The sample model (`tests/fixtures/Tampa_Bay.EwEmdb`) is bundled under the same GPL-3.0 license as EwE and does not require a separate `EWE_MODEL_PATH` environment variable.
 
-Expected full live result on PR #83 after merging current `main` is `144 passed, 8 skipped`.
+Expected full live result is `297 passed, 7 skipped`.
 
 Prefer testing mutations against copied models. If you mutate the shared sample model, restore the original value in a `finally` block and call `discard_changes` so EwE clears the unsaved-change flag without saving over the sample model. `discard_changes` only clears dirty flags; it does not physically revert values.
 
@@ -198,13 +198,18 @@ Prefer testing mutations against copied models. If you mutate the shared sample 
   - Blocked from `batch_commands`.
   - Every eval request is audit-logged with outcome (`denied`/`executed`).
 - `shutdown_server` is gated behind `EWE_MCP_ENABLE_EVAL=1` (same flag as `execute_ewe_code`), blocked from `batch_commands`, and audit-logged. It is destructive — it stops the plugin socket server.
-- Do not batch `execute_ewe_code`, `shutdown_server`, `invoke_ui_command`, model lifecycle operations, simulation run/stop commands, export/capture commands, or scenario load/mutation operations. The plugin enforces this guard for direct socket clients as well as the Python MCP server.
+- Do not batch `execute_ewe_code`, `shutdown_server`, `invoke_ui_command`, `set_values`, `set_indexed_value`, model lifecycle operations, simulation run/stop commands, export/capture commands, or scenario load/mutation operations. The plugin enforces this guard for direct socket clients as well as the Python MCP server.
 - Do not use `invoke_ui_command` for commands that open modal dialogs. Known dialog-opening commands such as `ImportTimeSeries` are blocked by default with `dialog_command_blocked`; use a dedicated MCP tool when available or operate the EwE GUI manually.
 - Use `validate_values` before `set_values` when possible.
 - Value reads/writes navigate by default through `get_values`, `get_indexed_value`, `set_values`, and `set_indexed_value`; pass `navigate=False` for quiet/background access, batches, or batch-like workflows to avoid UI flicker.
 - Use `discard_changes` only as an explicit cleanup step after test mutations have been restored; it clears EwE's dirty flag but does not physically revert values.
 - For model-changing workflows, prefer `save_model_as` to a temporary/copy path instead of overwriting the shared model.
-- `export_ecopath_results` validates that the path has a `.csv` or `.txt` extension and rejects directory traversal (`..`).
+- `export_ecopath_results` and `export_ecosim_results` validate that the path has a `.csv` or `.txt` extension and reject directory traversal (`..`).
+- `save_model_as` and `save_model(path=...)` validate path traversal.
+- `capture_view` and `save_screenshot` target parameter is case-insensitive (normalized to lowercase).
+- `batch_commands` accepts both `type` and `command_type` keys in inner commands (both are normalized to `type` before sending).
+- `import_time_series` no longer silently zero-pads short rows — rows with mismatched column counts will raise an error.
+- `stop_ecosim` uses `TIMEOUT_LONG` (120s) to accommodate long-running simulations.
 - Ecotracer runs as part of Ecosim/Ecospace when `ContaminantTracing` is enabled — there is no standalone `run_ecotracer` command.
 - MSE and Monte Carlo are configured within the Ecosim scenario context; there are no scenario management commands for them.
 - Record what you changed and what you restored in your final message.
