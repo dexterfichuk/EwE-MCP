@@ -1968,7 +1968,7 @@ async def batch_commands(commands: list[dict[str, Any]]) -> dict[str, Any]:
     """
     normalized_commands = []
     for command in commands:
-        command_type = command.get("type") or command.get("command_type")
+        command_type = command.get("command_type") if "command_type" in command else command.get("type")
         if command_type is None:
             raise ValueError("Each batch command must have a 'type' field")
         if command_type in BATCH_BLOCKED_COMMANDS:

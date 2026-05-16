@@ -135,4 +135,3 @@ async def test_batch_commands_command_type_alias():
     blocked_cmds = [{"command_type": "close_model", "params": {}}]
     with pytest.raises(ValueError, match="is not allowed in batch"):
         await batch_commands(blocked_cmds)
-    print("batch command_type alias test PASSED")
