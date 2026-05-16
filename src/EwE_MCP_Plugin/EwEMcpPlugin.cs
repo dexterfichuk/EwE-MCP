@@ -4678,6 +4678,8 @@ private JObject GetVariableMetadata(JObject parameters)
             "import_time_series",
             "set_values",
             "set_indexed_value",
+            "set_values_range",
+            "export_ecosim_results",
         };
 
         private JObject Batch(JObject parameters)
@@ -5716,6 +5718,14 @@ private static object ResolveVariableMetadata(object entity, PropertyInfo proper
                 case "ecopath_group_outputs":
                 case "ecopath_fleet_outputs":
                 case "ecopath_stats":
+                case "ecosim_group_outputs":
+                case "ecosim_fleet_outputs":
+                case "ecospace_group_outputs":
+                case "ecospace_fleet_outputs":
+                case "ecospace_region_outputs":
+                case "ecotracer_group_outputs":
+                case "mse_group_outputs":
+                case "mse_fleet_outputs":
                     return true;
                 default:
                     return false;

@@ -80,6 +80,7 @@ BATCH_BLOCKED_COMMANDS = frozenset(
         "stop_monte_carlo",
         "set_ecosim_forcing_shape",
         "export_ecopath_results",
+        "export_ecosim_results",
         "create_ecopath_group",
         "create_ecopath_fleet",
         "shutdown_server",

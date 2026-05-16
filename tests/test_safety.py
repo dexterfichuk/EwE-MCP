@@ -186,6 +186,7 @@ def test_batch_blocked_commands_are_destructive_or_sensitive():
         | {
             "execute_ewe_code",
             "export_ecopath_results",
+            "export_ecosim_results",
             "discard_changes",
             "run_ecopath",
             "shutdown_server",

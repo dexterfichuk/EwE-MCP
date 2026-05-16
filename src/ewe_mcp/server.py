@@ -1168,7 +1168,7 @@ async def wait_for_ecospace_completion(
     while time.monotonic() < deadline:
         last_state = await _send("get_ecospace_run_state")
         if not last_state.get("is_ecospace_running") and last_state.get(
-            "has_ecospace_loaded"
+            "has_ecospace_ran"
         ):
             return last_state
         await asyncio.sleep(poll_interval_seconds)
