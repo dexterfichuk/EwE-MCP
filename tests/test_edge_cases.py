@@ -114,3 +114,25 @@ async def test_new_batch_blocked_commands():
     assert "stop_mse" in BATCH_BLOCKED_COMMANDS
     assert "run_monte_carlo" in BATCH_BLOCKED_COMMANDS
     assert "stop_monte_carlo" in BATCH_BLOCKED_COMMANDS
+
+
+@pytest.mark.asyncio
+async def test_batch_commands_command_type_alias():
+    """Verify that 'command_type' is accepted as an alias for 'type' and normalized before sending."""
+    from unittest.mock import patch
+    from ewe_mcp.server import batch_commands
+
+    cmds = [{"command_type": "ping", "params": {}}]
+    with patch("ewe_mcp.server._send", return_value={"results": [{"pong": True}]}) as mock_send:
+        result = await batch_commands(cmds)
+        # Verify _send was called with the normalized command
+        mock_send.assert_called_once()
+        args, kwargs = mock_send.call_args
+        assert args[0] == "batch"
+        assert args[1]["commands"][0]["type"] == "ping"
+        assert args[1]["commands"][0].get("command_type") == "ping"
+    # Also verify that command_type in blocked list raises correctly
+    blocked_cmds = [{"command_type": "close_model", "params": {}}]
+    with pytest.raises(ValueError, match="is not allowed in batch"):
+        await batch_commands(blocked_cmds)
+    print("batch command_type alias test PASSED")

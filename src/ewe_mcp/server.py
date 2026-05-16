@@ -27,7 +27,6 @@ from ewe_mcp.data_sources.fishbase import query_fishbase as _query_fishbase
 from ewe_mcp.data_sources.sealifebase import query_sealifebase as _query_sealifebase
 from ewe_mcp.data_sources.globi import query_globi as _query_globi
 from ewe_mcp.helpers import (
-
     BATCH_BLOCKED_COMMANDS,
     STATUS_CODE_MAP,
     TIMEOUT_DEFAULT,
@@ -58,7 +57,7 @@ def _reject_path_traversal(path: str) -> None:
     """Reject paths containing '..' components. Works for both POSIX and Windows paths on any host."""
     normalized = path.replace("\\", "/")
     if ".." in pathlib.Path(normalized).parts:
-        raise ValueError("Path cannot contain '..' components for security.")
+        raise ValueError("Path cannot contain '..' components.")
 
 
 def _invalidate_connection() -> None:
@@ -807,6 +806,9 @@ async def import_time_series(
 
     Requires an Ecosim scenario to be loaded first.
 
+    Note: Rows with more or fewer columns than the header will raise an error.
+    Previously, short rows were silently zero-padded — this is no longer supported.
+
     Args:
         data: CSV-formatted time series data as a string.
         import_type: Default type for simple format: \"catch\", \"effort\",
@@ -879,7 +881,7 @@ async def import_time_series(
             try:
                 int(year)
             except (ValueError, TypeError):
-                raise ValueError(f"Year value {year!r} is not a valid integer")
+                raise ValueError(f"Year value {year!r} is not a valid integer") from None
             values = [cell.strip() for cell in row[1:]]
             if len(values) != n_series:
                 raise ValueError(f"Row for year {year!r} has {len(values)} data columns, expected {n_series}")
