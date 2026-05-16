@@ -750,6 +750,11 @@ async def create_ecopath_group(
         qb_ratio: Consumption/biomass ratio.
         ee: Ecotrophic efficiency.
         group_type: Group type (0=consumer, 1=producer, 2=detritus).
+
+    Note: The new group is written to the model database but in-memory core
+    counts are not immediately refreshed. The group may not appear in
+    list_ecopath_groups until the model is saved and reloaded. Use
+    save_model followed by load_model to see the new group.
     """
     params: dict[str, Any] = {"name": name}
     if biomass is not None:
@@ -767,7 +772,13 @@ async def create_ecopath_group(
 
 @mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
 async def create_ecopath_fleet(name: str) -> dict[str, Any]:
-    """Create a new Ecopath fishing fleet."""
+    """Create a new Ecopath fishing fleet.
+
+    Note: The new fleet is written to the model database but in-memory core
+    counts are not immediately refreshed. The fleet may not appear in
+    list_ecopath_fleets until the model is saved and reloaded. Use
+    save_model followed by load_model to see the new fleet.
+    """
     return await _send("create_ecopath_fleet", {"name": name})
 
 
@@ -856,12 +867,15 @@ async def import_time_series(
                 f"pool_indices length {len(pool_indices)} must match number of series {n_series}"
             )
 
-        # Map import_type to EwE type string or integer code
+# Map import_type to EwE type string or integer code.
+        # Names must match EwE's eTimeSeriesAliases enum (case-insensitive):
+        # BiomassAbs/BAbs=1, Catch/C=6, Effort=3, Forcing=2, etc.
+        # Avoid ambiguous short names like "f" (matches FishingMort=5, not Forcing=2).
         _TYPE_MAP: dict[str, str] = {
-            "biomass": "biomass_abs",
-            "catch": "catch",
-            "effort": "effort",
-            "forcing": "f",
+            "biomass": "BiomassAbs",
+            "catch": "Catch",
+            "effort": "Effort",
+            "forcing": "Forcing",
         }
         type_code = _TYPE_MAP.get(import_type, import_type)
         # Effort time series reference fleets; all others reference groups
