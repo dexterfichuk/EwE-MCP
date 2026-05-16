@@ -2926,7 +2926,7 @@ case "list_ecosim_scenarios":
             var core = RequireCore();
             var manager = SafeGetProperty(core, "MSEManager");
             if (manager == null) throw new EwEMcpException("core_unavailable", "MSE not available");
-            manager.GetType().GetMethod("StopRun")?.Invoke(manager, null);
+            manager.GetType().GetMethod("StopRun")?.Invoke(manager, new object[] { -1 });
             return new JObject { ["stopped"] = true };
         }
 
@@ -6256,7 +6256,7 @@ private static PropertyInfo FindReadableProperty(object entity, string variable,
             try
             {
                 var property = obj.GetType()
-                    .GetProperties(BindingFlags.Instance | BindingFlags.Public)
+                    .GetProperties(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
                     .FirstOrDefault(p => p.Name == propertyName && p.GetIndexParameters().Length == 0);
                 if (property != null)
                 {
@@ -6264,7 +6264,7 @@ private static PropertyInfo FindReadableProperty(object entity, string variable,
                 }
 
                 var field = obj.GetType()
-                    .GetFields(BindingFlags.Instance | BindingFlags.Public)
+                    .GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
                     .FirstOrDefault(f => f.Name == propertyName);
                 return field?.GetValue(obj);
             }
