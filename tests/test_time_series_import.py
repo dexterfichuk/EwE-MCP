@@ -68,8 +68,47 @@ def test_import_time_series_simple_format_transforms():
         assert "weight" in lines[1]
         assert "group" in lines[2]
         assert "type" in lines[3]
+        # Type strings must match EwE eTimeSeriesAliases (case-insensitive)
+        # "catch" maps to "Catch" (not "catch"), "biomass" to "BiomassAbs", etc.
+        assert "Catch" in lines[3]
         assert "1990,100" in lines[4]
         assert "1991,110" in lines[5]
+
+
+@pytest.mark.asyncio
+async def test_import_time_series_simple_format_biomass_type():
+    """import_time_series maps 'biomass' to 'BiomassAbs' (EwE enum alias)."""
+    mock_result = {"status": "ok", "rows_imported": 2, "time_series_count": 1}
+    simple_csv = "Year,MySeries\n1990,100\n1991,110"
+
+    with patch("ewe_mcp.server._send", return_value=mock_result) as mock_send:
+        from ewe_mcp.server import import_time_series
+
+        await import_time_series(data=simple_csv, import_type="biomass")
+        call_args = mock_send.call_args
+        sent_data = call_args[0][1]["data"]
+        lines = sent_data.split("\n")
+        assert any("BiomassAbs" in line for line in lines), (
+            f"Expected 'BiomassAbs' in transformed CSV, got: {lines}"
+        )
+
+
+@pytest.mark.asyncio
+async def test_import_time_series_simple_format_forcing_type():
+    """import_time_series maps 'forcing' to 'Forcing' (not 'f')."""
+    mock_result = {"status": "ok", "rows_imported": 2, "time_series_count": 1}
+    simple_csv = "Year,MySeries\n1990,1.0\n1991,1.1"
+
+    with patch("ewe_mcp.server._send", return_value=mock_result) as mock_send:
+        from ewe_mcp.server import import_time_series
+
+        await import_time_series(data=simple_csv, import_type="forcing")
+        call_args = mock_send.call_args
+        sent_data = call_args[0][1]["data"]
+        lines = sent_data.split("\n")
+        assert any("Forcing" in line for line in lines), (
+            f"Expected 'Forcing' in transformed CSV, got: {lines}"
+        )
 
 
 def test_import_time_series_custom_options():

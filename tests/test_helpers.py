@@ -31,32 +31,20 @@ def test_max_response_size_default():
 
 
 def test_max_response_size_env_override(monkeypatch):
-    get_max_response_size.cache_clear()
     monkeypatch.setenv("EWE_MCP_MAX_RESPONSE_SIZE", "5242880")
-    try:
-        assert get_max_response_size() == 5 * 1024 * 1024
-    finally:
-        get_max_response_size.cache_clear()
+    assert get_max_response_size() == 5 * 1024 * 1024
 
 
 def test_max_response_size_invalid(monkeypatch):
-    get_max_response_size.cache_clear()
     monkeypatch.setenv("EWE_MCP_MAX_RESPONSE_SIZE", "not_a_number")
-    try:
-        with pytest.raises(ValueError, match="must be an integer"):
-            get_max_response_size()
-    finally:
-        get_max_response_size.cache_clear()
+    with pytest.raises(ValueError, match="must be an integer"):
+        get_max_response_size()
 
 
 def test_max_response_size_negative(monkeypatch):
-    get_max_response_size.cache_clear()
     monkeypatch.setenv("EWE_MCP_MAX_RESPONSE_SIZE", "-1")
-    try:
-        with pytest.raises(ValueError, match="must be positive"):
-            get_max_response_size()
-    finally:
-        get_max_response_size.cache_clear()
+    with pytest.raises(ValueError, match="must be positive"):
+        get_max_response_size()
 
 
 def test_error_hint_oversized_response():
@@ -316,17 +304,14 @@ class TestFilterSentinels:
 class TestShouldFilterSentinels:
     def test_default_is_on(self, monkeypatch):
         monkeypatch.delenv("EWE_MCP_FILTER_SENTINELS", raising=False)
-        should_filter_sentinels.cache_clear()
         assert should_filter_sentinels() is True
 
     def test_explicit_on(self, monkeypatch):
         monkeypatch.setenv("EWE_MCP_FILTER_SENTINELS", "1")
-        should_filter_sentinels.cache_clear()
         assert should_filter_sentinels() is True
 
     def test_explicit_off(self, monkeypatch):
         monkeypatch.setenv("EWE_MCP_FILTER_SENTINELS", "0")
-        should_filter_sentinels.cache_clear()
         assert should_filter_sentinels() is False
 
 
@@ -335,7 +320,6 @@ class TestShouldFilterSentinels:
 
 def test_enrich_diagnose_sentinel_filtering_enabled(monkeypatch):
     monkeypatch.setenv("EWE_MCP_FILTER_SENTINELS", "1")
-    should_filter_sentinels.cache_clear()
     result = enrich_diagnose({"checks": []})
     sentinel_check = next(
         (c for c in result["checks"] if c["name"] == "sentinel_filtering"), None
@@ -343,12 +327,10 @@ def test_enrich_diagnose_sentinel_filtering_enabled(monkeypatch):
     assert sentinel_check is not None
     assert sentinel_check["status"] == "ok"
     assert sentinel_check["detail"]["enabled"] is True
-    should_filter_sentinels.cache_clear()
 
 
 def test_enrich_diagnose_sentinel_filtering_disabled(monkeypatch):
     monkeypatch.setenv("EWE_MCP_FILTER_SENTINELS", "0")
-    should_filter_sentinels.cache_clear()
     result = enrich_diagnose({"checks": []})
     sentinel_check = next(
         (c for c in result["checks"] if c["name"] == "sentinel_filtering"), None
@@ -356,7 +338,6 @@ def test_enrich_diagnose_sentinel_filtering_disabled(monkeypatch):
     assert sentinel_check is not None
     assert sentinel_check["status"] == "disabled"
     assert sentinel_check["detail"]["enabled"] is False
-    should_filter_sentinels.cache_clear()
 
 
 # ── validate_ewe_ranges sentinel bypass ────────────────────────────────

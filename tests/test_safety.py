@@ -66,8 +66,6 @@ def test_destructive_tools_have_annotations():
     batch_proxy = {
         "discard_changes",
         "save_ecosim_scenario",
-        "set_values",
-        "set_indexed_value",
         "shutdown_server",
     }
     not_in_batch = destructive_annotated - BATCH_BLOCKED_COMMANDS - batch_proxy
@@ -188,6 +186,7 @@ def test_batch_blocked_commands_are_destructive_or_sensitive():
         | {
             "execute_ewe_code",
             "export_ecopath_results",
+            "export_ecosim_results",
             "discard_changes",
             "run_ecopath",
             "shutdown_server",
@@ -326,6 +325,10 @@ _CSHARP_BATCH_BLOCKED = frozenset(
         "shutdown_server",
         "invoke_ui_command",
         "import_time_series",
+        "set_values_range",
+        "set_values",
+        "set_indexed_value",
+        "export_ecosim_results",
     }
 )
 

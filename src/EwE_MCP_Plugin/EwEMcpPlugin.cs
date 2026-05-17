@@ -896,19 +896,25 @@ case "list_ecosim_scenarios":
             };
         }
 
-private JObject GetVariableMetadata(JObject parameters)
-{
-    var domain = RequiredString(parameters, "domain");
-    var variable = RequiredString(parameters, "variable");
-    int? index = OptionalInt(parameters, "index");
-    var target = ResolveEntity(domain, index);
-    var property = FindReadableProperty(target.Entity, variable, target.NormalizedDomain);
-    if (property == null)
+    private JObject GetVariableMetadata(JObject parameters)
     {
-        throw new EwEMcpException("unknown_variable", $"Variable not found: {variable}");
+        var domain = RequiredString(parameters, "domain");
+        var variable = RequiredString(parameters, "variable");
+        int? index = OptionalInt(parameters, "index");
+        var target = ResolveEntity(domain, index);
+        var property = FindReadableProperty(target.Entity, variable, target.NormalizedDomain);
+        if (property == null)
+        {
+            // Check if the property exists but is indexed
+            var indexedProp = FindAsIndexedProperty(target.Entity, variable, target.NormalizedDomain);
+            if (indexedProp != null)
+            {
+                return PropertyMetadata(indexedProp, target.NormalizedDomain, target.Entity);
+            }
+            throw new EwEMcpException("unknown_variable", $"Variable not found: {variable}");
+        }
+        return PropertyMetadata(property, target.NormalizedDomain, target.Entity);
     }
-    return PropertyMetadata(property, target.NormalizedDomain, target.Entity);
-}
 
         private JObject GetValues(JObject parameters)
         {
@@ -1434,7 +1440,7 @@ private JObject GetVariableMetadata(JObject parameters)
         {
             var core = RequireCore();
             var name = RequiredString(parameters, "name");
-            int groupType = OptionalInt(parameters, "type") ?? 0; // 0=consumer, 1=producer, 2=detritus
+            int groupType = OptionalInt(parameters, "group_type") ?? OptionalInt(parameters, "type") ?? 0; // 0=consumer, 1=producer, 2=detritus; group_type takes precedence over legacy type when both are provided
             int iGroup = SafeIntProperty(core, "nGroups") + 1;
             int iGroupID = 0;
             float sPP = (float)groupType;
@@ -1476,14 +1482,15 @@ private JObject GetVariableMetadata(JObject parameters)
                 }
             }
 
-            return new JObject
-            {
-                ["created"] = true,
-                ["group_index"] = newGroupIndex,
-                ["name"] = name,
-                ["type"] = GroupTypeFromInt(groupType),
-                ["group_id"] = newGroupID
-            };
+    return new JObject
+    {
+        ["created"] = true,
+        ["group_index"] = newGroupIndex,
+        ["name"] = name,
+        ["type"] = GroupTypeFromInt(groupType),
+        ["group_id"] = newGroupID,
+        ["warning"] = "New group written to database but in-memory core counts (nGroups) are not immediately refreshed. The new group may not appear in list_ecopath_groups or get_values until the model is saved and reloaded. Use save_model followed by load_model to refresh."
+    };
         }
 
         private static string GroupTypeFromInt(int type)
@@ -1513,13 +1520,14 @@ private JObject GetVariableMetadata(JObject parameters)
             int newFleetIndex = Convert.ToInt32(args[1]);
             int newFleetID = Convert.ToInt32(args[2]);
 
-        return new JObject
-        {
-            ["created"] = true,
-            ["fleet_index"] = newFleetIndex,
-            ["name"] = name,
-            ["fleet_id"] = newFleetID
-        };
+    return new JObject
+    {
+        ["created"] = true,
+        ["fleet_index"] = newFleetIndex,
+        ["name"] = name,
+        ["fleet_id"] = newFleetID,
+        ["warning"] = "New fleet written to database but in-memory core counts (nFleets) are not immediately refreshed. The new fleet may not appear in list_ecopath_fleets or get_values until the model is saved and reloaded. Use save_model followed by load_model to refresh."
+    };
     }
 
     private JObject ImportTimeSeries(JObject parameters)
@@ -2918,7 +2926,11 @@ private JObject GetVariableMetadata(JObject parameters)
             var core = RequireCore();
             var manager = SafeGetProperty(core, "MSEManager");
             if (manager == null) throw new EwEMcpException("core_unavailable", "MSE not available");
-            manager.GetType().GetMethod("StopRun")?.Invoke(manager, null);
+            try
+            {
+                manager.GetType().GetMethod("StopRun")?.Invoke(manager, new object[] { -1 });
+            }
+            catch { }
             return new JObject { ["stopped"] = true };
         }
 
@@ -4486,13 +4498,18 @@ private JObject GetVariableMetadata(JObject parameters)
                 matrix.Add(row);
             }
 
-            return new JObject
-            {
-                ["status"] = (mtiData != null) ? "available" : "zero_fallback",
-                ["group_names"] = groupNames,
-                ["n_groups"] = nGroups,
-                ["matrix"] = matrix
-            };
+    var result = new JObject
+    {
+        ["status"] = (mtiData != null) ? "available" : "zero_fallback",
+        ["group_names"] = groupNames,
+        ["n_groups"] = nGroups,
+        ["matrix"] = matrix
+    };
+    if (mtiData == null)
+    {
+        result["note"] = "MTI data unavailable. The Network Analysis plugin may not be installed or the Ecopath model may not have been balanced. A zero matrix is returned as fallback.";
+    }
+    return result;
         }
 
         private static string ToCsvValue(object val)
@@ -4676,6 +4693,10 @@ private JObject GetVariableMetadata(JObject parameters)
             "shutdown_server",
             "invoke_ui_command",
             "import_time_series",
+            "set_values",
+            "set_indexed_value",
+            "set_values_range",
+            "export_ecosim_results",
         };
 
         private JObject Batch(JObject parameters)
@@ -5065,12 +5086,28 @@ private JObject GetVariableMetadata(JObject parameters)
             var results = new JObject();
             foreach (var pair in values)
             {
-                var property = FindWritableProperty(entity, pair.Key, domain);
-                if (property == null)
+        var property = FindWritableProperty(entity, pair.Key, domain);
+        if (property == null)
+        {
+            // Check if the property exists but is indexed (requires
+            // set_indexed_value instead of set_values).
+            var indexedProp = FindAsIndexedProperty(entity, pair.Key, domain);
+            if (indexedProp != null)
+            {
+                var indexParams = indexedProp.GetIndexParameters();
+                var paramNames = string.Join(", ", indexParams.Select(p => p.Name));
+                results[pair.Key] = new JObject
                 {
-                    results[pair.Key] = "unknown_or_readonly_property";
-                    continue;
-                }
+                    ["status"] = "indexed_property",
+                    ["message"] = $"Variable '{pair.Key}' is indexed ({indexParams.Length} index parameter(s): {paramNames}). Use set_indexed_value instead of set_values."
+                };
+            }
+            else
+            {
+                results[pair.Key] = "unknown_or_readonly_property";
+            }
+            continue;
+        }
 
                 if (!TryConvertValue(pair.Value, property.PropertyType, out var convertedValue))
                 {
@@ -5206,6 +5243,23 @@ private static object MapPropertyNameToVarNameFlag(string propertyName, Type enu
             if (normalized == "core")
             {
                 return new EntityTarget(normalized, core, null);
+            }
+
+            if (normalized == "ecopath_stats")
+            {
+                var statsIndex = requestedIndex ?? 1;
+                if (statsIndex != 1)
+                {
+                    throw new EwEMcpException("index_out_of_range", $"{normalized} index {statsIndex} is outside 1..1");
+                }
+
+                var stats = SafeGetProperty(core, "EcopathStats");
+                if (stats == null)
+                {
+                    throw new EwEMcpException("entity_unavailable", $"Could not resolve {normalized} via EcopathStats");
+                }
+
+                return new EntityTarget(normalized, stats, null);
             }
 
             var count = GetDomainCount(core, normalized);
@@ -5457,16 +5511,32 @@ private static object MapPropertyNameToVarNameFlag(string propertyName, Type enu
             {
                 foreach (var variable in requestedVariables)
                 {
-                    var property = FindReadableProperty(entity, variable, domain);
-                    if (property == null)
+            var property = FindReadableProperty(entity, variable, domain);
+            if (property == null)
+            {
+                if (includeErrors)
+                {
+                    // Check if the property exists but is indexed (requires
+                    // get_indexed_value / set_indexed_value instead).
+                    var indexedProp = FindAsIndexedProperty(entity, variable, domain);
+                    if (indexedProp != null)
                     {
-                        if (includeErrors)
+                        var indexParams = indexedProp.GetIndexParameters();
+                        var paramNames = string.Join(", ", indexParams.Select(p => p.Name));
+                        result[variable] = new JObject
                         {
-                            result[variable] = new JObject { ["error"] = "unknown_variable" };
-                        }
-                        continue;
+                            ["error"] = "indexed_variable",
+                            ["message"] = $"Variable '{variable}' is indexed ({indexParams.Length} index parameter(s): {paramNames}). Use get_indexed_value or set_indexed_value instead of get_values or set_values."
+                        };
                     }
-                    result[variable] = ReadPropertyValue(entity, property);
+                    else
+                    {
+                        result[variable] = new JObject { ["error"] = "unknown_variable" };
+                    }
+                }
+                continue;
+            }
+            result[variable] = ReadPropertyValue(entity, property);
                 }
                 return result;
             }
@@ -5531,7 +5601,7 @@ private static JObject PropertyMetadata(PropertyInfo property, string domain, ob
         ["domain"] = domain ?? string.Empty,
         ["type"] = FriendlyTypeName(property.PropertyType),
         ["readable"] = property.CanRead,
-        ["writable"] = property.CanWrite,
+        ["writable"] = property.CanWrite && !IsReadOnlyDomain(domain),
         ["indexed"] = indexParameters.Length > 0,
         ["index_count"] = indexParameters.Length
     };
@@ -5639,34 +5709,65 @@ private static object ResolveVariableMetadata(object entity, PropertyInfo proper
     return null;
 }
 
-        private static PropertyInfo FindReadableProperty(object entity, string variable, string domain)
+private static PropertyInfo FindReadableProperty(object entity, string variable, string domain)
+    {
+        if (entity == null)
+        {
+            return null;
+        }
+
+        var alias = AliasPropertyName(variable, domain);
+        return GetReadableProperties(entity)
+            .Where(p => p.GetIndexParameters().Length == 0)
+            .FirstOrDefault(p =>
+                string.Equals(p.Name, alias, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(NormalizeVariableName(p.Name), NormalizeVariableName(alias), StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static PropertyInfo FindWritableProperty(object entity, string variable, string domain)
+    {
+        if (IsReadOnlyDomain(domain))
+        {
+            return null;
+        }
+
+        var alias = AliasPropertyName(variable, domain);
+        return GetReadableProperties(entity)
+            .Where(p => p.CanWrite && p.GetIndexParameters().Length == 0)
+            .FirstOrDefault(p =>
+                string.Equals(p.Name, alias, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(NormalizeVariableName(p.Name), NormalizeVariableName(alias), StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
+    /// Check whether a named property exists on the entity but is indexed
+    /// (i.e., requires get_indexed_value / set_indexed_value instead of
+    /// get_values / set_values). Returns the matching indexed PropertyInfo
+    /// or null if no match or the property is scalar.
+    /// </summary>
+    private static PropertyInfo FindAsIndexedProperty(object entity, string variable, string domain)
+    {
+        if (entity == null)
+        {
+            return null;
+        }
+
+        var alias = AliasPropertyName(variable, domain);
+        return GetReadableProperties(entity)
+            .Where(p => p.GetIndexParameters().Length > 0)
+            .FirstOrDefault(p =>
+                string.Equals(p.Name, alias, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(NormalizeVariableName(p.Name), NormalizeVariableName(alias), StringComparison.OrdinalIgnoreCase));
+    }
+
+        private static PropertyInfo FindIndexedProperty(object entity, string variable, string domain, int indexCount, bool requireWritable)
         {
             if (entity == null)
             {
                 return null;
             }
 
-            var alias = AliasPropertyName(variable, domain);
-            return GetReadableProperties(entity)
-                .Where(p => p.GetIndexParameters().Length == 0)
-                .FirstOrDefault(p =>
-                    string.Equals(p.Name, alias, StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(NormalizeVariableName(p.Name), NormalizeVariableName(alias), StringComparison.OrdinalIgnoreCase));
-        }
-
-        private static PropertyInfo FindWritableProperty(object entity, string variable, string domain)
-        {
-            var alias = AliasPropertyName(variable, domain);
-            return GetReadableProperties(entity)
-                .Where(p => p.CanWrite && p.GetIndexParameters().Length == 0)
-                .FirstOrDefault(p =>
-                    string.Equals(p.Name, alias, StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(NormalizeVariableName(p.Name), NormalizeVariableName(alias), StringComparison.OrdinalIgnoreCase));
-        }
-
-        private static PropertyInfo FindIndexedProperty(object entity, string variable, string domain, int indexCount, bool requireWritable)
-        {
-            if (entity == null)
+            if (requireWritable && IsReadOnlyDomain(domain))
             {
                 return null;
             }
@@ -5678,6 +5779,27 @@ private static object ResolveVariableMetadata(object entity, PropertyInfo proper
                 .FirstOrDefault(p =>
                     string.Equals(p.Name, alias, StringComparison.OrdinalIgnoreCase) ||
                     string.Equals(NormalizeVariableName(p.Name), NormalizeVariableName(alias), StringComparison.OrdinalIgnoreCase));
+        }
+
+        private static bool IsReadOnlyDomain(string domain)
+        {
+            switch ((domain ?? string.Empty).Trim().ToLowerInvariant())
+            {
+                case "ecopath_group_outputs":
+                case "ecopath_fleet_outputs":
+                case "ecopath_stats":
+                case "ecosim_group_outputs":
+                case "ecosim_fleet_outputs":
+                case "ecospace_group_outputs":
+                case "ecospace_fleet_outputs":
+                case "ecospace_region_outputs":
+                case "ecotracer_group_outputs":
+                case "mse_group_outputs":
+                case "mse_fleet_outputs":
+                    return true;
+                default:
+                    return false;
+            }
         }
 
         private static JObject IndexedValidationResult(EntityTarget target, string variable, int[] indices, bool valid, string reason, PropertyInfo property)
@@ -6138,7 +6260,7 @@ private static object ResolveVariableMetadata(object entity, PropertyInfo proper
             try
             {
                 var property = obj.GetType()
-                    .GetProperties(BindingFlags.Instance | BindingFlags.Public)
+                    .GetProperties(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
                     .FirstOrDefault(p => p.Name == propertyName && p.GetIndexParameters().Length == 0);
                 if (property != null)
                 {
@@ -6146,7 +6268,7 @@ private static object ResolveVariableMetadata(object entity, PropertyInfo proper
                 }
 
                 var field = obj.GetType()
-                    .GetFields(BindingFlags.Instance | BindingFlags.Public)
+                    .GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
                     .FirstOrDefault(f => f.Name == propertyName);
                 return field?.GetValue(obj);
             }

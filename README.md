@@ -100,7 +100,7 @@ Add a custom MCP server pointing at the `ewe-mcp` entry point with the same envi
 | `EWE_MCP_TOKEN` | `ewe-mcp-local-dev` | Authentication token |
 | `EWE_MCP_ENABLE_EVAL` | — | Gate `execute_ewe_code` and `shutdown_server` (`1` to enable) |
 | `EWE_MCP_MAX_RESPONSE_SIZE` | `10485760` (10 MB) | Client-side response size cap |
-| `EWE_MCP_SENTINEL_FILTERING` | — | Enable sentinel value filtering (`EWE_MCP_ENABLE_SENTINEL_FILTERING=1`) |
+| `EWE_MCP_FILTER_SENTINELS` | `1` | Filter `-9999` sentinel values from JSON responses (`0` to disable) |
 
 Plugin-side config is read from `%APPDATA%\Ecopath with Ecosim\EwE_MCP_Plugin.cfg` (INI with `[EwE_MCP]` header). Env vars override config file values.
 
@@ -133,7 +133,7 @@ _No standalone `run_ecotracer` — Ecotracer runs within Ecosim/Ecospace when Co
 `get_monte_carlo_parameters`, `list_monte_carlo_groups`, `get_monte_carlo_group`, `get_monte_carlo_run_state`, `run_monte_carlo`, `stop_monte_carlo`
 
 ### Generic Entity / Value
-`list_domains`, `list_entities`, `get_entity`, `list_variables`, `get_variable_metadata`, `get_values`, `validate_values`, `get_indexed_value`, `validate_indexed_value`, `set_values`, `set_indexed_value`
+`list_domains`, `list_entities`, `get_entity`, `list_variables`, `get_variable_metadata`, `get_values`, `validate_values`, `get_indexed_value`, `validate_indexed_value`, `set_values`, `set_indexed_value`, `search_entities`, `get_values_range`, `set_values_range`
 
 ### Navigation / UI
 `list_navigation_nodes`, `navigate_to_node`, `get_active_view`, `invoke_ui_command`, `list_ui_commands`, `refresh_ui`
@@ -190,7 +190,7 @@ await set_values(domain="ecopath_group", index=1, values={"name": "0-12 Snook"},
 
 - `execute_ewe_code` is disabled by default (requires `EWE_MCP_ENABLE_EVAL=1`). Deny patterns block `System.IO`, `System.Diagnostics.Process`, `System.Net`, file/process operations.
 - `shutdown_server` is gated behind the same eval flag. Both are blocked from `batch_commands`.
-- Never batch model lifecycle, simulation run/stop, export/capture, eval, shutdown, or scenario load/mutation commands.
+- Never batch model lifecycle, simulation run/stop, export/capture, eval, shutdown, `set_values`, `set_indexed_value`, or scenario load/mutation commands.
 - Use `validate_values` before `set_values`. Use `discard_changes` only for test cleanup — it clears dirty flags but doesn't revert values.
 - Prefer `save_model_as` to temp copies for mutations rather than overwriting shared models.
 

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from functools import lru_cache
 import os
 import struct
 from typing import Any
@@ -16,7 +15,6 @@ RECV_CHUNK_SIZE = 65_536
 DEFAULT_MAX_RESPONSE_SIZE = 10 * 1024 * 1024
 
 
-@lru_cache(maxsize=1)
 def get_max_response_size() -> int:
     raw = os.environ.get("EWE_MCP_MAX_RESPONSE_SIZE", str(DEFAULT_MAX_RESPONSE_SIZE))
     try:
@@ -82,12 +80,15 @@ BATCH_BLOCKED_COMMANDS = frozenset(
         "stop_monte_carlo",
         "set_ecosim_forcing_shape",
         "export_ecopath_results",
+        "export_ecosim_results",
         "create_ecopath_group",
         "create_ecopath_fleet",
         "shutdown_server",
         "invoke_ui_command",
         "import_time_series",
         "set_values_range",
+        "set_values",
+        "set_indexed_value",
     }
 )
 
@@ -113,10 +114,13 @@ def get_token() -> str:
 
 def error_hint(message: str) -> str | None:
     lower = message.lower()
-    if "connection" in lower or "refused" in lower:
+    if ("connection refused" in lower or "failed to connect" in lower or
+        "cannot connect" in lower or "not connected" in lower):
         return "Ensure EwE is running and the EwE MCP plugin is loaded and listening."
-    if "unauthorized" in lower or "token" in lower:
+    if "unauthorized" in lower or "invalid token" in lower:
         return "Set the same EWE_MCP_TOKEN for the EwE plugin and Python MCP server."
+    if any(phrase in lower for phrase in ("run ecosim before", "ecosim must be run", "before reading ecosim result")):
+        return "Ecosim must be run first. Use run_ecosim() then wait_for_ecosim_completion() before reading results."
     if "command" in lower and "not found" in lower:
         return "Call list_ui_commands or get_command_catalog to inspect available EwE UI commands."
     if "core" in lower and "unavailable" in lower:
@@ -145,6 +149,8 @@ def error_hint(message: str) -> str | None:
             "(2) check if the model requires manual conversion first, "
             "(3) increase the timeout with TIMEOUT_LONG or a custom timeout value."
         )
+    if "no model loaded" in lower or "model not loaded" in lower or "no model is loaded" in lower:
+        return "Load a model first using load_model(). The model path should point to a .EwEmdb file on the Windows VM."
     if "connection closed" in lower or "broken pipe" in lower or "reset" in lower:
         return (
             "The EwE plugin connection was corrupted. Recovery steps: "
@@ -188,7 +194,6 @@ EWE_NULL_VALUE = -9999.0
 _SENTINEL_VALUES = frozenset({-9999, -9999.0})
 
 
-@lru_cache(maxsize=1)
 def should_filter_sentinels() -> bool:
     return os.environ.get("EWE_MCP_FILTER_SENTINELS", "1") != "0"
 
@@ -258,6 +263,7 @@ _DOMAIN_ALIASES: dict[str, str] = {
 # 16=NotEditable, 32=ErrorEncountered, 64=MissingParameter,
 # 128=CoreHighlight, 256=Null, 512=Stored
 STATUS_CODE_MAP: dict[int, str] = {
+    0: "Unknown",
     1: "OK",
     2: "FailedValidation",
     4: "ValueComputed",
@@ -291,7 +297,7 @@ def validate_ewe_ranges(
     variables that violate range constraints. Unknown domains/variables are
     skipped (return empty dict).
     """
-    constraints = EWE_RANGE_CONSTRAINTS.get(domain, {})
+    constraints = EWE_RANGE_CONSTRAINTS.get(normalize_domain_name(domain), {})
     if not constraints:
         return {}
     results: dict[str, dict[str, Any]] = {}
