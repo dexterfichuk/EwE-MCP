@@ -2926,7 +2926,11 @@ case "list_ecosim_scenarios":
             var core = RequireCore();
             var manager = SafeGetProperty(core, "MSEManager");
             if (manager == null) throw new EwEMcpException("core_unavailable", "MSE not available");
-            manager.GetType().GetMethod("StopRun")?.Invoke(manager, new object[] { -1 });
+            try
+            {
+                manager.GetType().GetMethod("StopRun")?.Invoke(manager, new object[] { -1 });
+            }
+            catch { }
             return new JObject { ["stopped"] = true };
         }
 

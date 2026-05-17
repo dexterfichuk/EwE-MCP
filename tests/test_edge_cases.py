@@ -114,6 +114,10 @@ async def test_new_batch_blocked_commands():
     assert "stop_mse" in BATCH_BLOCKED_COMMANDS
     assert "run_monte_carlo" in BATCH_BLOCKED_COMMANDS
     assert "stop_monte_carlo" in BATCH_BLOCKED_COMMANDS
+    assert "set_values" in BATCH_BLOCKED_COMMANDS
+    assert "set_indexed_value" in BATCH_BLOCKED_COMMANDS
+    assert "set_values_range" in BATCH_BLOCKED_COMMANDS
+    assert "export_ecosim_results" in BATCH_BLOCKED_COMMANDS
 
 
 @pytest.mark.asyncio

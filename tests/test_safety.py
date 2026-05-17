@@ -325,6 +325,10 @@ _CSHARP_BATCH_BLOCKED = frozenset(
         "shutdown_server",
         "invoke_ui_command",
         "import_time_series",
+        "set_values_range",
+        "set_values",
+        "set_indexed_value",
+        "export_ecosim_results",
     }
 )
 
