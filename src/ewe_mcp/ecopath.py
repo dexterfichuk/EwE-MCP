@@ -2,6 +2,21 @@
 
 from __future__ import annotations
 
+import math
+
+
+def _check_finite(*values: float) -> None:
+    for v in values:
+        if not math.isfinite(v):
+            raise ValueError(f"Value must be a finite number, got {v}")
+
+
+def _check_non_negative(*values: float, names: list[str] | None = None) -> None:
+    for i, v in enumerate(values):
+        if v < 0:
+            name = names[i] if names else f"parameter {i}"
+            raise ValueError(f"{name} must be non-negative, got {v}")
+
 
 def estimate_fishing_mortality(catch: float, biomass: float) -> float:
     """
@@ -9,6 +24,8 @@ def estimate_fishing_mortality(catch: float, biomass: float) -> float:
 
     F = C / B
     """
+    _check_finite(catch, biomass)
+    _check_non_negative(catch, biomass, names=["catch", "biomass"])
     if biomass == 0:
         if catch == 0:
             return 0.0
@@ -24,6 +41,8 @@ def estimate_total_mortality(
 
     Z = F + M
     """
+    _check_finite(fishing_mortality, natural_mortality)
+    _check_non_negative(fishing_mortality, natural_mortality, names=["fishing_mortality", "natural_mortality"])
     return fishing_mortality + natural_mortality
 
 
@@ -33,6 +52,8 @@ def estimate_catch(biomass: float, fishing_mortality: float) -> float:
 
     C = B * F
     """
+    _check_finite(biomass, fishing_mortality)
+    _check_non_negative(biomass, fishing_mortality, names=["biomass", "fishing_mortality"])
     return biomass * fishing_mortality
 
 
@@ -42,6 +63,8 @@ def estimate_production(biomass: float, pb_ratio: float) -> float:
 
     P = B * (P/B)
     """
+    _check_finite(biomass, pb_ratio)
+    _check_non_negative(biomass, pb_ratio, names=["biomass", "pb_ratio"])
     return biomass * pb_ratio
 
 
@@ -51,6 +74,8 @@ def estimate_consumption(biomass: float, qb_ratio: float) -> float:
 
     Q = B * (Q/B)
     """
+    _check_finite(biomass, qb_ratio)
+    _check_non_negative(biomass, qb_ratio, names=["biomass", "qb_ratio"])
     return biomass * qb_ratio
 
 
@@ -60,6 +85,7 @@ def estimate_average_longevity(pb_ratio: float) -> float:
 
     Longevity = 1 / (P/B)
     """
-    if pb_ratio == 0:
-        raise ValueError("P/B ratio cannot be zero when estimating longevity.")
+    _check_finite(pb_ratio)
+    if pb_ratio <= 0:
+        raise ValueError(f"P/B ratio must be positive when estimating longevity, got {pb_ratio}")
     return 1.0 / pb_ratio

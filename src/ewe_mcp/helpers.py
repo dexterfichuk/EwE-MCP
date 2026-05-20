@@ -151,7 +151,7 @@ def error_hint(message: str) -> str | None:
         )
     if "no model loaded" in lower or "model not loaded" in lower or "no model is loaded" in lower:
         return "Load a model first using load_model(). The model path should point to a .EwEmdb file on the Windows VM."
-    if "connection closed" in lower or "broken pipe" in lower or "reset" in lower:
+    if "connection closed" in lower or "broken pipe" in lower or ("reset" in lower and ("connection" in lower or "peer" in lower)):
         return (
             "The EwE plugin connection was corrupted. Recovery steps: "
             "(1) Verify EwE is still running on the Windows VM, "
@@ -217,12 +217,14 @@ def filter_sentinels(value: Any) -> Any:
 # 4-tuple: (min_val, max_val, min_exclusive, max_exclusive)
 # min_exclusive=True means value must be > min_val (not >=)
 # max_exclusive=True means value must be < max_val (not <=)
-# Known variable names for Ecosim/Ecospace result tools (documentation only;
+
+# Known variable names for Ecosim/Ecospace/Ecotracer result tools (documentation only;
 # not used for runtime validation — the C# plugin rejects unknown names).
 ECOSIM_GROUP_RESULT_VARS = (
     "biomass",
     "biomass_rel",
     "catch",
+    "yield",  # alias for "catch"
     "catch_rel",
     "feeding_time",
     "fish_mort",
@@ -234,8 +236,16 @@ ECOSIM_GROUP_RESULT_VARS = (
     "prod_consump",
     "catch_by_fleet",
     "fishing_mort_by_fleet",
+    "value",
+    "value_rel",
+    "value_by_fleet",
+    "landings_by_fleet",
+    "discard_by_fleet",
 )
-ECOSIM_FLEET_RESULT_VARS = ("catch_biomass", "value", "effort", "profit", "risk")
+ECOSIM_FLEET_RESULT_VARS = ("catch_biomass", "value")  # "catch" is an alias for "catch_biomass"
+ECOSPACE_GROUP_RESULT_VARS = ("biomass", "relative_biomass")
+ECOSPACE_FLEET_RESULT_VARS = ("catch_biomass", "value")
+ECOTRACER_GROUP_RESULT_VARS = ("concentration", "conbio")
 
 EWE_RANGE_CONSTRAINTS: dict[str, dict[str, tuple[float, float, bool, bool]]] = {
     "ecosim_group_inputs": {

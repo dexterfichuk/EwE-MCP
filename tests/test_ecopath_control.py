@@ -114,7 +114,8 @@ def test_ecopath_fleet_diagnostics_after_run(live_client, sample_model_path):
 def test_export_ecopath_results(live_client, sample_model_path):
     live_client.command_result("load_model", {"path": sample_model_path})
     live_client.command_result("run_ecopath")
-    export_path = "C:/Users/dexter/ewe_mcp_test_export.csv"
+    vm_user = os.environ.get("EWE_VM_USER", "dexter")
+    export_path = f"C:/Users/{vm_user}/ewe_mcp_test_export.csv"
     result = live_client.command_result("export_ecopath_results", {"path": export_path})
     assert result["exported"] is True
     assert "path" in result

@@ -120,8 +120,12 @@ class EwEMCPClient:
             "timeout": timeout,
         }
         payload = json.dumps(request, separators=(",", ":")).encode("utf-8")
-        self.socket.sendall(HEADER_STRUCT.pack(len(payload)))
-        self.socket.sendall(payload)
+        try:
+            self.socket.sendall(HEADER_STRUCT.pack(len(payload)))
+            self.socket.sendall(payload)
+        except OSError:
+            self.disconnect()
+            raise ConnectionError("Connection lost during send") from None
 
         self._set_timeout(timeout)
         try:
@@ -136,6 +140,8 @@ class EwEMCPClient:
                     command_type,
                 )
             self._set_timeout(None)
+            if not data.strip():
+                raise ConnectionError("Received empty response from EwE MCP plugin")
             response = json.loads(data.decode("utf-8"))
             if "_events" in response:
                 self._notifications.extend(response.pop("_events"))
@@ -169,6 +175,6 @@ class EwEMCPClient:
         """Fetch pending dialog events. Sends a no-op ping to trigger piggyback delivery."""
         try:
             self.send_command("ping", timeout=5)
-        except Exception as exc:
+        except (ConnectionError, OSError, socket.timeout) as exc:
             logger.debug("get_dialog_events ping failed: %s", exc)
         return self.notifications

@@ -2214,7 +2214,8 @@ case "list_ecosim_scenarios":
                     {
                         case "biomass": val = SafeGetIndexedProperty(output, "Biomass", t); break;
                         case "relative_biomass": val = SafeGetIndexedProperty(output, "RelativeBiomass", t); break;
-                        default: break;
+                        default:
+                            throw new EwEMcpException("unknown_ecospace_result_variable", $"Unknown Ecospace result variable: {variable}");
                     }
                     arr.Add(new JObject { ["time"] = t, ["value"] = ToJToken(val) });
                 }
@@ -2249,7 +2250,8 @@ case "list_ecosim_scenarios":
                     {
                         case "catch_biomass": val = SafeGetIndexedProperty(output, "CatchBiomass", t); break;
                         case "value": val = SafeGetIndexedProperty(output, "Value", t); break;
-                        default: break;
+                        default:
+                            throw new EwEMcpException("unknown_ecospace_result_variable", $"Unknown Ecospace result variable: {variable}");
                     }
                     arr.Add(new JObject { ["time"] = t, ["value"] = ToJToken(val) });
                 }
@@ -2281,10 +2283,33 @@ case "list_ecosim_scenarios":
             var core = RequireCore();
             var basemap = SafeGetProperty(core, "EcospaceBasemap");
             if (basemap == null) throw new EwEMcpException("core_unavailable", "Ecospace basemap not available. Load an Ecospace scenario first.");
+            int rows = SafeIntProperty(basemap, "InRow");
+            int cols = SafeIntProperty(basemap, "InCol");
+            var depthLayer = SafeGetProperty(basemap, "LayerDepth");
+            var grid = new JArray();
+            if (depthLayer != null)
+            {
+                for (int r = 1; r <= rows; r++)
+                {
+                    var rowArr = new JArray();
+                    for (int c = 1; c <= cols; c++)
+                    {
+                        var cellObj = SafeGetIndexedProperty(depthLayer, "Cell", r, c);
+                        if (cellObj != null)
+                        {
+                            try { rowArr.Add(Convert.ToSingle(cellObj)); }
+                            catch { rowArr.Add(-1f); }
+                        }
+                        else { rowArr.Add(-1f); }
+                    }
+                    grid.Add(rowArr);
+                }
+            }
             return new JObject
             {
-                ["rows"] = SafeIntProperty(basemap, "InRow"),
-                ["cols"] = SafeIntProperty(basemap, "InCol"),
+                ["rows"] = rows,
+                ["cols"] = cols,
+                ["grid"] = grid,
                 ["cell_length"] = SafeJTokenProperty(basemap, "CellLength"),
                 ["cell_size"] = SafeJTokenProperty(basemap, "CellSize"),
                 ["latitude"] = SafeJTokenProperty(basemap, "Latitude"),
@@ -2736,7 +2761,8 @@ case "list_ecosim_scenarios":
                     {
                         case "concentration": val = SafeGetIndexedProperty(results, "Concentration", index, t); break;
                         case "conbio": val = SafeGetIndexedProperty(results, "ConBio", index, t); break;
-                        default: break;
+                        default:
+                            throw new EwEMcpException("unknown_ecotracer_result_variable", $"Unknown Ecotracer result variable: {variable}");
                     }
                     arr.Add(new JObject { ["time"] = t, ["value"] = ToJToken(val) });
                 }

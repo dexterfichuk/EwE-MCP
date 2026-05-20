@@ -3,6 +3,11 @@ import pytest
 from ewe_mcp.helpers import (
     BATCH_BLOCKED_COMMANDS,
     DEFAULT_MAX_RESPONSE_SIZE,
+    ECOSIM_FLEET_RESULT_VARS,
+    ECOSIM_GROUP_RESULT_VARS,
+    ECOSPACE_FLEET_RESULT_VARS,
+    ECOSPACE_GROUP_RESULT_VARS,
+    ECOTRACER_GROUP_RESULT_VARS,
     EWE_NULL_VALUE,
     STATUS_CODE_MAP,
     enrich_diagnose,
@@ -356,3 +361,33 @@ def test_validate_ewe_ranges_sentinel_mixed_with_valid():
     )
     assert "max_rel_pb" not in result
     assert result["den_dep_catchability"]["valid"] is True
+
+
+# ── Result variable constant sanity ────────────────────────────────────
+
+
+class TestResultVariableConstants:
+    """Structural sanity checks for result variable constant tuples."""
+
+    RESULT_VAR_CONSTANTS = [
+        ECOSIM_GROUP_RESULT_VARS,
+        ECOSIM_FLEET_RESULT_VARS,
+        ECOSPACE_GROUP_RESULT_VARS,
+        ECOSPACE_FLEET_RESULT_VARS,
+        ECOTRACER_GROUP_RESULT_VARS,
+    ]
+
+    def test_each_is_tuple_of_strings(self):
+        for const in self.RESULT_VAR_CONSTANTS:
+            assert isinstance(const, tuple), f"Expected tuple, got {type(const)}"
+            for item in const:
+                assert isinstance(item, str), f"Expected str, got {type(item)}: {item!r}"
+
+    def test_no_empty_strings(self):
+        for const in self.RESULT_VAR_CONSTANTS:
+            for item in const:
+                assert item != "", f"Empty string found in {const}"
+
+    def test_no_duplicates(self):
+        for const in self.RESULT_VAR_CONSTANTS:
+            assert len(const) == len(set(const)), f"Duplicates found in {const}"

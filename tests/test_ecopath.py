@@ -47,5 +47,37 @@ def test_consumption_calculation():
 def test_longevity_calculation():
     # Longevity = 1 / (P/B)
     assert estimate_average_longevity(pb_ratio=0.5) == 2.0
-    with pytest.raises(ValueError, match="P/B ratio cannot be zero"):
+    with pytest.raises(ValueError, match="P/B ratio must be positive"):
         estimate_average_longevity(pb_ratio=0.0)
+
+
+def test_negative_inputs_rejected():
+    with pytest.raises(ValueError, match="must be non-negative"):
+        estimate_fishing_mortality(catch=-10, biomass=100)
+    with pytest.raises(ValueError, match="must be non-negative"):
+        estimate_fishing_mortality(catch=10, biomass=-100)
+    with pytest.raises(ValueError, match="must be non-negative"):
+        estimate_catch(biomass=-1, fishing_mortality=0.5)
+    with pytest.raises(ValueError, match="must be non-negative"):
+        estimate_total_mortality(fishing_mortality=-0.1, natural_mortality=0.3)
+    with pytest.raises(ValueError, match="must be non-negative"):
+        estimate_production(biomass=100, pb_ratio=-0.5)
+    with pytest.raises(ValueError, match="must be non-negative"):
+        estimate_consumption(biomass=100, qb_ratio=-1.0)
+
+
+def test_nan_inf_inputs_rejected():
+    with pytest.raises(ValueError, match="must be a finite number"):
+        estimate_fishing_mortality(catch=float("nan"), biomass=100)
+    with pytest.raises(ValueError, match="must be a finite number"):
+        estimate_fishing_mortality(catch=10, biomass=float("inf"))
+    with pytest.raises(ValueError, match="must be a finite number"):
+        estimate_average_longevity(pb_ratio=float("inf"))
+    with pytest.raises(ValueError, match="must be a finite number"):
+        estimate_total_mortality(fishing_mortality=0.1, natural_mortality=float("-inf"))
+    with pytest.raises(ValueError, match="must be a finite number"):
+        estimate_catch(biomass=float("nan"), fishing_mortality=0.5)
+    with pytest.raises(ValueError, match="must be a finite number"):
+        estimate_production(biomass=100, pb_ratio=float("nan"))
+    with pytest.raises(ValueError, match="must be a finite number"):
+        estimate_consumption(biomass=100, qb_ratio=float("nan"))

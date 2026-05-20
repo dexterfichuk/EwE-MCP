@@ -8,6 +8,8 @@ import logging
 import time
 from typing import Any
 
+import socket
+
 import base64
 import pathlib
 
@@ -76,7 +78,8 @@ def _get_connection() -> EwEMCPClient:
         if now - _validated_at < _connection_ttl:
             return _connection
         try:
-            assert _connection.socket is not None
+            if _connection.socket is None:
+                raise OSError("socket is None")
             _connection.socket.getpeername()
             _validated_at = now
             return _connection
@@ -282,9 +285,14 @@ async def get_dialog_events() -> list[dict[str, Any]]:
     Returns an empty list if no dialogs were detected.
     """
     try:
-        return await asyncio.to_thread(_get_connection().get_dialog_events)
-    except Exception:
-        logger.debug("get_dialog_events failed", exc_info=True)
+        await _send("ping")
+    except (ConnectionError, OSError, socket.timeout, RuntimeError):
+        logger.warning("get_dialog_events ping failed — transport may be down")
+    try:
+        async with _send_lock:
+            return _get_connection().notifications
+    except (ConnectionError, OSError, RuntimeError):
+        logger.warning("get_dialog_events drain failed — transport may be down")
         return []
 
 
@@ -366,6 +374,7 @@ async def load_model(path: str) -> dict[str, Any]:
     with dialog watcher enabled (EWE_MCP_DIALOG_WATCHER=1) or
     convert the model manually before loading.
     """
+    _reject_path_traversal(path)
     return await _send("load_model", {"path": path}, timeout=TIMEOUT_LONG)
 
 
@@ -1003,7 +1012,13 @@ async def get_ecospace_group_results(
     start_time: int | None = None,
     end_time: int | None = None,
 ) -> dict[str, Any]:
-    """Read Ecospace group result time-series after a run."""
+    """Read Ecospace group result time-series after a run.
+
+    Known variable names: biomass, relative_biomass.
+    If variables is None, all available variables are returned.
+    Unknown variable names will be rejected by the EwE plugin with
+    a descriptive error.
+    """
     params: dict[str, Any] = {"index": index}
     if variables is not None:
         params["variables"] = variables
@@ -1021,7 +1036,13 @@ async def get_ecospace_fleet_results(
     start_time: int | None = None,
     end_time: int | None = None,
 ) -> dict[str, Any]:
-    """Read Ecospace fleet result time-series after a run."""
+    """Read Ecospace fleet result time-series after a run.
+
+    Known variable names: catch_biomass, value.
+    If variables is None, all available variables are returned.
+    Unknown variable names will be rejected by the EwE plugin with
+    a descriptive error.
+    """
     params: dict[str, Any] = {"index": index}
     if variables is not None:
         params["variables"] = variables
@@ -1310,8 +1331,12 @@ async def get_ecotracer_group_results(
 ) -> dict[str, Any]:
     """Read Ecotracer group result time-series after a run.
 
+    Known variable names: concentration, conbio.
     Defaults to at most 120 timesteps (start_time..start_time+119) when
     end_time is omitted, matching Ecosim/Ecospace result conventions.
+    If variables is None, all available variables are returned.
+    Unknown variable names will be rejected by the EwE plugin with
+    a descriptive error.
     """
     params: dict[str, Any] = {"index": index}
     if variables is not None:
@@ -1639,10 +1664,15 @@ async def get_ecosim_group_results(
     Known variable names: biomass, biomass_rel, catch, catch_rel,
     feeding_time, fish_mort, pred_mort, total_mort, tl,
     consump_biomass, avg_weight, prod_consump, catch_by_fleet,
-    fishing_mort_by_fleet. Additional variables may be available
-    depending on the EwE build. If variables is None, all available
-    variables are returned. Unknown variable names will be rejected
-    by the EwE plugin with a descriptive error.
+    fishing_mort_by_fleet, value, value_rel, value_by_fleet,
+    landings_by_fleet, discard_by_fleet.
+
+    Note: catch can also be requested as "yield".
+    Variables ending in _by_fleet require a fleet_index parameter.
+    Additional variables may be available depending on the EwE build.
+    If variables is None, all available variables are returned.
+    Unknown variable names will be rejected by the EwE plugin with
+    a descriptive error.
     """
     params: dict[str, Any] = {"index": index}
     if variables is not None:
@@ -1665,7 +1695,8 @@ async def get_ecosim_fleet_results(
 ) -> dict[str, Any]:
     """Read Ecosim fleet result time-series after a run.
 
-    Known variable names: catch_biomass, value, effort, profit, risk.
+    Known variable names: catch_biomass, value.
+    Note: catch_biomass can also be requested as "catch".
     Additional variables may be available depending on the EwE build.
     If variables is None, all available variables are returned.
     Unknown variable names will be rejected by the EwE plugin with
@@ -1880,6 +1911,8 @@ async def save_screenshot(
         max_height: Optional max pixel height to downscale to.
     """
     _reject_path_traversal(path)
+    if not path.lower().endswith('.png'):
+        raise ValueError("path must end with .png extension")
     target = target.lower()
     if target not in _VALID_CAPTURE_TARGETS:
         raise ValueError(f"target must be one of {sorted(_VALID_CAPTURE_TARGETS)}, got {target!r}")
