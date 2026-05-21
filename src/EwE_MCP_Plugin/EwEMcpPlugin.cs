@@ -1449,6 +1449,13 @@ case "list_ecosim_scenarios":
             var method = core.GetType().GetMethod("AddGroup", new[] { typeof(string), typeof(float), typeof(float), typeof(int).MakeByRefType(), typeof(int).MakeByRefType() });
             if (method == null) throw new EwEMcpException("unsupported_operation", "AddGroup not available in this EwE build");
 
+            // Capture active Ecosim scenario index before AddGroup triggers a batch lock release.
+            // AddGroup internally calls ReleaseBatchLock(eBatchChangeLevelFlags.Ecopath) which
+            // reloads Ecopath data via LoadModel but explicitly leaves Ecosim data stale
+            // (Ecosim scenarios are only reloaded when the batch level is Ecosim or deeper).
+            // We force-reload the Ecosim scenario afterwards to prevent array bounds errors.
+            int activeEcosimIndex = SafeIntProperty(core, "ActiveEcosimScenarioIndex");
+
             object[] args = new object[] { name, sPP, sVBK, iGroup, iGroupID };
             bool ok = Convert.ToBoolean(method.Invoke(core, args));
             if (!ok) throw new EwEMcpException("create_failed", "Failed to create Ecopath group");
@@ -1456,7 +1463,32 @@ case "list_ecosim_scenarios":
             int newGroupIndex = Convert.ToInt32(args[3]);
             int newGroupID = Convert.ToInt32(args[4]);
 
-            // Set optional properties on the new group if provided
+            // Force reload of the active Ecosim scenario to update its in-memory
+            // data structures for the new group count. Without this, loading the
+            // scenario later would read n+1 rows from EcosimScenarioGroup into
+            // arrays sized for n groups, causing "Index was outside the bounds
+            // of the array".
+            if (activeEcosimIndex > 0)
+            {
+                var loadEcosimMethod = core.GetType().GetMethod("LoadEcosimScenario",
+                    System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public,
+                    null, new[] { typeof(int) }, null);
+                if (loadEcosimMethod != null)
+                {
+                    try
+                    {
+                        loadEcosimMethod.Invoke(core, new object[] { activeEcosimIndex });
+                    }
+                    catch (Exception ex)
+                    {
+                        EwEMcpFileLog.Warn($"CreateEcopathGroup: failed to reload Ecosim scenario {activeEcosimIndex}: {ex.Message}");
+                    }
+                }
+            }
+
+            // Set optional properties on the new group if provided.
+            // After AddGroup the Ecopath data should be fresh, so SafeSetProperty
+            // will write to the proper in-memory objects.
             var input = SafeGetIndexedProperty(core, "EcopathGroupInputs", newGroupIndex);
             if (input != null)
             {
@@ -1482,6 +1514,9 @@ case "list_ecosim_scenarios":
                 }
             }
 
+            // Mark the data source as dirty for the optional property sets above
+            MarkDataSourceModified("ecopath_groups");
+
     return new JObject
     {
         ["created"] = true,
@@ -1489,7 +1524,7 @@ case "list_ecosim_scenarios":
         ["name"] = name,
         ["type"] = GroupTypeFromInt(groupType),
         ["group_id"] = newGroupID,
-        ["warning"] = "New group written to database but in-memory core counts (nGroups) are not immediately refreshed. The new group may not appear in list_ecopath_groups or get_values until the model is saved and reloaded. Use save_model followed by load_model to refresh."
+        ["ecosim_reloaded"] = activeEcosimIndex > 0
     };
         }
 
@@ -3407,6 +3442,9 @@ case "list_ecosim_scenarios":
                 }
             }
 
+            // Mark the Ecosim data source as dirty so the shape changes are persisted
+            MarkDataSourceModified("ecosim_scenarios");
+
         return new JObject
         {
             ["index"] = index,
@@ -5077,6 +5115,7 @@ case "list_ecosim_scenarios":
             try
             {
                 property.SetValue(target.Entity, convertedValue, indices.Cast<object>().ToArray());
+                SyncEntityToDataSource(target.Entity, target.NormalizedDomain);
             }
             catch (Exception ex)
             {
@@ -5151,6 +5190,7 @@ case "list_ecosim_scenarios":
                 try
                 {
                     property.SetValue(entity, convertedValue, null);
+                    SyncEntityToDataSource(entity, domain);
                     results[pair.Key] = "updated";
                 }
                 catch
@@ -6125,6 +6165,146 @@ private static PropertyInfo FindReadableProperty(object entity, string variable,
             }
         }
 
+
+        /// <summary>
+        /// Mark the EwE data source as modified so that save_model persists
+        /// reflection-based property changes to the database.
+        /// Mapped domain names to eCoreComponentType enum values (1=Ecopath,
+        /// 2=Ecosim, 3=Ecospace, 10=Ecotracer, 15=MSE, ...) so that the
+        /// data source's SetChanged() properly tracks which component is dirty.
+        /// </summary>
+        /// <summary>
+        /// Sync a changed Core entity to the DataSource so save_model persists it.
+        /// Calls cCore.UpdateEcopathInput(dbId) via reflection.
+        /// </summary>
+        private void SyncEntityToDataSource(object entity, string domain)
+        {
+            if (entity == null) return;
+
+            var core = _core();
+            if (core == null) return;
+
+            var dbId = SafeGetProperty(entity, "DBID");
+            if (dbId == null) return;
+
+            var normalized = (domain ?? string.Empty).Trim().ToLowerInvariant();
+            string updateMethod = null;
+            switch (normalized)
+            {
+                case "ecopath_groups": updateMethod = "UpdateEcopathInput"; break;
+                case "ecopath_fleets": updateMethod = "UpdateFleetInput"; break;
+                case "ecosim_group_inputs": updateMethod = "UpdateEcoSimGroup"; break;
+                case "ecosim_fleet_inputs": updateMethod = "UpdateEcoSimFleetInput"; break;
+            }
+
+            if (updateMethod == null) return;
+
+            try
+            {
+                var method = core.GetType().GetMethod(updateMethod,
+                    System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic);
+                if (method != null)
+                {
+                    method.Invoke(core, new object[] { Convert.ToInt32(dbId) });
+                }
+            }
+            catch (Exception ex)
+            {
+                EwEMcpFileLog.Warn($"SyncEntityToDataSource({updateMethod}, dbId={dbId}) failed: {ex.Message}");
+            }
+        }
+
+        private void MarkDataSourceModified(string domain)
+        {
+            var core = _core();
+            if (core == null) return;
+
+            var dataSource = SafeGetProperty(core, "DataSource");
+            if (dataSource == null) return;
+
+            int componentValue;
+            switch ((domain ?? string.Empty).Trim().ToLowerInvariant())
+            {
+                case "ecopath_groups":
+                case "ecopath_fleets":
+                case "ecopath_group_outputs":
+                case "ecopath_fleet_outputs":
+                case "ecopath_stats":
+                    componentValue = 1; // eCoreComponentType.Ecopath
+                    break;
+                case "ecosim_group_inputs":
+                case "ecosim_group_outputs":
+                case "ecosim_fleet_inputs":
+                case "ecosim_fleet_outputs":
+                case "ecosim_scenarios":
+                    componentValue = 2; // eCoreComponentType.Ecosim
+                    break;
+                case "ecospace_group_inputs":
+                case "ecospace_group_outputs":
+                case "ecospace_fleet_inputs":
+                case "ecospace_fleet_outputs":
+                case "ecospace_scenarios":
+                case "ecospace_habitats":
+                case "ecospace_mpas":
+                case "ecospace_region_outputs":
+                    componentValue = 3; // eCoreComponentType.Ecospace
+                    break;
+                case "ecotracer_scenarios":
+                case "ecotracer_group_inputs":
+                case "ecotracer_group_outputs":
+                case "ecotracer_model_parameters":
+                    componentValue = 10; // eCoreComponentType.Ecotracer
+                    break;
+                case "mse_parameters":
+                case "mse_group_inputs":
+                case "mse_group_outputs":
+                case "mse_fleet_inputs":
+                case "mse_fleet_outputs":
+                    componentValue = 15; // eCoreComponentType.MSE
+                    break;
+                case "monte_carlo_groups":
+                    componentValue = 8; // eCoreComponentType.EcoSimMonteCarlo
+                    break;
+                default:
+                    componentValue = 1; // Default to Ecopath
+                    break;
+            }
+
+            try
+            {
+                // Resolve the eCoreComponentType enum from the core assembly
+                var enumType = dataSource.GetType().Assembly.GetType("EwECore.eCoreComponentType");
+                if (enumType == null) return;
+
+                var ccValue = Enum.ToObject(enumType, componentValue);
+
+                // Call DataSource.SetChanged(ccValue) via reflection
+                var setChangedMethod = dataSource.GetType().GetMethod("SetChanged",
+                    System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public,
+                    null, new[] { enumType }, null);
+                if (setChangedMethod != null)
+                {
+                    setChangedMethod.Invoke(dataSource, new object[] { ccValue });
+
+                    // Also notify the StateMonitor so SaveChanges() detects the change
+                    var stateMonitor = SafeGetProperty(core, "StateMonitor");
+                    if (stateMonitor != null)
+                    {
+                        var registerMethod = stateMonitor.GetType().GetMethod("RegisterModification",
+                            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public,
+                            null, new[] { enumType }, null);
+                        if (registerMethod != null)
+                        {
+                            registerMethod.Invoke(stateMonitor, new object[] { ccValue });
+                        }
+                    }
+                }
+            }
+            catch
+            {
+                // Best-effort; failing to dirty the data source is not fatal to the set operation itself.
+            }
+        }
 
         private cCore RequireCore()
         {
