@@ -64,6 +64,20 @@ async def test_create_ecopath_group_accepts_all_group_types(mock_send, group_typ
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("group_type", [-1, 3, 99, None])
+async def test_create_ecopath_group_rejects_invalid_types(mock_send, group_type):
+    from ewe_mcp.server import create_ecopath_group
+
+    if group_type is None:
+        with pytest.raises(ValueError, match="group_type is required"):
+            await create_ecopath_group(name="BadGroup", group_type=group_type)
+    else:
+        with pytest.raises(ValueError, match="group_type must be"):
+            await create_ecopath_group(name="BadGroup", group_type=group_type)
+    mock_send.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_create_ecopath_fleet_name_only(mock_send):
     from ewe_mcp.server import create_ecopath_fleet
 

@@ -765,6 +765,8 @@ async def create_ecopath_group(
     """
     if group_type is None:
         raise ValueError("group_type is required (0=consumer, 1=producer, 2=detritus)")
+    if group_type not in (0, 1, 2):
+        raise ValueError(f"group_type must be 0 (consumer), 1 (producer), or 2 (detritus), got {group_type}")
 
     params: dict[str, Any] = {"name": name}
     if biomass is not None:

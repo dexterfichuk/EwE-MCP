@@ -4291,7 +4291,7 @@ case "list_ecosim_scenarios":
             var core = RequireCore();
             string path = parameters?["path"]?.ToString();
             bool ok;
-            if (string.IsNullOrEmpty(path))
+            if (string.IsNullOrWhiteSpace(path))
                 ok = core.Save();
             else
                 ok = core.Save(path);
@@ -4305,6 +4305,39 @@ case "list_ecosim_scenarios":
             }
 
             return new JObject { ["saved"] = ok, ["path"] = path ?? string.Empty };
+        }
+
+        /// <summary>
+        /// Strip password/credentials from an OLEDB connection string to prevent
+        /// credential leakage via exception messages or logging.
+        /// Also ensures Persist Security Info is set to False.
+        /// </summary>
+        private static string SanitizeConnectionString(string cs)
+        {
+            if (string.IsNullOrEmpty(cs)) return cs;
+            try
+            {
+                var builder = new System.Data.OleDb.OleDbConnectionStringBuilder(cs);
+                // Remove any password
+                if (builder.ContainsKey("Jet OLEDB:Database Password"))
+                    builder.Remove("Jet OLEDB:Database Password");
+                if (builder.ContainsKey("Password"))
+                    builder.Remove("Password");
+                // Prevent credentials from being discoverable via ConnectionString property
+                builder["Persist Security Info"] = "False";
+                return builder.ConnectionString;
+            }
+            catch
+            {
+                // If we can't parse it, strip common credential tokens manually
+                var sanitized = System.Text.RegularExpressions.Regex.Replace(cs,
+                    @"(Jet OLEDB:Database Password|Password|Pwd)=[^;]*;?",
+                    "", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+                sanitized = System.Text.RegularExpressions.Regex.Replace(sanitized,
+                    @"Persist Security Info=[^;]*;?",
+                    "Persist Security Info=False;", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+                return sanitized.TrimEnd(';');
+            }
         }
 
         /// <summary>
@@ -4328,10 +4361,20 @@ case "list_ecosim_scenarios":
                     if (oleDbConn != null)
                     {
                         var cs = SafeGetProperty(oleDbConn, "ConnectionString") as string;
-                        if (!string.IsNullOrEmpty(cs)) return cs;
+                        if (!string.IsNullOrEmpty(cs))
+                        {
+                            // Strip any password/credentials from the connection string
+                            // to prevent credential leakage via exception messages.
+                            cs = SanitizeConnectionString(cs);
+                            return cs;
+                        }
                     }
                     var cs2 = SafeGetProperty(connObj, "ConnectionString") as string;
-                    if (!string.IsNullOrEmpty(cs2)) return cs2;
+                    if (!string.IsNullOrEmpty(cs2))
+                    {
+                        cs2 = SanitizeConnectionString(cs2);
+                        return cs2;
+                    }
                 }
             }
             catch { }
@@ -4502,7 +4545,7 @@ case "list_ecosim_scenarios":
                         }
                         catch (Exception ex)
                         {
-                            EwEMcpFileLog.Warn($"FlushPendingDietWrites: failed for predIdx={predIndex} preyIdx={preyIndex}: {ex.Message}");
+                            EwEMcpFileLog.Warn($"FlushPendingDietWrites: failed for predIdx={predIndex} preyIdx={preyIndex}: {ex.GetType().Name}");
                         }
                     }
                 }
@@ -4510,13 +4553,18 @@ case "list_ecosim_scenarios":
             }
             catch (Exception ex)
             {
-                EwEMcpFileLog.Warn($"FlushPendingDietWrites: connection failed: {ex.Message}");
+                EwEMcpFileLog.Warn("FlushPendingDietWrites: connection failed — see plugin log for details");
+                EwEMcpFileLog.Info($"FlushPendingDietWrites: connection exception type: {ex.GetType().Name}");
             }
         }
 
         private JObject CloseModel()
         {
             bool ok = RequireCore().CloseModel();
+            lock (_dietLock)
+            {
+                _pendingDietWrites.Clear();
+            }
             return new JObject { ["closed"] = ok };
         }
 
@@ -5479,7 +5527,7 @@ case "list_ecosim_scenarios":
                             int preyId = Convert.ToInt32(
                                 SafeGetProperty(preyInput, "GroupID") ?? SafeGetProperty(preyInput, "DBID"));
 
-                                        var connStr2 = GetConnectionString(core2);
+                            var connStr2 = GetConnectionString(core2);
                             if (!string.IsNullOrEmpty(connStr2))
                             {
                                 using (var conn = new OleDbConnection(connStr2))
@@ -5513,7 +5561,7 @@ case "list_ecosim_scenarios":
                     }
                     catch (Exception dex)
                     {
-                        EwEMcpFileLog.Warn($"SetIndexedValue: diet_comp immediate SQL failed: {dex.Message}");
+                        EwEMcpFileLog.Warn($"SetIndexedValue: diet_comp immediate SQL failed: {dex.GetType().Name}");
                     }
                 }
             }
@@ -7440,23 +7488,6 @@ private static PropertyInfo FindReadableProperty(object entity, string variable,
             }
         }
 
-        /// <summary>
-        /// Represents a pending diet composition write that needs to be re-applied
-        /// to the EcopathDietComp table after core.Save() has finished (since
-        /// SaveEcopathDietComp does DELETE+INSERT from the in-memory DC array
-        /// which has zeros for newly created groups).
-        /// Stores 1-based group indices rather than GroupIDs because the DB-assigned
-        /// GroupID may differ from the temporary ID assigned by AddGroup.
-        /// Indices are stable across save/load cycles.
-        /// </summary>
-        private struct DietWrite
-        {
-            /// <summary>1-based predator group index.</summary>
-            public int PredIndex { get; set; }
-            /// <summary>1-based prey group index.</summary>
-            public int PreyIndex { get; set; }
-            public float Diet { get; set; }
-        }
 
         private sealed class EntityTarget
         {
