@@ -44,6 +44,13 @@ from ewe_mcp.helpers import (
     should_filter_sentinels,
     validate_ewe_ranges,
 )
+from ewe_mcp.name_batch import (
+    DOMAIN_CONFIG,
+    STATIC_WRITABLE_FIELDS,
+    default_capabilities,
+    rank_name_suggestions,
+    resolve_exact_name,
+)
 
 logger = logging.getLogger("ewe_mcp")
 mcp = FastMCP("EwE MCP")
@@ -52,6 +59,7 @@ _connection: EwEMCPClient | None = None
 _validated_at = 0.0
 _connection_ttl = 5.0
 _send_lock = asyncio.Lock()
+_writable_fields_cache: dict[str, set[str]] | None = None
 _VALID_CAPTURE_TARGETS = {"auto", "main", "active", "content"}
 _VALID_IMPORT_TYPES = {"biomass", "catch", "effort", "forcing"}
 
@@ -687,6 +695,68 @@ async def set_values_range(
     result["domain"] = normalize_domain_name(result.get("domain", domain))
     await refresh_ui()
     return result
+
+
+async def _discover_dynamic_writable_fields() -> dict[str, set[str]]:
+    """Best-effort metadata discovery; caches and returns result."""
+    global _writable_fields_cache
+    if _writable_fields_cache is not None:
+        return _writable_fields_cache
+    dynamic: dict[str, set[str]] = {}
+    for domain in DOMAIN_CONFIG:
+        try:
+            variables = await list_variables(domain=domain)
+        except Exception:
+            continue
+        writable = {
+            v.get("name")
+            for v in variables.get("variables", [])
+            if isinstance(v, dict) and v.get("name") and bool(v.get("writable", False))
+        }
+        if writable:
+            dynamic[domain] = writable
+    _writable_fields_cache = dynamic
+    return dynamic
+
+
+def _get_writable_fields(domain: str) -> frozenset:
+    """Get writable fields for a domain: dynamic-cached first, static fallback.
+    Merges both to catch aliases (e.g. 'pb' vs 'PBInput')."""
+    static = frozenset(STATIC_WRITABLE_FIELDS.get(domain, set()))
+    if _writable_fields_cache is not None and domain in _writable_fields_cache:
+        return frozenset(_writable_fields_cache[domain]) | static
+    return static
+
+
+def _empty_batch_summary() -> dict[str, int]:
+    return {
+        "total": 0,
+        "applied": 0,
+        "failed": 0,
+        "not_found": 0,
+        "ambiguous": 0,
+        "validation_failed": 0,
+        "skipped": 0,
+    }
+
+
+def _final_batch_status(summary: dict[str, int]) -> str:
+    if summary["failed"] == 0:
+        return "success"
+    if summary["applied"] == 0:
+        return "failed"
+    return "partial_success"
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+async def list_name_batch_capabilities() -> dict[str, Any]:
+    """List supported domains, match fields, and writable fields for name-based batch updates.
+
+    Use this first to discover which domains and fields are available before
+    calling set_values_by_name_batch.
+    """
+    dynamic = await _discover_dynamic_writable_fields()
+    return default_capabilities(dynamic_fields=dynamic)
 
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
@@ -2003,6 +2073,232 @@ async def set_indexed_value(
     result = await _send("set_indexed_value", params, timeout=TIMEOUT_LONG)
     await refresh_ui()
     return result
+
+
+@mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
+async def set_values_by_name_batch(
+    operations: list[dict[str, Any]],
+    options: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Resolve exact names to indices and apply mixed-domain set_values in one request.
+
+    Each operation specifies a domain, name, and values. Names are resolved by
+    exact match only. If no exact match is found, ranked fuzzy suggestions are
+    returned so the agent can retry with the correct spelling.
+
+    Use list_name_batch_capabilities first to discover supported domains,
+    match fields, and writable fields.
+
+    Pass navigate=True per operation only when you want to visually navigate
+    the EwE GUI to the edited screen. Defaults to False for bulk workflows.
+
+    Args:
+        operations: List of operation dicts, each with domain, name, values,
+            and optional match_field/navigate.
+        options: Optional dict with dry_run, stop_on_error,
+            include_suggestions, max_suggestions.
+    """
+    opts = options or {}
+    dry_run = bool(opts.get("dry_run", False))
+    stop_on_error = bool(opts.get("stop_on_error", False))
+    include_suggestions = bool(opts.get("include_suggestions", True))
+    max_suggestions = int(opts.get("max_suggestions", 5))
+
+    summary = _empty_batch_summary()
+    summary["total"] = len(operations)
+    results: list[dict[str, Any]] = []
+    entity_cache: dict[tuple[str, str], list[dict[str, Any]]] = {}
+
+    for idx, op in enumerate(operations):
+        domain = normalize_domain_name(str(op.get("domain", "")))
+        name = str(op.get("name", ""))
+        values = op.get("values")
+        match_field = str(op.get("match_field", "name"))
+        navigate = bool(op.get("navigate", False))
+
+        item: dict[str, Any] = {
+            "op_index": idx,
+            "domain": domain,
+            "name": name,
+            "match_field": match_field,
+        }
+
+        # Validate domain
+        if domain not in DOMAIN_CONFIG:
+            item.update({
+                "status": "set_failed",
+                "error_code": "unknown_domain",
+                "message": f"Unsupported domain for name batch: {domain}",
+            })
+            summary["failed"] += 1
+            results.append(item)
+            if stop_on_error:
+                break
+            continue
+
+        # Validate match_field
+        allowed_match_fields = DOMAIN_CONFIG[domain].get("match_fields", ["name"])
+        if match_field not in allowed_match_fields:
+            item.update({
+                "status": "set_failed",
+                "error_code": "invalid_match_field",
+                "message": f"match_field '{match_field}' not supported for domain '{domain}'; allowed: {allowed_match_fields}",
+            })
+            summary["failed"] += 1
+            results.append(item)
+            if stop_on_error:
+                break
+            continue
+
+        # Validate values
+        if not isinstance(values, dict) or not values:
+            item.update({
+                "status": "set_failed",
+                "error_code": "invalid_values",
+                "message": "values must be a non-empty object",
+            })
+            summary["failed"] += 1
+            results.append(item)
+            if stop_on_error:
+                break
+            continue
+
+        # Ensure writable fields cache is populated (dynamic discovery first)
+        if _writable_fields_cache is None:
+            await _discover_dynamic_writable_fields()
+
+        # Validate fields against dynamically discovered metadata with
+        # STATIC_WRITABLE_FIELDS as fallback when dynamic is unavailable.
+        allowed = _get_writable_fields(domain)
+        using_dynamic = _writable_fields_cache is not None and domain in (_writable_fields_cache or {})
+
+        unknown = sorted([k for k in values if k not in allowed])
+        if unknown:
+            if using_dynamic:
+                # Dynamic discovery confirmed these fields are not writable
+                item.update({
+                    "status": "validation_failed",
+                    "error_code": "unknown_field",
+                    "message": "One or more fields are not writable in this domain",
+                    "details": {"unknown_fields": unknown},
+                })
+                summary["failed"] += 1
+                summary["validation_failed"] += 1
+                results.append(item)
+                if stop_on_error:
+                    break
+                continue
+            else:
+                # Static fallback may be incomplete; warn but do not reject
+                item.setdefault("_warnings", []).append(
+                    f"Fields not listed in static writable set; "
+                    f"will attempt set_values with validate_values: {unknown}"
+                )
+
+        # Fetch all entities for name resolution (cached per domain+match_field, paged)
+        cache_key = (domain, match_field)
+        if cache_key not in entity_cache:
+            entities: list[dict[str, Any]] = []
+            start_index = 1
+            while True:
+                range_result = await get_values_range(
+                    domain=domain,
+                    variables=[match_field],
+                    start_index=start_index,
+                    max_entities=500,
+                    navigate=False,
+                )
+                page = range_result.get("entities", [])
+                entities.extend(page)
+                if not range_result.get("truncated"):
+                    break
+                start_index = (page[-1]["index"] + 1) if page else (start_index + 500)
+            entity_cache[cache_key] = entities
+        entities = entity_cache[cache_key]
+        resolved = resolve_exact_name(entities, name, match_field=match_field)
+
+        # Handle not_found
+        if resolved["resolution_status"] == "not_found":
+            item.update({
+                "resolution_status": "not_found",
+                "status": "not_found",
+                "error_code": "not_found",
+                "message": "No exact name match found",
+            })
+            if include_suggestions:
+                item["suggestions"] = rank_name_suggestions(
+                    name,
+                    entities,
+                    max_suggestions=max_suggestions,
+                    match_field=match_field,
+                )
+            summary["failed"] += 1
+            summary["not_found"] += 1
+            results.append(item)
+            if stop_on_error:
+                break
+            continue
+
+        # Handle ambiguous
+        if resolved["resolution_status"] == "ambiguous":
+            item.update({
+                "resolution_status": "ambiguous",
+                "status": "ambiguous",
+                "error_code": "ambiguous_name",
+                "message": "Multiple exact matches found",
+                "candidates": resolved["candidates"],
+            })
+            summary["failed"] += 1
+            summary["ambiguous"] += 1
+            results.append(item)
+            if stop_on_error:
+                break
+            continue
+
+        # Exact match — proceed with validation
+        resolved_index = int(resolved["resolved_index"])
+        item["resolved_index"] = resolved_index
+        item["resolution_status"] = "exact"
+
+        validation = await validate_values(domain=domain, index=resolved_index, values=values)
+        invalid = [
+            k
+            for k, v in (validation.get("results") or {}).items()
+            if isinstance(v, dict) and v.get("valid") is False
+        ]
+        if invalid:
+            item.update({
+                "status": "validation_failed",
+                "error_code": "validation_failed",
+                "message": "Validation failed for one or more fields",
+                "validation": validation,
+            })
+            summary["failed"] += 1
+            summary["validation_failed"] += 1
+            results.append(item)
+            if stop_on_error:
+                break
+            continue
+
+        # Dry run — report without mutating
+        if dry_run:
+            item.update({"status": "applied", "dry_run": True, "validation": validation})
+            summary["applied"] += 1
+            results.append(item)
+            continue
+
+        # Apply mutation
+        set_result = await set_values(
+            domain=domain,
+            index=resolved_index,
+            values=values,
+            navigate=navigate,
+        )
+        item.update({"status": "applied", "dry_run": False, "set_result": set_result})
+        summary["applied"] += 1
+        results.append(item)
+
+    return {"status": _final_batch_status(summary), "summary": summary, "results": results}
 
 
 @mcp.tool(

@@ -111,10 +111,13 @@ def _validate_batch_blocked_commands(cmds: "list[str]") -> None:
 def get_batch_blocked_commands(client: "EwEMCPClient | None" = None) -> "frozenset":
     """Query the C# plugin for the authoritative batch-blocked command set.
 
+    A connected EwEMCPClient is required to query the plugin. When called
+    without a client, or when the plugin is unreachable, the function
+    returns the hardcoded BATCH_BLOCKED_COMMANDS fallback instead.
+
     Results are cached globally (only when the plugin responds successfully).
-    Falls back to BATCH_BLOCKED_COMMANDS if the plugin is unreachable or
-    returns an invalid response. The fallback is never cached so a subsequent
-    call with a working client will re-query.
+    The fallback is never cached so a subsequent call with a working client
+    will re-query.
     """
     global _BATCH_BLOCKED_COMMANDS_CACHE
     if _BATCH_BLOCKED_COMMANDS_CACHE is not None:
