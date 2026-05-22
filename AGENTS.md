@@ -12,6 +12,27 @@ This repo builds an MCP bridge for a live Ecopath with Ecosim (EwE) desktop proc
 - Development token: `ewe-mcp-local-dev`
 - Sample model: `C:\Users\dexter\Eii.Ecopath\Database\Tampa_Bay.EwEmdb`
 
+## MCP Client Config
+
+Add to your `opencode.jsonc` or MCP client config, pointing at the installed `ewe-mcp.exe`:
+
+```jsonc
+{
+  "mcpServers": {
+    "ewe": {
+      "command": "C:\\Program Files\\EwE-MCP\\ewe-mcp.exe",
+      "env": {
+        "EWE_MCP_HOST": "127.0.0.1",
+        "EWE_MCP_PORT": "9877",
+        "EWE_MCP_TOKEN": "ewe-mcp-local-dev"
+      }
+    }
+  }
+}
+```
+
+Adjust the `command` path to wherever the installer placed `ewe-mcp.exe`. For development from source: `"command": "uv", "args": ["run", "--directory", "/path/to/EwE-MCP", "ewe-mcp"]`.
+
 Never commit credentials. Put the VM password in the `SSHPASS` environment variable before using `sshpass` commands.
 
 ## Start Safely

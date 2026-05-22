@@ -209,7 +209,7 @@ namespace EwE_MCP_Plugin
                 {
                     throw new EwEMcpException("missing_type", "Missing command type");
                 }
-                if (!string.Equals(request.Token, _config.Token, StringComparison.Ordinal))
+                if (!FixedTimeEquals(request.Token ?? string.Empty, _config.Token ?? string.Empty))
                 {
                     throw new EwEMcpException("unauthorized", "Invalid or missing EWE_MCP_TOKEN");
                 }
@@ -604,8 +604,9 @@ namespace EwE_MCP_Plugin
 
         private static readonly string[] _riskyTextPatterns = new[]
         {
-            "delete", "remove", "overwrite", "replace", "discard",
-            "are you sure", "confirm", "warning", "unsaved",
+            "permanently delete", "are you sure you want to delete", "are you sure you want to remove",
+            "overwrite existing", "replace", "discard changes",
+            "are you sure", "confirm", "unsaved changes will be lost",
             "save changes", "do you want to save"
         };
 
@@ -651,21 +652,33 @@ namespace EwE_MCP_Plugin
         private static readonly HashSet<string> _safeDialogTitles = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
             "Ecopath with Ecosim",
-            "EwE",
             "Ecopath",
+            "Ecosim",
+            "Ecospace",
         };
 
         private static bool IsSafeToDismiss(string title)
         {
             foreach (var safe in _safeDialogTitles)
             {
-                if (title.IndexOf(safe, StringComparison.OrdinalIgnoreCase) >= 0)
+                if (title.StartsWith(safe, StringComparison.OrdinalIgnoreCase))
                     return true;
             }
             return false;
         }
 
-    private static void ClickDialogButton(IntPtr buttonHandle, string description)
+        private static bool FixedTimeEquals(string a, string b)
+        {
+            int len = Math.Max(a.Length, b.Length);
+            int result = 0;
+            for (int i = 0; i < len; i++)
+            {
+                result |= (i < a.Length ? a[i] : 0) ^ (i < b.Length ? b[i] : 0);
+            }
+            return result == 0;
+        }
+
+        private static void ClickDialogButton(IntPtr buttonHandle, string description)
         {
             IntPtr result;
             if (!SendMessageTimeout(buttonHandle, BM_CLICK, IntPtr.Zero, IntPtr.Zero, SMTO_ABORTIFHUNG, MSG_TIMEOUT_MS, out result))

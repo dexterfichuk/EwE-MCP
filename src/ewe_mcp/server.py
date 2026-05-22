@@ -29,13 +29,14 @@ from ewe_mcp.data_sources.fishbase import query_fishbase as _query_fishbase
 from ewe_mcp.data_sources.sealifebase import query_sealifebase as _query_sealifebase
 from ewe_mcp.data_sources.globi import query_globi as _query_globi
 from ewe_mcp.helpers import (
-    BATCH_BLOCKED_COMMANDS,
     STATUS_CODE_MAP,
     TIMEOUT_DEFAULT,
     TIMEOUT_LONG,
+    cache_batch_blocked_commands,
     enrich_diagnose,
     error_hint,
     filter_sentinels,
+    get_batch_blocked_commands,
     get_host,
     get_port,
     get_token,
@@ -57,8 +58,12 @@ _VALID_IMPORT_TYPES = {"biomass", "catch", "effort", "forcing"}
 
 def _reject_path_traversal(path: str) -> None:
     """Reject paths containing '..' components. Works for both POSIX and Windows paths on any host."""
-    normalized = path.replace("\\", "/")
-    if ".." in pathlib.Path(normalized).parts:
+    # Check Windows path interpretation (catches C:..\foo type bypasses that
+    # PurePosixPath would not parse as containing a '..' component).
+    if ".." in pathlib.PureWindowsPath(path).parts:
+        raise ValueError("Path cannot contain '..' components.")
+    # Also check POSIX interpretation for cross-platform safety.
+    if ".." in pathlib.PurePosixPath(path).parts:
         raise ValueError("Path cannot contain '..' components.")
 
 
@@ -101,22 +106,15 @@ def _send_sync(
     params: dict[str, Any] | None = None,
     timeout: int = TIMEOUT_DEFAULT,
 ):
-    last_error: Exception | None = None
-    for attempt in range(3):
-        try:
-            return _get_connection().command_result(
-                command_type, params, timeout=timeout
-            )
-        except ResponseTooLargeError:
-            raise
-        except (OSError, ConnectionError) as exc:
-            last_error = exc
-            _invalidate_connection()
-            if attempt < 2:
-                time.sleep(0.5 * (attempt + 1))
-    if last_error is not None:
-        raise last_error
-    raise RuntimeError("EwE MCP command failed")
+    try:
+        return _get_connection().command_result(
+            command_type, params, timeout=timeout
+        )
+    except ResponseTooLargeError:
+        raise
+    except (OSError, ConnectionError) as exc:
+        _invalidate_connection()
+        raise
 
 
 async def _send(
@@ -2018,12 +2016,15 @@ async def batch_commands(commands: list[dict[str, Any]]) -> dict[str, Any]:
     view capture, scenario mutations/loads, set_values, set_indexed_value,
     and other destructive operations.
     """
+    # Use cached value or hardcoded fallback (non-blocking).
+    blocked = get_batch_blocked_commands()
+
     normalized_commands = []
     for command in commands:
         command_type = command.get("command_type") if "command_type" in command else command.get("type")
         if command_type is None:
             raise ValueError("Each batch command must have a 'type' field")
-        if command_type in BATCH_BLOCKED_COMMANDS:
+        if command_type in blocked:
             raise ValueError(f"Command {command_type!r} is not allowed in batch")
         normalized_commands.append({"type": command_type, "params": command.get("params", {})})
     result = await _send("batch", {"commands": normalized_commands}, timeout=TIMEOUT_LONG)
@@ -2220,6 +2221,13 @@ def main() -> None:
         datefmt="%H:%M:%S",
     )
     logger.info("EwE MCP server starting")
+    # Pre-cache batch blocked commands from the C# plugin
+    try:
+        client = _get_connection()
+        if cache_batch_blocked_commands(client):
+            logger.info("Batch blocked commands cached from plugin (%d commands)", len(get_batch_blocked_commands()))
+    except Exception:
+        logger.info("Using hardcoded fallback for batch blocked commands (plugin not available)")
     mcp.run()
 
 

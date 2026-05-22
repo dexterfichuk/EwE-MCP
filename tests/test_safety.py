@@ -18,6 +18,7 @@ from ewe_mcp.helpers import (
     DEFAULT_MAX_RESPONSE_SIZE,
     DEFAULT_TOKEN,
     EVAL_DENY_PATTERNS,
+    get_batch_blocked_commands,
     get_token,
     HEADER_STRUCT,
 )
@@ -226,6 +227,19 @@ async def test_save_screenshot_rejects_dotdot():
         await save_screenshot(path="relative/../escape.png")
 
 
+def test_reject_path_traversal_windows_style():
+    from ewe_mcp.server import _reject_path_traversal
+
+    with pytest.raises(ValueError, match=r"\.\."):
+        _reject_path_traversal("C:..\\foo\\bar.exe")
+    with pytest.raises(ValueError, match=r"\.\."):
+        _reject_path_traversal("C:\\Users\\..\\etc\\evil.exe")
+    with pytest.raises(ValueError, match=r"\.\."):
+        _reject_path_traversal("..\\..\\etc\\evil.exe")
+    _reject_path_traversal("C:\\Program Files\\EwE-MCP\\ewe-mcp.exe")
+    _reject_path_traversal("/usr/local/bin/ewe-mcp")
+
+
 def test_execute_ewe_code_blocked_from_batch():
     assert "execute_ewe_code" in BATCH_BLOCKED_COMMANDS
 
@@ -287,6 +301,7 @@ _CSHARP_BATCH_BLOCKED = frozenset(
         "execute_ewe_code",
         "close_model",
         "load_model",
+        "create_model",
         "save_model",
         "save_model_as",
         "run_ecopath",
@@ -341,11 +356,43 @@ def test_python_eval_deny_patterns_match_csharp():
     )
 
 
-def test_python_batch_blocked_is_superset_of_csharp():
-    csharp_missing = _CSHARP_BATCH_BLOCKED - BATCH_BLOCKED_COMMANDS
-    assert not csharp_missing, (
-        f"C# blocks these commands in batch but Python does not: {sorted(csharp_missing)}"
+def test_python_batch_blocked_matches_csharp():
+    py_only = BATCH_BLOCKED_COMMANDS - _CSHARP_BATCH_BLOCKED
+    cs_only = _CSHARP_BATCH_BLOCKED - BATCH_BLOCKED_COMMANDS
+    assert not py_only and not cs_only, (
+        f"Mismatch. Python-only: {sorted(py_only)}, C#-only: {sorted(cs_only)}"
     )
+
+
+@pytest.mark.live
+def test_batch_blocked_commands_can_be_queried_from_plugin():
+    """Verify the C# plugin returns the authoritative batch-blocked set."""
+    from ewe_mcp.client import EwEMCPClient
+    from ewe_mcp.helpers import get_host, get_port, get_token
+
+    client = EwEMCPClient(host=get_host(), port=get_port(), token=get_token())
+    if not client.connect():
+        pytest.skip("EwE MCP plugin not reachable")
+    try:
+        result = client.command_result("get_batch_blocked_commands")
+        assert isinstance(result, dict), f"Expected dict, got {type(result)}"
+        assert "commands" in result, f"Missing 'commands' key in {result}"
+        cmds = result["commands"]
+        assert isinstance(cmds, list), f"Expected list, got {type(cmds)}"
+        assert len(cmds) > 0, "Expected at least one blocked command"
+        assert "execute_ewe_code" in cmds, "execute_ewe_code should always be blocked"
+        assert "set_values" in cmds, "set_values should always be blocked"
+        # Verify the plugin list matches what get_batch_blocked_commands() returns
+        # when the cache is populated from the plugin
+        cached = get_batch_blocked_commands(client)
+        assert set(cmds) == cached, (
+            f"Plugin returned {set(cmds)} but "
+            f"get_batch_blocked_commands cached {cached}"
+        )
+    finally:
+        client.disconnect()
+        from ewe_mcp.helpers import _BATCH_BLOCKED_COMMANDS_CACHE
+        _BATCH_BLOCKED_COMMANDS_CACHE = None
 
 
 def _extract_csharp_dialog_commands():

@@ -490,6 +490,8 @@ case "list_ecosim_scenarios":
                 return OnUiThread(() => ExecuteEweCode(request.Params));
             case "shutdown_server":
                 return ShutdownServer();
+            case "get_batch_blocked_commands":
+                return GetBatchBlockedCommands();
             default:
                     throw new EwEMcpException("unknown_command", $"Unknown command type: {request.Type}");
             }
@@ -4761,7 +4763,16 @@ case "list_ecosim_scenarios":
             "set_indexed_value",
             "set_values_range",
             "export_ecosim_results",
+
+
         };
+        private JObject GetBatchBlockedCommands()
+        {
+            return new JObject
+            {
+                ["commands"] = new JArray(BatchBlockedCommands.OrderBy(x => x))
+            };
+        }
 
         private JObject Batch(JObject parameters)
         {

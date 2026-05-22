@@ -41,6 +41,10 @@ EVAL_DENY_PATTERNS = (
     "Process.Start",
 )
 
+# Hardcoded fallback set for batch-blocked commands.
+# The authoritative source is the C# plugin's BatchBlockedCommands HashSet.
+# At runtime, get_batch_blocked_commands(client) queries the plugin and caches the result;
+# this frozenset is only used as fallback when the plugin is unreachable.
 BATCH_BLOCKED_COMMANDS = frozenset(
     {
         "execute_ewe_code",
@@ -91,6 +95,57 @@ BATCH_BLOCKED_COMMANDS = frozenset(
         "set_indexed_value",
     }
 )
+
+
+_BATCH_BLOCKED_COMMANDS_CACHE: "frozenset | None" = None
+
+
+def _validate_batch_blocked_commands(cmds: "list[str]") -> None:
+    """Guard against an empty or clearly-invalid plugin response."""
+    if not cmds or "execute_ewe_code" not in cmds:
+        raise ValueError(
+            "Plugin returned an invalid batch-blocked command list"
+        )
+
+
+def get_batch_blocked_commands(client: "EwEMCPClient | None" = None) -> "frozenset":
+    """Query the C# plugin for the authoritative batch-blocked command set.
+
+    Results are cached globally (only when the plugin responds successfully).
+    Falls back to BATCH_BLOCKED_COMMANDS if the plugin is unreachable or
+    returns an invalid response. The fallback is never cached so a subsequent
+    call with a working client will re-query.
+    """
+    global _BATCH_BLOCKED_COMMANDS_CACHE
+    if _BATCH_BLOCKED_COMMANDS_CACHE is not None:
+        return _BATCH_BLOCKED_COMMANDS_CACHE
+    try:
+        if client is not None:
+            result = client.command_result("get_batch_blocked_commands")
+            cmds = result.get("commands", [])
+            _validate_batch_blocked_commands(cmds)
+            _BATCH_BLOCKED_COMMANDS_CACHE = frozenset(cmds)
+            return _BATCH_BLOCKED_COMMANDS_CACHE
+    except Exception:
+        pass
+    return BATCH_BLOCKED_COMMANDS
+
+
+def cache_batch_blocked_commands(client: "EwEMCPClient") -> "bool":
+    """Pre-populate the batch blocked commands cache from the plugin.
+
+    Returns True if the cache was populated from the plugin, False if
+    fallback was used or an error occurred.
+    """
+    try:
+        result = client.command_result("get_batch_blocked_commands")
+        cmds = result.get("commands", [])
+        _validate_batch_blocked_commands(cmds)
+        global _BATCH_BLOCKED_COMMANDS_CACHE
+        _BATCH_BLOCKED_COMMANDS_CACHE = frozenset(cmds)
+        return True
+    except Exception:
+        return False
 
 
 def get_host() -> str:

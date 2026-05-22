@@ -167,9 +167,26 @@ begin
       '      }' + #13#10 +
       '    }' + #13#10 +
       '' + #13#10 +
-      'Replace the backslashes with double backslashes in the actual JSON file.' + #13#10 +
-      '' + #13#10 +
-      '## Verification' + #13#10 +
+       'Replace the backslashes with double backslashes in the actual JSON file.' + #13#10 +
+       '' + #13#10 +
+       '### opencode' + #13#10 +
+       '' + #13#10 +
+       'Add to opencode.jsonc:' + #13#10 +
+       '' + #13#10 +
+       '    {' + #13#10 +
+       '      "mcpServers": {' + #13#10 +
+       '        "ewe": {' + #13#10 +
+       '          "command": "' + AppPath + '\\ewe-mcp.exe",' + #13#10 +
+       '          "env": {' + #13#10 +
+       '            "EWE_MCP_HOST": "127.0.0.1",' + #13#10 +
+       '            "EWE_MCP_PORT": "9877",' + #13#10 +
+       '            "EWE_MCP_TOKEN": "ewe-mcp-local-dev"' + #13#10 +
+       '          }' + #13#10 +
+       '        }' + #13#10 +
+       '      }' + #13#10 +
+       '    }' + #13#10 +
+       '' + #13#10 +
+       '## Verification' + #13#10 +
       '' + #13#10 +
       '1. Launch EwE (ewe6.exe)' + #13#10 +
       '2. Check that EwE_MCP_Plugin.log exists in %APPDATA%\Ecopath with Ecosim' + #13#10 +
