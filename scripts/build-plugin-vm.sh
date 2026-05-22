@@ -28,5 +28,9 @@ COPYFILE_DISABLE=1 tar \
   "$(basename "$ROOT_DIR")"
 
 sshpass -e scp "${SSH_OPTS[@]}" "$ARCHIVE" "${VM_USER}@${VM_HOST}:C:/Users/dexter/ewe-mcp-src.tgz"
+
+# scp build script to avoid quoting issues with spaces in path
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+sshpass -e scp "${SSH_OPTS[@]}" "${SCRIPT_DIR}/build_sync.ps1" "${VM_USER}@${VM_HOST}:C:/Users/dexter/build.ps1"
 sshpass -e ssh "${SSH_OPTS[@]}" "${VM_USER}@${VM_HOST}" \
-  "powershell -NoProfile -Command \"Remove-Item -Recurse -Force '$REMOTE_ROOT' -ErrorAction SilentlyContinue; tar -xzf C:\\Users\\dexter\\ewe-mcp-src.tgz -C C:\\Users\\dexter; Set-Location '$REMOTE_ROOT'; dotnet build .\\src\\EwE_MCP_Plugin\\EwE_MCP_Plugin.csproj -c $CONFIGURATION -p:PlatformTarget=$PLATFORM -p:EwEAssemblyDir='$EWE_DIR'\""
+  "C:\\Windows\\SysWOW64\\WindowsPowerShell\\v1.0\\powershell.exe -ExecutionPolicy Bypass -File C:\\Users\\dexter\\build.ps1"

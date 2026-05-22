@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using System.Data;
+using System.Data.OleDb;
 using System.Drawing;
 using System.Drawing.Imaging;
 using System.IO;
@@ -5126,7 +5128,7 @@ case "list_ecosim_scenarios":
             try
             {
                 property.SetValue(target.Entity, convertedValue, indices.Cast<object>().ToArray());
-                SyncEntityToDataSource(target.Entity, target.NormalizedDomain);
+                ForceValidateToDataSource(target.Entity, property.Name, convertedValue, target.NormalizedDomain);
             }
             catch (Exception ex)
             {
@@ -5201,7 +5203,7 @@ case "list_ecosim_scenarios":
                 try
                 {
                     property.SetValue(entity, convertedValue, null);
-                    SyncEntityToDataSource(entity, domain);
+                    ForceValidateToDataSource(entity, property.Name, convertedValue, domain);
                     results[pair.Key] = "updated";
                 }
                 catch
@@ -6183,46 +6185,169 @@ private static PropertyInfo FindReadableProperty(object entity, string variable,
         /// Mapped domain names to eCoreComponentType enum values (1=Ecopath,
         /// 2=Ecosim, 3=Ecospace, 10=Ecotracer, 15=MSE, ...) so that the
         /// data source's SetChanged() properly tracks which component is dirty.
-        /// </summary>
-        /// <summary>
-        /// Sync a changed Core entity to the DataSource so save_model persists it.
-        /// Calls cCore.UpdateEcopathInput(dbId) via reflection.
-        /// </summary>
-        private void SyncEntityToDataSource(object entity, string domain)
+        private void ForceValidateToDataSource(object entity, string propertyName, object value, string domain)
         {
-            if (entity == null) return;
+            var normalizedDomain = (domain ?? "").Trim().ToLowerInvariant();
+            var col = SqlColumnFor(propertyName, normalizedDomain);
+            if (col == null) return;
+
+            var (tableName, idColumn, idValue) = ResolveDomainSqlInfo(normalizedDomain, entity);
+            if (tableName == null || idColumn == null || idValue == null) return;
 
             var core = _core();
             if (core == null) return;
-
-            var dbId = SafeGetProperty(entity, "DBID");
-            if (dbId == null) return;
-
-            var normalized = (domain ?? string.Empty).Trim().ToLowerInvariant();
-            string updateMethod = null;
-            switch (normalized)
-            {
-                case "ecopath_groups": updateMethod = "UpdateEcopathInput"; break;
-                case "ecopath_fleets": updateMethod = "UpdateFleetInput"; break;
-                case "ecosim_group_inputs": updateMethod = "UpdateEcoSimGroup"; break;
-                case "ecosim_fleet_inputs": updateMethod = "UpdateEcoSimFleetInput"; break;
-            }
-
-            if (updateMethod == null) return;
+            var ds = SafeGetProperty(core, "DataSource");
+            if (ds == null) return;
+            var db = SafeGetProperty(ds, "Database");
+            if (db == null) return;
+            var connStr = SafeGetProperty(db, "ConnectionString") as string;
+            if (string.IsNullOrEmpty(connStr)) return;
 
             try
             {
-                var method = core.GetType().GetMethod(updateMethod,
-                    System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic);
-                if (method != null)
+                using (var conn = new OleDbConnection(connStr))
                 {
-                    method.Invoke(core, new object[] { Convert.ToInt32(dbId) });
+                    conn.Open();
+                    using (var cmd = new OleDbCommand($"UPDATE [{tableName}] SET [{col}] = @v WHERE [{idColumn}] = @id", conn))
+                    {
+                        if (col == "GroupName" || col == "FleetName")
+                        {
+                            cmd.Parameters.AddWithValue("@v", value?.ToString() ?? "");
+                        }
+                        else
+                        {
+                            cmd.Parameters.AddWithValue("@v", Convert.ToDouble(value));
+                        }
+                        cmd.Parameters.AddWithValue("@id", Convert.ToInt32(idValue));
+                        cmd.ExecuteNonQuery();
+                    }
                 }
             }
             catch (Exception ex)
             {
-                EwEMcpFileLog.Warn($"SyncEntityToDataSource({updateMethod}, dbId={dbId}) failed: {ex.Message}");
+                EwEMcpFileLog.Warn($"SQL persist '{propertyName}' failed: {ex.Message}");
             }
+
+            // Best-effort array sync for save_model compatibility
+            try { SyncArrayField(core, entity, normalizedDomain); MarkDataSourceModified(normalizedDomain); } catch { }
+        }
+
+        private (string tableName, string idColumn, object idValue) ResolveDomainSqlInfo(string normalizedDomain, object entity)
+        {
+            switch (normalizedDomain)
+            {
+                case "ecopath_groups":
+                    return ("EcopathGroup", "GroupID",
+                        SafeGetProperty(entity, "GroupID") ?? SafeGetProperty(entity, "DBID"));
+                case "ecopath_fleets":
+                    return ("EcopathFleet", "FleetID",
+                        SafeGetProperty(entity, "FleetID") ?? SafeGetProperty(entity, "DBID"));
+                case "ecosim_group_inputs":
+                    return ("EcosimScenarioGroup", "GroupID",
+                        SafeGetProperty(entity, "GroupID") ?? SafeGetProperty(entity, "DBID"));
+                case "ecosim_fleet_inputs":
+                    return ("EcosimScenarioFleet", "FleetID",
+                        SafeGetProperty(entity, "FleetID") ?? SafeGetProperty(entity, "DBID"));
+                default:
+                    return (null, null, null);
+            }
+        }
+
+        private void SyncArrayField(object core, object entity, string normalizedDomain)
+        {
+            // Array field sync is only applicable to Ecopath groups;
+            // Ecosim and other domains use different in-memory structures.
+            if (normalizedDomain != "ecopath_groups") return;
+
+            var dsData = SafeGetProperty(core, "EcopathDataStructures");
+            if (dsData == null) return;
+            var idx = SafeGetProperty(entity, "Index");
+            if (idx == null) return;
+            int i = Convert.ToInt32(idx) + 1;
+
+            CopyProp(dsData, "PBinput", i, entity, "PBInput");
+            CopyProp(dsData, "QBinput", i, entity, "QBInput");
+            CopyProp(dsData, "EEinput", i, entity, "EEInput");
+            CopyProp(dsData, "Binput", i, entity, "BiomassAreaInput", true);
+        }
+
+        private static void CopyProp(object dsData, string fieldName, int oneBasedIndex, object entity, string propName, bool multiplyByArea = false)
+        {
+            var fld = dsData.GetType().GetField(fieldName, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+            if (fld == null) return;
+            var arr = fld.GetValue(dsData) as Array;
+            if (arr == null || oneBasedIndex < 0 || oneBasedIndex >= arr.Length) return;
+
+            var prop = entity.GetType().GetProperty(propName, BindingFlags.Instance | BindingFlags.Public | BindingFlags.FlattenHierarchy);
+            if (prop == null) return;
+            var val = prop.GetValue(entity);
+            if (val == null) return;
+            float fv = Convert.ToSingle(val);
+            if (multiplyByArea)
+            {
+                var area = SafeGetProperty(entity, "Area");
+                if (area != null) fv *= Convert.ToSingle(area);
+            }
+            arr.SetValue(fv, oneBasedIndex);
+        }
+
+        private static string SqlColumnFor(string propertyName, string normalizedDomain)
+        {
+            if (normalizedDomain == "ecopath_groups")
+            {
+                switch (propertyName)
+                {
+                    case "Name":
+                    case "name": return "GroupName";
+                    case "BiomassAreaInput": return "Biomass";
+                    case "PBInput": return "ProdBiom";
+                    case "QBInput": return "ConsBiom";
+                    case "EEInput": return "EcoEfficiency";
+                    case "OtherMortInput": return "OtherMort";
+                    case "BAInput": return "BiomAcc";
+                    case "GSInput": return "Unassim";
+                    case "DetImport": return "DtImports";
+                    case "GEInput": return "ProdCons";
+                    case "Immigration": return "Immigration";
+                    case "Emigration": return "Emigration";
+                    case "EmigRate": return "EmigRate";
+                    default: return null;
+                }
+            }
+            if (normalizedDomain == "ecopath_fleets")
+            {
+                switch (propertyName)
+                {
+                    case "Name":
+                    case "name": return "FleetName";
+                    case "NominalEffort": return "NominalEffort";
+                    case "FixedCost": return "FixedCost";
+                    case "VariableCost": return "VariableCost";
+                    default: return null;
+                }
+            }
+            if (normalizedDomain == "ecosim_group_inputs")
+            {
+                switch (propertyName)
+                {
+                    case "Pbmaxs": return "Pbmaxs";
+                    case "FtimeMax": return "FtimeMax";
+                    case "FtimeAdjust": return "FtimeAdjust";
+                    default: return null;
+                }
+            }
+            if (normalizedDomain == "ecosim_fleet_inputs")
+            {
+                switch (propertyName)
+                {
+                    case "RelQ": return "RelQ";
+                    case "EffortConversionFactor": return "EffortConversionFactor";
+                    case "EffortAdjustmentFactor": return "EffortAdjustmentFactor";
+                    case "SailCost": return "SailCost";
+                    default: return null;
+                }
+            }
+            return null;
         }
 
         private void MarkDataSourceModified(string domain)

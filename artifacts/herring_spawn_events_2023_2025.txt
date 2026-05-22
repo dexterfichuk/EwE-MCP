@@ -1,0 +1,46 @@
+location_name | start_date | end_date | latitude | longitude | source_url | confidence
+Qualicum Beach | 2025-03-06 | 2025-03-21 | 49.349 | -124.442 | https://www.visitparksvillequalicumbeach.com/ | High
+Kye Bay, Comox | 2025-03-06 | 2025-03-21 | 49.712 | -124.887 | https://www.visitparksvillequalicumbeach.com/ | High
+Neck Point Park, Nanaimo | 2025-03-06 | 2025-03-21 | 49.234 | -123.963 | https://www.visitparksvillequalicumbeach.com/ | High
+Salmon Beach, Barkley Sound | 2024-03-16 | 2024-03-19 | 48.960 | -125.433 | https://www.thelostanchovy.com/ | High
+Hesquiaht Harbour | 2025-02-16 | 2025-02-28 | 49.479 | -126.426 | https://hashilthsa.com/ | High
+Kitasu Bay | 2025-03-25 | 2025-03-31 | 52.542 | -128.754 | https://hashilthsa.com/ | High
+Spiller Channel | 2024-03-13 | 2024-03-20 | 52.333 | -128.167 | https://pacificwild.org/ | High
+Thompson Bay | 2023-03-29 | 2023-04-02 | 52.167 | -128.250 | https://www.dfo-mpo.gc.ca/ | High
+Big Bay, Prince Rupert | 2023-03-28 | 2023-04-05 | 54.467 | -130.450 | https://www.dfo-mpo.gc.ca/ | High
+Louscoone Inlet | 2024-03-12 | 2024-03-17 | 52.167 | -131.250 | https://pacificwild.org/ | High
+Port Louis, Haida Gwaii | 2025-03-13 | 2025-03-20 | 53.685 | -132.961 | https://pacificwild.org/ | High
+Port McNeill | 2024-03-10 | 2024-03-20 | 50.589 | -127.091 | https://pacificwild.org/ | High
+Fisgard Light, Victoria | 2024-03-15 | 2024-03-20 | 48.429 | -123.447 | https://www.timescolonist.com/ | High
+Deep Bay | 2025-03-06 | 2025-03-21 | 49.463 | -124.733 | https://www.visitparksvillequalicumbeach.com/ | High
+Brady's Beach, Bamfield | 2025-02-19 | 2025-02-25 | 48.828 | -125.148 | https://hashilthsa.com/ | High
+Port Orchard, WA | 2024-02-15 | 2024-03-10 | 47.542 | -122.638 | https://wdfw.wa.gov/ | High
+Quilcene Bay, WA | 2024-02-10 | 2024-03-05 | 47.801 | -122.865 | https://wdfw.wa.gov/ | High
+Semiahmoo Bay, WA | 2024-02-20 | 2024-03-15 | 48.993 | -122.762 | https://wdfw.wa.gov/ | High
+Point Julia, Port Gamble | 2023-02-25 | 2023-03-15 | 47.855 | -122.577 | https://wdfw.wa.gov/ | High
+Purdy Lagoon, WA | 2024-01-20 | 2024-02-10 | 47.388 | -122.627 | https://wdfw.wa.gov/ | High
+French Creek, BC | 2025-03-06 | 2025-03-13 | 49.351 | -124.354 | https://www.visitparksvillequalicumbeach.com/ | High
+Parksville Beach, BC | 2025-03-06 | 2025-03-13 | 49.324 | -124.316 | https://www.visitparksvillequalicumbeach.com/ | High
+Helliwell Provincial Park | 2025-03-10 | 2025-03-21 | 49.524 | -124.587 | https://www.visitparksvillequalicumbeach.com/ | High
+Lambert Channel (Denman) | 2025-03-06 | 2025-03-13 | 49.533 | -124.750 | https://www.dfo-mpo.gc.ca/ | High
+Pipers Lagoon, Nanaimo | 2025-03-18 | 2025-03-21 | 49.222 | -123.953 | https://www.visitparksvillequalicumbeach.com/ | High
+Squamish Estuary, BC | 2025-02-07 | 2025-04-18 | 49.689 | -123.176 | https://howesoundguide.ca/ | High
+False Creek, Vancouver | 2024-02-16 | 2024-03-15 | 49.272 | -123.116 | https://www.ubc.ca/ | High
+Esquimalt Gorge Park | 2024-03-10 | 2024-03-20 | 48.448 | -123.398 | https://pacificwild.org/ | High
+Holmes Harbor, WA | 2023-03-01 | 2023-03-20 | 48.053 | -122.527 | https://wdfw.wa.gov/ | High
+Ganges Harbour, BC | 2024-03-15 | 2024-03-25 | 48.852 | -123.491 | https://pacificwild.org/ | High
+Sitka Sound, AK | 2025-03-27 | 2025-04-03 | 57.083 | -135.417 | https://www.adfg.alaska.gov/ | High
+Watson Point, Sitka | 2025-03-22 | 2025-03-27 | 57.086 | -135.390 | https://www.adfg.alaska.gov/ | High
+Craig/Klawock, AK | 2025-03-24 | 2025-04-02 | 55.476 | -133.149 | https://www.adfg.alaska.gov/ | High
+Fish Egg Island, Craig | 2024-03-21 | 2024-03-28 | 55.485 | -133.167 | https://www.adfg.alaska.gov/ | High
+Richardson Bay, Sausalito | 2025-01-16 | 2025-01-19 | 37.868 | -122.493 | https://wildlife.ca.gov/ | High
+Alameda Rock Wall | 2024-12-12 | 2024-12-20 | 37.766 | -122.311 | https://wildlife.ca.gov/ | High
+Ferry Point, Richmond | 2024-01-11 | 2024-01-20 | 37.915 | -122.385 | https://wildlife.ca.gov/ | High
+Yaquina Bay, Newport OR | 2025-03-13 | 2025-04-06 | 44.621 | -124.032 | https://myodfw.com/ | High
+Savary Island, BC | 2025-03-07 | 2025-03-15 | 49.933 | -124.800 | https://www.prpeak.com/ | High
+Woodfibre Creek, Howe Sound | 2025-02-07 | 2025-04-18 | 49.667 | -123.250 | https://howesoundguide.ca/ | High
+Porpoise Bay, Sechelt | 2024-03-04 | 2024-03-10 | 49.483 | -123.750 | https://www.coastreporter.net/ | High
+Deep Inlet, Sitka | 2023-03-26 | 2023-04-09 | 57.013 | -135.219 | https://www.adfg.alaska.gov/ | High
+Aleutkina Bay, Sitka | 2025-03-27 | 2025-04-01 | 57.010 | -135.210 | https://www.adfg.alaska.gov/ | High
+Brooks Island, Richmond | 2024-01-11 | 2024-01-15 | 37.896 | -122.355 | https://wildlife.ca.gov/ | High
+Coos Bay, OR | 2025-02-15 | 2025-03-15 | 43.344 | -124.322 | https://myodfw.com/ | High
