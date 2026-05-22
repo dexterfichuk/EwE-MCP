@@ -756,13 +756,16 @@ async def create_ecopath_group(
         pb_ratio: Production/biomass ratio.
         qb_ratio: Consumption/biomass ratio.
         ee: Ecotrophic efficiency.
-        group_type: Group type (0=consumer, 1=producer, 2=detritus).
+        group_type: Group type (0=consumer, 1=producer, 2=detritus). Required.
 
     Note: The new group is written to the model database but in-memory core
     counts are not immediately refreshed. The group may not appear in
     list_ecopath_groups until the model is saved and reloaded. Use
     save_model followed by load_model to see the new group.
     """
+    if group_type is None:
+        raise ValueError("group_type is required (0=consumer, 1=producer, 2=detritus)")
+
     params: dict[str, Any] = {"name": name}
     if biomass is not None:
         params["biomass"] = biomass
@@ -772,8 +775,7 @@ async def create_ecopath_group(
         params["qb_ratio"] = qb_ratio
     if ee is not None:
         params["ee"] = ee
-    if group_type is not None:
-        params["group_type"] = group_type
+    params["group_type"] = group_type
     return await _send("create_ecopath_group", params)
 
 
