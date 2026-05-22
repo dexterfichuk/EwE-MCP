@@ -206,7 +206,7 @@ namespace EwE_MCP_Plugin
         // entries are not persisted by SaveEcopathDietComp during core.Save().
         // After core.Save() flushes the in-memory DC array (which has zeros for
         // new groups), FlushPendingDietWrites re-inserts these entries via SQL.
-        private readonly List<DietWrite> _pendingDietWrites = new List<DietWrite>();
+        private readonly Dictionary<(int, int), float> _pendingDietWrites = new Dictionary<(int, int), float>();
         private readonly object _dietLock = new object();
 
         public Action OnShutdownRequested { get; set; }
@@ -4381,36 +4381,40 @@ case "list_ecosim_scenarios":
         {
             if (core == null) return;
 
-            List<DietWrite> pending;
+            KeyValuePair<(int, int), float>[] pending;
             lock (_dietLock)
             {
                 if (_pendingDietWrites.Count == 0) return;
-                pending = new List<DietWrite>(_pendingDietWrites);
+                pending = _pendingDietWrites.ToArray();
             }
             // Don't clear _pendingDietWrites — FlushPendingDietWrites preserves
-            // the list so writes survive repeated load_model cycles.
+            // the list so writes survive repeated load_model cycles. The
+            // Dictionary automatically deduplicates by (PredIndex, PreyIndex).
 
-            foreach (var write in pending)
+            foreach (var kvp in pending)
             {
+                int predIndex = kvp.Key.Item1;
+                int preyIndex = kvp.Key.Item2;
+                float dietVal = kvp.Value;
                 try
                 {
                     // Don't use nGroups for bounds — it may not reflect AddGroup.
-                    var input = SafeGetIndexedProperty(core, "EcopathGroupInputs", write.PredIndex);
+                    var input = SafeGetIndexedProperty(core, "EcopathGroupInputs", predIndex);
                     if (input == null)
                     {
-                        EwEMcpFileLog.Warn($"ApplyPendingDietWritesInMemory: no entity at index {write.PredIndex}");
+                        EwEMcpFileLog.Warn($"ApplyPendingDietWritesInMemory: no entity at index {predIndex}");
                         continue;
                     }
                     var prop = FindIndexedProperty(input, "diet_comp", "ecopath_groups", 1, requireWritable: true);
                     if (prop != null)
                     {
-                        prop.SetValue(input, write.Diet, new object[] { write.PreyIndex });
-                        EwEMcpFileLog.Info($"ApplyPendingDietWritesInMemory: set [{write.PredIndex},{write.PreyIndex}] = {write.Diet}");
+                        prop.SetValue(input, dietVal, new object[] { preyIndex });
+                        EwEMcpFileLog.Info($"ApplyPendingDietWritesInMemory: set [{predIndex},{preyIndex}] = {dietVal}");
                     }
                 }
                 catch (Exception ex)
                 {
-                    EwEMcpFileLog.Warn($"ApplyPendingDietWritesInMemory: failed for [{write.PredIndex},{write.PreyIndex}]: {ex.Message}");
+                    EwEMcpFileLog.Warn($"ApplyPendingDietWritesInMemory: failed for [{predIndex},{preyIndex}]: {ex.Message}");
                 }
             }
         }
@@ -4426,16 +4430,15 @@ case "list_ecosim_scenarios":
         /// </summary>
         private void FlushPendingDietWrites()
         {
-            // Copy pending list but DON'T clear it — writes must survive across
-            // load_model cycles so that ApplyPendingDietWritesInMemory can
-            // re-apply them after each reload.  Duplicate SQL writes are harmless
-            // (UPDATE turns into no-op when value is unchanged, INSERT becomes
-            // UPDATE on the next cycle).
-            List<DietWrite> pending;
+            // Copy pending entries but DON'T clear the dictionary — writes must survive
+            // across load_model cycles so that ApplyPendingDietWritesInMemory can
+            // re-apply them after each reload.  The Dictionary automatically deduplicates
+            // by (PredIndex, PreyIndex), preventing unbounded growth on repeated edits.
+            KeyValuePair<(int, int), float>[] pending;
             lock (_dietLock)
             {
                 if (_pendingDietWrites.Count == 0) return;
-                pending = new List<DietWrite>(_pendingDietWrites);
+                pending = _pendingDietWrites.ToArray();
             }
 
             var core = _core();
@@ -4453,17 +4456,20 @@ case "list_ecosim_scenarios":
                 using (var conn = new OleDbConnection(connStr))
                 {
                     conn.Open();
-                    foreach (var write in pending)
+                    foreach (var kvp in pending)
                     {
+                        int predIndex = kvp.Key.Item1;
+                        int preyIndex = kvp.Key.Item2;
+                        float dietVal = kvp.Value;
                         try
                         {
                             // Don't use nGroups for bounds — it may not reflect AddGroup.
                             // Instead, try to resolve the entity and skip if unavailable.
-                            var predInput = SafeGetIndexedProperty(core, "EcopathGroupInputs", write.PredIndex);
-                            var preyInput = SafeGetIndexedProperty(core, "EcopathGroupInputs", write.PreyIndex);
+                            var predInput = SafeGetIndexedProperty(core, "EcopathGroupInputs", predIndex);
+                            var preyInput = SafeGetIndexedProperty(core, "EcopathGroupInputs", preyIndex);
                             if (predInput == null || preyInput == null)
                             {
-                                EwEMcpFileLog.Warn($"FlushPendingDietWrites: entity unavailable at predIdx={write.PredIndex} preyIdx={write.PreyIndex}");
+                                EwEMcpFileLog.Warn($"FlushPendingDietWrites: entity unavailable at predIdx={predIndex} preyIdx={preyIndex}");
                                 continue;
                             }
 
@@ -4476,7 +4482,7 @@ case "list_ecosim_scenarios":
                                 "UPDATE [EcopathDietComp] SET [Diet] = @v WHERE [PredID] = @p1 AND [PreyID] = @p2",
                                 conn))
                             {
-                                cmd.Parameters.AddWithValue("@v", write.Diet);
+                                cmd.Parameters.AddWithValue("@v", dietVal);
                                 cmd.Parameters.AddWithValue("@p1", predId);
                                 cmd.Parameters.AddWithValue("@p2", preyId);
                                 int rows = cmd.ExecuteNonQuery();
@@ -4488,7 +4494,7 @@ case "list_ecosim_scenarios":
                                     {
                                         insertCmd.Parameters.AddWithValue("@p1", predId);
                                         insertCmd.Parameters.AddWithValue("@p2", preyId);
-                                        insertCmd.Parameters.AddWithValue("@v", write.Diet);
+                                        insertCmd.Parameters.AddWithValue("@v", dietVal);
                                         insertCmd.ExecuteNonQuery();
                                     }
                                 }
@@ -4496,11 +4502,11 @@ case "list_ecosim_scenarios":
                         }
                         catch (Exception ex)
                         {
-                            EwEMcpFileLog.Warn($"FlushPendingDietWrites: failed for predIdx={write.PredIndex} preyIdx={write.PreyIndex}: {ex.Message}");
+                            EwEMcpFileLog.Warn($"FlushPendingDietWrites: failed for predIdx={predIndex} preyIdx={preyIndex}: {ex.Message}");
                         }
                     }
                 }
-                EwEMcpFileLog.Info($"FlushPendingDietWrites: flushed {pending.Count} diet entries");
+                EwEMcpFileLog.Info($"FlushPendingDietWrites: flushed {pending.Length} diet entries");
             }
             catch (Exception ex)
             {
@@ -5448,15 +5454,12 @@ case "list_ecosim_scenarios":
                 int preyIndex = indices[0];
                 float dietVal = Convert.ToSingle(convertedValue);
 
-                // Enqueue by index for post-save flush (IDs resolved at flush time)
+                // Enqueue by index for post-save flush (IDs resolved at flush time).
+                // Dictionary deduplicates by (PredIndex, PreyIndex) — repeated edits
+                // to the same cell overwrite instead of appending.
                 lock (_dietLock)
                 {
-                    _pendingDietWrites.Add(new DietWrite
-                    {
-                        PredIndex = predIndex,
-                        PreyIndex = preyIndex,
-                        Diet = dietVal
-                    });
+                    _pendingDietWrites[(predIndex, preyIndex)] = dietVal;
                 }
 
                 // Immediate SQL write so get_ecopath_group / get_indexed_value
