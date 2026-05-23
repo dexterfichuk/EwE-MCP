@@ -4452,6 +4452,18 @@ case "list_ecosim_scenarios":
                     if (prop != null)
                     {
                         prop.SetValue(input, dietVal, new object[] { preyIndex });
+
+                        // Also update the DietComp[] array property so get_values sees the value.
+                        var arrayProp = FindWritableProperty(input, "diet_comp", "ecopath_groups");
+                        if (arrayProp != null && preyIndex >= 1)
+                        {
+                            var dietArray = arrayProp.GetValue(input, null) as float[];
+                            if (dietArray != null && (preyIndex - 1) < dietArray.Length)
+                            {
+                                dietArray[preyIndex - 1] = dietVal;
+                            }
+                        }
+
                         EwEMcpFileLog.Info($"ApplyPendingDietWritesInMemory: set [{predIndex},{preyIndex}] = {dietVal}");
                     }
                 }
@@ -5635,6 +5647,150 @@ case "list_ecosim_scenarios":
                 {
                     property.SetValue(entity, convertedValue, null);
                     ForceValidateToDataSource(entity, property.Name, convertedValue, domain);
+
+                    // ── DietComp bulk-array handling ──
+                    // When diet_comp is set as a Single[] via set_values (not set_indexed_value),
+                    // we must also update the internal DC float[,] array and write to SQL so
+                    // save_model + load_model persist the values. Otherwise save_model reads
+                    // the stale DC array and writes zeros.
+                    if (domain == "ecopath_groups" &&
+                        string.Equals(property.Name, "DietComp", StringComparison.OrdinalIgnoreCase) &&
+                        pair.Value is JArray dietArray && index.HasValue)
+                    {
+                        int predIndex = index.Value;
+                        var core = _core();
+                        if (core != null)
+                        {
+                            try
+                            {
+                                int nPrey = dietArray.Count - 1;
+                                // ── Update internal DC array ──
+                                var mDataField = core.GetType().GetField("m_EcopathData",
+                                    BindingFlags.Instance | BindingFlags.NonPublic);
+                                var mData = mDataField?.GetValue(core);
+                                if (mData != null)
+                                {
+                                    var dcField = mData.GetType().GetField("DC",
+                                        BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                                    var dcArray = dcField?.GetValue(mData) as float[,];
+                                    if (dcArray != null)
+                                    {
+                                        var dsData = SafeGetProperty(core, "EcopathDataStructures");
+                                        if (dsData != null)
+                                        {
+                                            var groupDbIdField = dsData.GetType().GetField("GroupDBID",
+                                                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                                            var groupDbIdArray = groupDbIdField?.GetValue(dsData) as Array;
+                                            if (groupDbIdArray != null)
+                                            {
+                                                var predIdObj = SafeGetProperty(entity, "GroupID") ?? SafeGetProperty(entity, "DBID");
+                                                if (predIdObj != null)
+                                                {
+                                                    int predIdx = Array.IndexOf(groupDbIdArray, Convert.ToInt32(predIdObj));
+                                                    if (predIdx >= 1 && predIdx < dcArray.GetLength(0))
+                                                    {
+                                                        nPrey = Math.Min(dietArray.Count - 1, dcArray.GetLength(1) - 1);
+                                                        for (int prey = 1; prey <= nPrey; prey++)
+                                                        {
+                                                            float val = Convert.ToSingle(dietArray[prey - 1]);
+                                                            dcArray[predIdx, prey] = val;
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+
+                                // ── Enqueue pending SQL writes + immediate SQL ──
+                                var connStr = GetConnectionString(core);
+                                var predInput = SafeGetIndexedProperty(core, "EcopathGroupInputs", predIndex);
+                                int predGroupId = 0;
+                                if (predInput != null)
+                                    predGroupId = Convert.ToInt32(
+                                        SafeGetProperty(predInput, "GroupID") ?? SafeGetProperty(predInput, "DBID"));
+
+                                OleDbConnection conn = null;
+                                if (!string.IsNullOrEmpty(connStr) && predGroupId > 0)
+                                    conn = new OleDbConnection(connStr);
+
+                                lock (_dietLock)
+                                {
+                                    if (conn != null)
+                                    {
+                                        try
+                                        {
+                                            conn.Open();
+                                            for (int preyIdx = 1; preyIdx <= nPrey; preyIdx++)
+                                            {
+                                                float val = Convert.ToSingle(dietArray[preyIdx - 1]);
+                                                if (val != 0f)
+                                                {
+                                                    _pendingDietWrites[(predIndex, preyIdx)] = val;
+
+                                                    int preyGroupId = 0;
+                                                    var preyInput = SafeGetIndexedProperty(core, "EcopathGroupInputs", preyIdx);
+                                                    if (preyInput != null)
+                                                    {
+                                                        preyGroupId = Convert.ToInt32(
+                                                            SafeGetProperty(preyInput, "GroupID") ?? SafeGetProperty(preyInput, "DBID"));
+                                                    }
+                                                    if (preyGroupId <= 0)
+                                                    {
+                                                        EwEMcpFileLog.Warn($"SetGenericValues: diet_comp skip SQL for preyIdx={preyIdx}, could not resolve prey GroupID");
+                                                        continue;
+                                                    }
+
+                                                    using (var cmd = new OleDbCommand(
+                                                        "UPDATE [EcopathDietComp] SET [Diet] = @v WHERE [PredID] = @p1 AND [PreyID] = @p2",
+                                                        conn))
+                                                    {
+                                                        cmd.Parameters.AddWithValue("@v", val);
+                                                        cmd.Parameters.AddWithValue("@p1", predGroupId);
+                                                        cmd.Parameters.AddWithValue("@p2", preyGroupId);
+                                                        int rows = cmd.ExecuteNonQuery();
+                                                        if (rows == 0)
+                                                        {
+                                                            using (var insertCmd = new OleDbCommand(
+                                                                "INSERT INTO [EcopathDietComp] ([PredID], [PreyID], [Diet]) VALUES (@p1, @p2, @v)",
+                                                                conn))
+                                                            {
+                                                                insertCmd.Parameters.AddWithValue("@p1", predGroupId);
+                                                                insertCmd.Parameters.AddWithValue("@p2", preyGroupId);
+                                                                insertCmd.Parameters.AddWithValue("@v", val);
+                                                                insertCmd.ExecuteNonQuery();
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                            conn.Close();
+                                        }
+                                        catch (Exception sqlex)
+                                        {
+                                            try { conn?.Close(); } catch { }
+                                            EwEMcpFileLog.Warn($"SetGenericValues: diet_comp SQL failed: {sqlex.GetType().Name}");
+                                        }
+                                    }
+                                    else
+                                    {
+                                        for (int preyIdx = 1; preyIdx <= nPrey; preyIdx++)
+                                        {
+                                            float val = Convert.ToSingle(dietArray[preyIdx - 1]);
+                                            if (val != 0f)
+                                                _pendingDietWrites[(predIndex, preyIdx)] = val;
+                                        }
+                                    }
+                                }
+                                conn?.Dispose();
+                            }
+                            catch (Exception dex)
+                            {
+                                EwEMcpFileLog.Warn($"SetGenericValues: diet_comp bulk handling failed: {dex.Message}");
+                            }
+                        }
+                    }
+
                     results[pair.Key] = "updated";
                 }
                 catch
