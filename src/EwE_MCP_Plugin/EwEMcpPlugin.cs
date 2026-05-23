@@ -200,6 +200,15 @@ namespace EwE_MCP_Plugin
         private readonly EwEMcpAuditLog _auditLog;
         private readonly EwEMcpConfig _config;
         private HashSet<string> _dialogOpeningCommands;
+
+        // ── DietComp persistence (new groups) ──
+        // Tracks diet_comp writes for newly created Ecopath groups whose DC array
+        // entries are not persisted by SaveEcopathDietComp during core.Save().
+        // After core.Save() flushes the in-memory DC array (which has zeros for
+        // new groups), FlushPendingDietWrites re-inserts these entries via SQL.
+        private readonly Dictionary<(int, int), float> _pendingDietWrites = new Dictionary<(int, int), float>();
+        private readonly object _dietLock = new object();
+
         public Action OnShutdownRequested { get; set; }
 
         public EwEMcpCommandRouter(
@@ -4258,7 +4267,22 @@ case "list_ecosim_scenarios":
         private JObject LoadModel(JObject parameters)
         {
             var path = RequiredString(parameters, "path");
-            var ok = RequireCore().LoadModel(path);
+            var core = RequireCore();
+            var ok = core.LoadModel(path);
+
+            // After loading, re-apply any pending diet writes to the in-memory
+            // entity DietComp properties.  SaveEcopathDietComp writes to the
+            // EcopathDietComp table during core.Save(), but core.LoadModel may
+            // not populate the DietComp property for groups that were created
+            // after the model was first opened.  By re-applying pending writes
+            // after every load we ensure the in-memory state stays correct.
+            ApplyPendingDietWritesInMemory(core);
+
+            // Also flush any SQL-persisted writes that may have been orphaned
+            // by the load (re-populates the EcopathDietComp table for entries
+            // that EwE's own load may have missed).
+            FlushPendingDietWrites();
+
             return new JObject { ["loaded"] = ok, ["path"] = path };
         }
 
@@ -4266,13 +4290,281 @@ case "list_ecosim_scenarios":
         {
             var core = RequireCore();
             string path = parameters?["path"]?.ToString();
-            bool ok = saveAs || !string.IsNullOrWhiteSpace(path) ? core.Save(path ?? string.Empty) : core.Save();
+            bool ok;
+            if (string.IsNullOrWhiteSpace(path))
+                ok = core.Save();
+            else
+                ok = core.Save(path);
+
+            // After core.Save() triggers SaveEcopathDietComp (DELETE+INSERT from the
+            // in-memory DC array), re-apply any pending diet writes for newly created
+            // groups whose DC entries are not covered by the array.
+            if (ok)
+            {
+                FlushPendingDietWrites();
+            }
+
             return new JObject { ["saved"] = ok, ["path"] = path ?? string.Empty };
+        }
+
+        /// <summary>
+        /// Strip password/credentials from an OLEDB connection string to prevent
+        /// credential leakage via exception messages or logging.
+        /// Also ensures Persist Security Info is set to False.
+        /// </summary>
+        private static string SanitizeConnectionString(string cs)
+        {
+            if (string.IsNullOrEmpty(cs)) return cs;
+            try
+            {
+                var builder = new System.Data.OleDb.OleDbConnectionStringBuilder(cs);
+                // Remove any password
+                if (builder.ContainsKey("Jet OLEDB:Database Password"))
+                    builder.Remove("Jet OLEDB:Database Password");
+                if (builder.ContainsKey("Password"))
+                    builder.Remove("Password");
+                // Prevent credentials from being discoverable via ConnectionString property
+                builder["Persist Security Info"] = "False";
+                return builder.ConnectionString;
+            }
+            catch
+            {
+                // If we can't parse it, strip common credential tokens manually
+                var sanitized = System.Text.RegularExpressions.Regex.Replace(cs,
+                    @"(Jet OLEDB:Database Password|Password|Pwd)=[^;]*;?",
+                    "", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+                sanitized = System.Text.RegularExpressions.Regex.Replace(sanitized,
+                    @"Persist Security Info=[^;]*;?",
+                    "Persist Security Info=False;", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+                return sanitized.TrimEnd(';');
+            }
+        }
+
+        /// <summary>
+        /// Get an OLEDB connection string for the current model by trying multiple
+        /// property access patterns against the EwE core and its DataSource.
+        /// </summary>
+        private static string GetConnectionString(object core)
+        {
+            if (core == null) return null;
+
+            var ds = SafeGetProperty(core, "DataSource");
+            if (ds == null) return null;
+
+            // Path 1: DataSource.Connection → cEwEAccessDatabase.m_conn (OleDbConnection) → ConnectionString
+            try
+            {
+                var connObj = SafeGetProperty(ds, "Connection");
+                if (connObj != null)
+                {
+                    var oleDbConn = SafeGetProperty(connObj, "m_conn");
+                    if (oleDbConn != null)
+                    {
+                        var cs = SafeGetProperty(oleDbConn, "ConnectionString") as string;
+                        if (!string.IsNullOrEmpty(cs))
+                        {
+                            // Strip any password/credentials from the connection string
+                            // to prevent credential leakage via exception messages.
+                            cs = SanitizeConnectionString(cs);
+                            return cs;
+                        }
+                    }
+                    var cs2 = SafeGetProperty(connObj, "ConnectionString") as string;
+                    if (!string.IsNullOrEmpty(cs2))
+                    {
+                        cs2 = SanitizeConnectionString(cs2);
+                        return cs2;
+                    }
+                }
+            }
+            catch { }
+
+            // Path 2: DataSource.Directory() + DataSource.FileName() + DataSource.Extension()
+            try
+            {
+                var dir = SafeInvoke(ds, "Directory") as string;
+                var fn = SafeInvoke(ds, "FileName") as string;
+                var ext = SafeInvoke(ds, "Extension") as string;
+                if (!string.IsNullOrEmpty(dir) && !string.IsNullOrEmpty(fn))
+                {
+                    var fullPath = System.IO.Path.Combine(dir, fn);
+                    if (!string.IsNullOrEmpty(ext)) fullPath += ext;
+                    else if (!fullPath.EndsWith(".EwEmdb", StringComparison.OrdinalIgnoreCase))
+                        fullPath += ".EwEmdb";
+                    return $"Provider=Microsoft.ACE.OLEDB.12.0;Data Source={fullPath};Persist Security Info=False;";
+                }
+            }
+            catch { }
+
+            // Path 3: DataSource.ToString() as fallback
+            try
+            {
+                var toString = SafeInvoke(ds, "ToString") as string;
+                if (!string.IsNullOrEmpty(toString) && toString.EndsWith(".EwEmdb", StringComparison.OrdinalIgnoreCase))
+                {
+                    return $"Provider=Microsoft.ACE.OLEDB.12.0;Data Source={toString};Persist Security Info=False;";
+                }
+            }
+            catch { }
+
+            return null;
+        }
+
+        /// <summary>
+        /// Re-apply pending diet_comp writes to the in-memory entity
+        /// DietComp indexed properties.  This is called after core.LoadModel()
+        /// to restore diet_comp values that may not have been loaded from the
+        /// EcopathDietComp table (e.g. for groups created via AddGroup whose
+        /// GroupIDs differ from those used in the SQL table).
+        /// 
+        /// Uses SafeGetIndexedProperty instead of nGroups for bounds checking
+        /// because nGroups may not reflect newly added groups.
+        /// </summary>
+        private void ApplyPendingDietWritesInMemory(object core)
+        {
+            if (core == null) return;
+
+            KeyValuePair<(int, int), float>[] pending;
+            lock (_dietLock)
+            {
+                if (_pendingDietWrites.Count == 0) return;
+                pending = _pendingDietWrites.ToArray();
+            }
+            // Don't clear _pendingDietWrites — FlushPendingDietWrites preserves
+            // the list so writes survive repeated load_model cycles. The
+            // Dictionary automatically deduplicates by (PredIndex, PreyIndex).
+
+            foreach (var kvp in pending)
+            {
+                int predIndex = kvp.Key.Item1;
+                int preyIndex = kvp.Key.Item2;
+                float dietVal = kvp.Value;
+                try
+                {
+                    // Don't use nGroups for bounds — it may not reflect AddGroup.
+                    var input = SafeGetIndexedProperty(core, "EcopathGroupInputs", predIndex);
+                    if (input == null)
+                    {
+                        EwEMcpFileLog.Warn($"ApplyPendingDietWritesInMemory: no entity at index {predIndex}");
+                        continue;
+                    }
+                    var prop = FindIndexedProperty(input, "diet_comp", "ecopath_groups", 1, requireWritable: true);
+                    if (prop != null)
+                    {
+                        prop.SetValue(input, dietVal, new object[] { preyIndex });
+                        EwEMcpFileLog.Info($"ApplyPendingDietWritesInMemory: set [{predIndex},{preyIndex}] = {dietVal}");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    EwEMcpFileLog.Warn($"ApplyPendingDietWritesInMemory: failed for [{predIndex},{preyIndex}]: {ex.Message}");
+                }
+            }
+        }
+
+        /// <summary>
+        /// Re-apply pending diet_comp writes directly to the database after
+        /// core.Save() has finished.  SaveEcopathDietComp does DELETE+INSERT
+        /// from the in-memory DC array, which contains zeros for newly created
+        /// groups (since the DC array was never updated for those entries).
+        /// This method resolves 1-based group indices from the pending writes
+        /// to current GroupIDs and writes them via SQL so that a subsequent
+        /// load_model reads the correct values.
+        /// </summary>
+        private void FlushPendingDietWrites()
+        {
+            // Copy pending entries but DON'T clear the dictionary — writes must survive
+            // across load_model cycles so that ApplyPendingDietWritesInMemory can
+            // re-apply them after each reload.  The Dictionary automatically deduplicates
+            // by (PredIndex, PreyIndex), preventing unbounded growth on repeated edits.
+            KeyValuePair<(int, int), float>[] pending;
+            lock (_dietLock)
+            {
+                if (_pendingDietWrites.Count == 0) return;
+                pending = _pendingDietWrites.ToArray();
+            }
+
+            var core = _core();
+            if (core == null) return;
+
+            var connStr = GetConnectionString(core);
+            if (string.IsNullOrEmpty(connStr))
+            {
+                EwEMcpFileLog.Warn("FlushPendingDietWrites: no connection string available");
+                return;
+            }
+
+            try
+            {
+                using (var conn = new OleDbConnection(connStr))
+                {
+                    conn.Open();
+                    foreach (var kvp in pending)
+                    {
+                        int predIndex = kvp.Key.Item1;
+                        int preyIndex = kvp.Key.Item2;
+                        float dietVal = kvp.Value;
+                        try
+                        {
+                            // Don't use nGroups for bounds — it may not reflect AddGroup.
+                            // Instead, try to resolve the entity and skip if unavailable.
+                            var predInput = SafeGetIndexedProperty(core, "EcopathGroupInputs", predIndex);
+                            var preyInput = SafeGetIndexedProperty(core, "EcopathGroupInputs", preyIndex);
+                            if (predInput == null || preyInput == null)
+                            {
+                                EwEMcpFileLog.Warn($"FlushPendingDietWrites: entity unavailable at predIdx={predIndex} preyIdx={preyIndex}");
+                                continue;
+                            }
+
+                            int predId = Convert.ToInt32(
+                                SafeGetProperty(predInput, "GroupID") ?? SafeGetProperty(predInput, "DBID"));
+                            int preyId = Convert.ToInt32(
+                                SafeGetProperty(preyInput, "GroupID") ?? SafeGetProperty(preyInput, "DBID"));
+
+                            using (var cmd = new OleDbCommand(
+                                "UPDATE [EcopathDietComp] SET [Diet] = @v WHERE [PredID] = @p1 AND [PreyID] = @p2",
+                                conn))
+                            {
+                                cmd.Parameters.AddWithValue("@v", dietVal);
+                                cmd.Parameters.AddWithValue("@p1", predId);
+                                cmd.Parameters.AddWithValue("@p2", preyId);
+                                int rows = cmd.ExecuteNonQuery();
+                                if (rows == 0)
+                                {
+                                    using (var insertCmd = new OleDbCommand(
+                                        "INSERT INTO [EcopathDietComp] ([PredID], [PreyID], [Diet]) VALUES (@p1, @p2, @v)",
+                                        conn))
+                                    {
+                                        insertCmd.Parameters.AddWithValue("@p1", predId);
+                                        insertCmd.Parameters.AddWithValue("@p2", preyId);
+                                        insertCmd.Parameters.AddWithValue("@v", dietVal);
+                                        insertCmd.ExecuteNonQuery();
+                                    }
+                                }
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            EwEMcpFileLog.Warn($"FlushPendingDietWrites: failed for predIdx={predIndex} preyIdx={preyIndex}: {ex.GetType().Name}");
+                        }
+                    }
+                }
+                EwEMcpFileLog.Info($"FlushPendingDietWrites: flushed {pending.Length} diet entries");
+            }
+            catch (Exception ex)
+            {
+                EwEMcpFileLog.Warn("FlushPendingDietWrites: connection failed — see plugin log for details");
+                EwEMcpFileLog.Info($"FlushPendingDietWrites: connection exception type: {ex.GetType().Name}");
+            }
         }
 
         private JObject CloseModel()
         {
             bool ok = RequireCore().CloseModel();
+            lock (_dietLock)
+            {
+                _pendingDietWrites.Clear();
+            }
             return new JObject { ["closed"] = ok };
         }
 
@@ -5129,10 +5421,149 @@ case "list_ecosim_scenarios":
             {
                 property.SetValue(target.Entity, convertedValue, indices.Cast<object>().ToArray());
                 ForceValidateToDataSource(target.Entity, property.Name, convertedValue, target.NormalizedDomain);
+                MarkDataSourceModified(target.NormalizedDomain);
+
+                if (target.NormalizedDomain == "ecopath_groups" &&
+                    string.Equals(property.Name, "DietComp", StringComparison.OrdinalIgnoreCase) &&
+                    indices.Length >= 1)
+                {
+                    // Directly update the internal DC 2D array to ensure SaveEcopathDietComp picks it up.
+                    var core = _core();
+                    if (core != null)
+                    {
+                        // Find m_EcopathData.DC (primary computation data used by SaveEcopathDietComp)
+                        try
+                        {
+                            var mDataField = core.GetType().GetField("m_EcopathData",
+                                BindingFlags.Instance | BindingFlags.NonPublic);
+                            var mData = mDataField?.GetValue(core);
+                            EwEMcpFileLog.Info($"SetIndexedValue: m_EcopathData found={mData != null}");
+                            if (mData != null)
+                            {
+                                var dcField = mData.GetType().GetField("DC",
+                                    BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                                var dcArray = dcField?.GetValue(mData) as float[,];
+                                EwEMcpFileLog.Info($"SetIndexedValue: DC array found={dcArray != null}, size=[{dcArray?.GetLength(0) ?? 0},{dcArray?.GetLength(1) ?? 0}]");
+                                if (dcArray != null)
+                                {
+                                    // Resolve predator index from GroupDBID
+                                    var dsData = SafeGetProperty(core, "EcopathDataStructures");
+                                    if (dsData != null)
+                                    {
+                                        var groupDbIdField = dsData.GetType().GetField("GroupDBID",
+                                            BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                                        var groupDbIdArray = groupDbIdField?.GetValue(dsData) as Array;
+                                        if (groupDbIdArray != null)
+                                        {
+                                            var predIdObj = SafeGetProperty(target.Entity, "GroupID") ?? SafeGetProperty(target.Entity, "DBID");
+                                            if (predIdObj != null)
+                                            {
+                                                int predIdx = Array.IndexOf(groupDbIdArray, Convert.ToInt32(predIdObj));
+                                                int preyIdx = indices[0];
+                                                EwEMcpFileLog.Info($"SetIndexedValue: predIdx={predIdx} preyIdx={preyIdx} predId={predIdObj}");
+                                                if (predIdx >= 1 && predIdx < dcArray.GetLength(0) && preyIdx < dcArray.GetLength(1))
+                                                {
+                                                    float dietVal = Convert.ToSingle(convertedValue);
+                                                    dcArray[predIdx, preyIdx] = dietVal;
+                                                    EwEMcpFileLog.Info($"SetIndexedValue: DC[{predIdx},{preyIdx}] = {dietVal}");
+                                                }
+                                                else
+                                                    EwEMcpFileLog.Warn($"SetIndexedValue: bounds error [{predIdx},{preyIdx}] vs [{dcArray.GetLength(0)},{dcArray.GetLength(1)}]");
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        catch (Exception dex)
+                        {
+                            EwEMcpFileLog.Warn($"SetIndexedValue: DC update failed: {dex.Message}");
+                        }
+                    }
+                }
             }
             catch (Exception ex)
             {
                 throw new EwEMcpException("set_failed", ex.Message);
+            }
+
+            // ── DietComp SQL persistence for new groups ──
+            // Even when the in-memory DC array was updated above, SaveEcopathDietComp
+            // (called during core.Save()) does DELETE+INSERT from the DC array, which
+            // has zeros for newly created groups. Write directly to the database and
+            // enqueue for post-save flush so the data survives load_model.
+            // Uses 1-based group indices rather than GroupIDs because AddGroup assigns
+            // temporary IDs that may differ from the DB-assigned GroupID after save/load.
+            if (target.NormalizedDomain == "ecopath_groups" &&
+                string.Equals(property.Name, "DietComp", StringComparison.OrdinalIgnoreCase) &&
+                indices.Length >= 1 && target.Index.HasValue)
+            {
+                int predIndex = target.Index.Value;
+                int preyIndex = indices[0];
+                float dietVal = Convert.ToSingle(convertedValue);
+
+                // Enqueue by index for post-save flush (IDs resolved at flush time).
+                // Dictionary deduplicates by (PredIndex, PreyIndex) — repeated edits
+                // to the same cell overwrite instead of appending.
+                lock (_dietLock)
+                {
+                    _pendingDietWrites[(predIndex, preyIndex)] = dietVal;
+                }
+
+                // Immediate SQL write so get_ecopath_group / get_indexed_value
+                // see the value (uses current GroupIDs which are correct for the
+                // current in-memory state).
+                var core2 = _core();
+                if (core2 != null)
+                {
+                    try
+                    {
+                        var predInput = SafeGetIndexedProperty(core2, "EcopathGroupInputs", predIndex);
+                        var preyInput = SafeGetIndexedProperty(core2, "EcopathGroupInputs", preyIndex);
+                        if (predInput != null && preyInput != null)
+                        {
+                            int predId = Convert.ToInt32(
+                                SafeGetProperty(predInput, "GroupID") ?? SafeGetProperty(predInput, "DBID"));
+                            int preyId = Convert.ToInt32(
+                                SafeGetProperty(preyInput, "GroupID") ?? SafeGetProperty(preyInput, "DBID"));
+
+                            var connStr2 = GetConnectionString(core2);
+                            if (!string.IsNullOrEmpty(connStr2))
+                            {
+                                using (var conn = new OleDbConnection(connStr2))
+                                {
+                                    conn.Open();
+                                    using (var cmd = new OleDbCommand(
+                                        "UPDATE [EcopathDietComp] SET [Diet] = @v WHERE [PredID] = @p1 AND [PreyID] = @p2",
+                                        conn))
+                                    {
+                                        cmd.Parameters.AddWithValue("@v", dietVal);
+                                        cmd.Parameters.AddWithValue("@p1", predId);
+                                        cmd.Parameters.AddWithValue("@p2", preyId);
+                                        int rows = cmd.ExecuteNonQuery();
+                                        if (rows == 0)
+                                        {
+                                            using (var insertCmd = new OleDbCommand(
+                                                "INSERT INTO [EcopathDietComp] ([PredID], [PreyID], [Diet]) VALUES (@p1, @p2, @v)",
+                                                conn))
+                                            {
+                                                insertCmd.Parameters.AddWithValue("@p1", predId);
+                                                insertCmd.Parameters.AddWithValue("@p2", preyId);
+                                                insertCmd.Parameters.AddWithValue("@v", dietVal);
+                                                insertCmd.ExecuteNonQuery();
+                                            }
+                                        }
+                                    }
+                                }
+                                EwEMcpFileLog.Info($"SetIndexedValue: diet_comp SQL persisted (predIdx={predIndex}->preyIdx={preyIndex} = {dietVal})");
+                            }
+                        }
+                    }
+                    catch (Exception dex)
+                    {
+                        EwEMcpFileLog.Warn($"SetIndexedValue: diet_comp immediate SQL failed: {dex.GetType().Name}");
+                    }
+                }
             }
 
             var result = new JObject
@@ -7056,6 +7487,7 @@ private static PropertyInfo FindReadableProperty(object entity, string variable,
                 return false;
             }
         }
+
 
         private sealed class EntityTarget
         {

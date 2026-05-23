@@ -590,9 +590,8 @@ namespace EwE_MCP_Plugin
         // Queue all captured events, capping to prevent unbounded growth
         foreach (var evt in events)
         {
-            if (_pendingDialogEvents.Count >= MaxPendingDialogEvents)
+            while (_pendingDialogEvents.Count >= MaxPendingDialogEvents && _pendingDialogEvents.TryDequeue(out _))
             {
-                _pendingDialogEvents.TryDequeue(out _);
                 EwEMcpFileLog.Warn("Dialog event queue overflow — dropping oldest event");
             }
             _pendingDialogEvents.Enqueue(evt);
@@ -649,7 +648,7 @@ namespace EwE_MCP_Plugin
         return IntPtr.Zero;
     }
 
-        private static readonly HashSet<string> _safeDialogTitles = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        private static readonly string[] _safeDialogTitlePrefixes =
         {
             "Ecopath with Ecosim",
             "Ecopath",
@@ -659,10 +658,17 @@ namespace EwE_MCP_Plugin
 
         private static bool IsSafeToDismiss(string title)
         {
-            foreach (var safe in _safeDialogTitles)
+            if (string.IsNullOrWhiteSpace(title))
+            {
+                return false;
+            }
+
+            foreach (var safe in _safeDialogTitlePrefixes)
             {
                 if (title.StartsWith(safe, StringComparison.OrdinalIgnoreCase))
+                {
                     return true;
+                }
             }
             return false;
         }
