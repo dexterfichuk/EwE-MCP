@@ -4453,14 +4453,16 @@ case "list_ecosim_scenarios":
                     {
                         prop.SetValue(input, dietVal, new object[] { preyIndex });
 
-                        // Also update the DietComp[] array property so get_values sees the value.
+                        // Also update the DietComp[] array property so get_values sees
+                        // the value. After load_model the entity re-initializes its
+                        // DietComp array as 1-based (index 1 = group 1, index 0 unused).
                         var arrayProp = FindWritableProperty(input, "diet_comp", "ecopath_groups");
                         if (arrayProp != null && preyIndex >= 1)
                         {
                             var dietArray = arrayProp.GetValue(input, null) as float[];
-                            if (dietArray != null && (preyIndex - 1) < dietArray.Length)
+                            if (dietArray != null && preyIndex < dietArray.Length)
                             {
-                                dietArray[preyIndex - 1] = dietVal;
+                                dietArray[preyIndex] = dietVal;
                             }
                         }
 
