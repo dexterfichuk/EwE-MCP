@@ -365,6 +365,10 @@ def test_python_batch_blocked_matches_csharp():
 
 
 @pytest.mark.live
+@pytest.mark.skipif(
+    os.environ.get("EWE_LIVE_TESTS") != "1",
+    reason="Requires live EwE MCP plugin (set EWE_LIVE_TESTS=1 to run)",
+)
 def test_batch_blocked_commands_can_be_queried_from_plugin():
     """Verify the C# plugin returns the authoritative batch-blocked set."""
     from ewe_mcp.client import EwEMCPClient
@@ -391,8 +395,8 @@ def test_batch_blocked_commands_can_be_queried_from_plugin():
         )
     finally:
         client.disconnect()
-        from ewe_mcp.helpers import _BATCH_BLOCKED_COMMANDS_CACHE
-        _BATCH_BLOCKED_COMMANDS_CACHE = None
+        import ewe_mcp.helpers as _h
+        _h._BATCH_BLOCKED_COMMANDS_CACHE = None
 
 
 def _extract_csharp_dialog_commands():

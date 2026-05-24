@@ -135,6 +135,9 @@ _No standalone `run_ecotracer` — Ecotracer runs within Ecosim/Ecospace when Co
 ### Generic Entity / Value
 `list_domains`, `list_entities`, `get_entity`, `list_variables`, `get_variable_metadata`, `get_values`, `validate_values`, `get_indexed_value`, `validate_indexed_value`, `set_values`, `set_indexed_value`, `search_entities`, `get_values_range`, `set_values_range`
 
+### Name-Based Batch Updates
+`list_name_batch_capabilities`, `set_values_by_name_batch`
+
 ### Navigation / UI
 `list_navigation_nodes`, `navigate_to_node`, `get_active_view`, `invoke_ui_command`, `list_ui_commands`, `refresh_ui`
 
@@ -184,6 +187,29 @@ Pass `navigate=False` for quiet/background access, batch operations, or any work
 await navigate_to_node(id="ndDietComposition")
 await get_indexed_value(domain="ecopath_group", index=20, variable="diet_comp", indices=[25])
 await set_values(domain="ecopath_group", index=1, values={"name": "0-12 Snook"}, navigate=False)
+```
+
+### Name-Based Batch Updates
+
+`set_values_by_name_batch` updates entities by exact name instead of index, across mixed domains in one request. Use `list_name_batch_capabilities` first to discover supported domains, match fields, and writable fields.
+
+Name resolution is exact-match only. If no exact match is found, the tool returns ranked fuzzy suggestions so the agent can retry with the corrected name — suggestions are never auto-applied.
+
+Recommended agent workflow:
+1. Call `list_name_batch_capabilities` to discover available fields and domains.
+2. Build operations using the discovered writable fields.
+3. Call `set_values_by_name_batch` with the operations.
+4. If the response contains `not_found` or `ambiguous` items, retry using the `suggestions` or `candidates` from the result.
+
+Example:
+```python
+await set_values_by_name_batch(
+    operations=[
+        {"domain": "ecopath_group", "name": "Adult menhaden", "values": {"pb": 1.42}},
+        {"domain": "ecopath_fleet", "name": "Shrimp Trawl", "values": {"landing": 0.95}},
+    ],
+    options={"dry_run": False, "include_suggestions": True},
+)
 ```
 
 ## Safety Rules

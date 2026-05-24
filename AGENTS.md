@@ -168,6 +168,7 @@ The MCP server exposes tools backed by the running EwE plugin. Current tools inc
 - **MSE:** `get_mse_parameters`, `list_mse_group_inputs`, `get_mse_group_input`, `list_mse_fleet_inputs`, `get_mse_fleet_input`, `get_mse_run_state`, `run_mse`, `stop_mse`, `get_mse_group_results`, `get_mse_fleet_results`
 - **Monte Carlo:** `get_monte_carlo_parameters`, `list_monte_carlo_groups`, `get_monte_carlo_group`, `get_monte_carlo_run_state`, `run_monte_carlo`, `stop_monte_carlo`
 - **Generic entity/value:** `list_domains`, `list_entities`, `get_entity`, `list_variables`, `get_variable_metadata`, `get_values`, `validate_values`, `get_indexed_value`, `validate_indexed_value`, `set_values`, `set_indexed_value`, `search_entities`, `get_values_range`, `set_values_range`
+- **Name-based batch updates:** `list_name_batch_capabilities`, `set_values_by_name_batch`
 - **Navigation/UI:** `list_navigation_nodes`, `navigate_to_node`, `get_active_view`, `invoke_ui_command`, `list_ui_commands`, `refresh_ui`, `capture_view`, `save_screenshot`
 - **Server control:** `shutdown_server`
 - **Batching:** `batch_commands`
@@ -233,6 +234,7 @@ Prefer testing mutations against copied models. If you mutate the shared sample 
 - `stop_ecosim` uses `TIMEOUT_LONG` (120s) to accommodate long-running simulations.
 - Ecotracer runs as part of Ecosim/Ecospace when `ContaminantTracing` is enabled — there is no standalone `run_ecotracer` command.
 - MSE and Monte Carlo are configured within the Ecosim scenario context; there are no scenario management commands for them.
+- `set_values_by_name_batch` performs exact-name resolution before mutation. Fuzzy matching is suggestion-only and never auto-applies values. For multi-domain edits, prefer `set_values_by_name_batch` over ad-hoc index lookup loops.
 - Record what you changed and what you restored in your final message.
 
 ## Troubleshooting
