@@ -5665,7 +5665,22 @@ case "list_ecosim_scenarios":
                         {
                             try
                             {
-                                int nPrey = dietArray.Count - 1;
+                                // ── Shift to 1-based internal layout ──
+                                // The Python client sends a 0-based array (index 0 = group 1),
+                                // but EwE's entity stores DietComp[] as 1-based (index 1 = group 1).
+                                // Shift all values right by one position so the entity, DC array,
+                                // and SQL all see the correct prey indices.
+                                int nElements = dietArray.Count;
+                                var dietShifted = new float[nElements];
+                                int nPrey = nElements - 1;
+                                for (int si = 1; si < nElements; si++)
+                                {
+                                    float sv = Convert.ToSingle(dietArray[si - 1]);
+                                    dietShifted[si] = sv;
+                                }
+                                // Apply the shifted array to the entity property
+                                property.SetValue(entity, dietShifted, null);
+
                                 // ── Update internal DC array ──
                                 var mDataField = core.GetType().GetField("m_EcopathData",
                                     BindingFlags.Instance | BindingFlags.NonPublic);
@@ -5691,11 +5706,10 @@ case "list_ecosim_scenarios":
                                                     int predIdx = Array.IndexOf(groupDbIdArray, Convert.ToInt32(predIdObj));
                                                     if (predIdx >= 1 && predIdx < dcArray.GetLength(0))
                                                     {
-                                                        nPrey = Math.Min(dietArray.Count - 1, dcArray.GetLength(1) - 1);
+                                                        nPrey = Math.Min(nElements - 1, dcArray.GetLength(1) - 1);
                                                         for (int prey = 1; prey <= nPrey; prey++)
                                                         {
-                                                            float val = Convert.ToSingle(dietArray[prey - 1]);
-                                                            dcArray[predIdx, prey] = val;
+                                                            dcArray[predIdx, prey] = dietShifted[prey];
                                                         }
                                                     }
                                                 }
@@ -5725,7 +5739,7 @@ case "list_ecosim_scenarios":
                                             conn.Open();
                                             for (int preyIdx = 1; preyIdx <= nPrey; preyIdx++)
                                             {
-                                                float val = Convert.ToSingle(dietArray[preyIdx - 1]);
+                                                float val = dietShifted[preyIdx];
                                                 if (val != 0f)
                                                 {
                                                     _pendingDietWrites[(predIndex, preyIdx)] = val;
@@ -5778,7 +5792,7 @@ case "list_ecosim_scenarios":
                                     {
                                         for (int preyIdx = 1; preyIdx <= nPrey; preyIdx++)
                                         {
-                                            float val = Convert.ToSingle(dietArray[preyIdx - 1]);
+                                            float val = dietShifted[preyIdx];
                                             if (val != 0f)
                                                 _pendingDietWrites[(predIndex, preyIdx)] = val;
                                         }
@@ -6221,7 +6235,21 @@ private static object MapPropertyNameToVarNameFlag(string propertyName, Type enu
         {
             try
             {
-                return ToJToken(property.GetValue(entity, null));
+                var value = property.GetValue(entity, null);
+
+                // Shift DietComp from 1-based internal layout back to 0-based for
+                // the Python client. The internal array stores diet[1] = group 1 value;
+                // the Python client expects diet[0] = group 1 value.
+                if (string.Equals(property.Name, "DietComp", StringComparison.OrdinalIgnoreCase) &&
+                    value is float[] dietInternal && dietInternal.Length > 1)
+                {
+                    var dietClient = new float[dietInternal.Length];
+                    for (int i = 1; i < dietInternal.Length; i++)
+                        dietClient[i - 1] = dietInternal[i];
+                    return ToJToken(dietClient);
+                }
+
+                return ToJToken(value);
             }
             catch (Exception ex)
             {
