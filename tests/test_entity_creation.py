@@ -13,15 +13,12 @@ def mock_send():
 
 
 @pytest.mark.asyncio
-async def test_create_ecopath_group_name_only(mock_send):
+async def test_create_ecopath_group_requires_group_type(mock_send):
     from ewe_mcp.server import create_ecopath_group
 
-    result = await create_ecopath_group(name="TestGroup")
-    mock_send.assert_awaited_once_with(
-        "create_ecopath_group",
-        {"name": "TestGroup"},
-    )
-    assert result == {"created": True}
+    with pytest.raises(ValueError, match="group_type is required"):
+        await create_ecopath_group(name="TestGroup")
+    mock_send.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -51,41 +48,33 @@ async def test_create_ecopath_group_with_all_optional_params(mock_send):
 
 
 @pytest.mark.asyncio
-async def test_create_ecopath_group_with_some_optional_params(mock_send):
+@pytest.mark.parametrize("group_type", [0, 1, 2])
+async def test_create_ecopath_group_accepts_all_group_types(mock_send, group_type):
     from ewe_mcp.server import create_ecopath_group
 
-    result = await create_ecopath_group(
-        name="DetritusGroup",
-        group_type=2,
-        biomass=10.0,
-    )
+    result = await create_ecopath_group(name="Group", group_type=group_type)
     mock_send.assert_awaited_once_with(
         "create_ecopath_group",
         {
-            "name": "DetritusGroup",
-            "biomass": 10.0,
-            "group_type": 2,
+            "name": "Group",
+            "group_type": group_type,
         },
     )
     assert result == {"created": True}
 
 
 @pytest.mark.asyncio
-async def test_create_ecopath_group_none_params_not_sent(mock_send):
+@pytest.mark.parametrize("group_type", [-1, 3, 99, None])
+async def test_create_ecopath_group_rejects_invalid_types(mock_send, group_type):
     from ewe_mcp.server import create_ecopath_group
 
-    result = await create_ecopath_group(
-        name="ConsumerGroup",
-        biomass=None,
-        pb_ratio=None,
-        qb_ratio=None,
-        ee=None,
-        group_type=None,
-    )
-    call_args = mock_send.call_args
-    params = call_args[0][1]
-    assert params == {"name": "ConsumerGroup"}
-    assert result == {"created": True}
+    if group_type is None:
+        with pytest.raises(ValueError, match="group_type is required"):
+            await create_ecopath_group(name="BadGroup", group_type=group_type)
+    else:
+        with pytest.raises(ValueError, match="group_type must be"):
+            await create_ecopath_group(name="BadGroup", group_type=group_type)
+    mock_send.assert_not_awaited()
 
 
 @pytest.mark.asyncio
