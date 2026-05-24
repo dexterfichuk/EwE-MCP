@@ -587,15 +587,21 @@ namespace EwE_MCP_Plugin
         return true;
             }, IntPtr.Zero);
 
-        // Queue all captured events, capping to prevent unbounded growth
+        // Queue all captured events, capping to prevent unbounded growth.
+        // Track total dropped count across the batch and emit a single aggregated warning.
+        int dialogEventDroppedCount = 0;
         foreach (var evt in events)
         {
             while (_pendingDialogEvents.Count >= MaxPendingDialogEvents && _pendingDialogEvents.TryDequeue(out _))
             {
-                EwEMcpFileLog.Warn("Dialog event queue overflow — dropping oldest event");
+                dialogEventDroppedCount++;
             }
             _pendingDialogEvents.Enqueue(evt);
             _auditLog.Add("dialog_watcher", "captured", evt["data"]?.ToString(Formatting.None) ?? "unknown");
+        }
+        if (dialogEventDroppedCount > 0)
+        {
+            EwEMcpFileLog.Warn($"Dialog event queue overflow — dropped {dialogEventDroppedCount} oldest event(s)");
         }
 
             return dismissed;

@@ -4343,6 +4343,9 @@ case "list_ecosim_scenarios":
         /// <summary>
         /// Get an OLEDB connection string for the current model by trying multiple
         /// property access patterns against the EwE core and its DataSource.
+        /// Returns the raw connection string (including credentials if stored)
+        /// so that database connections work for password-protected .EwEmdb files.
+        /// For logging or error surfacing, use SanitizeConnectionString() separately.
         /// </summary>
         private static string GetConnectionString(object core)
         {
@@ -4363,16 +4366,12 @@ case "list_ecosim_scenarios":
                         var cs = SafeGetProperty(oleDbConn, "ConnectionString") as string;
                         if (!string.IsNullOrEmpty(cs))
                         {
-                            // Strip any password/credentials from the connection string
-                            // to prevent credential leakage via exception messages.
-                            cs = SanitizeConnectionString(cs);
                             return cs;
                         }
                     }
                     var cs2 = SafeGetProperty(connObj, "ConnectionString") as string;
                     if (!string.IsNullOrEmpty(cs2))
                     {
-                        cs2 = SanitizeConnectionString(cs2);
                         return cs2;
                     }
                 }
@@ -5670,10 +5669,12 @@ case "list_ecosim_scenarios":
                                 // but EwE's entity stores DietComp[] as 1-based (index 1 = group 1).
                                 // Shift all values right by one position so the entity, DC array,
                                 // and SQL all see the correct prey indices.
+                                // Internal storage needs an extra slot at index 0 (unused) so
+                                // prey index N in the client maps to internal index N+1.
                                 int nElements = dietArray.Count;
-                                var dietShifted = new float[nElements];
-                                int nPrey = nElements - 1;
-                                for (int si = 1; si < nElements; si++)
+                                var dietShifted = new float[nElements + 1];
+                                int nPrey = nElements;
+                                for (int si = 1; si <= nElements; si++)
                                 {
                                     float sv = Convert.ToSingle(dietArray[si - 1]);
                                     dietShifted[si] = sv;
@@ -5706,7 +5707,7 @@ case "list_ecosim_scenarios":
                                                     int predIdx = Array.IndexOf(groupDbIdArray, Convert.ToInt32(predIdObj));
                                                     if (predIdx >= 1 && predIdx < dcArray.GetLength(0))
                                                     {
-                                                        nPrey = Math.Min(nElements - 1, dcArray.GetLength(1) - 1);
+                                                        nPrey = Math.Min(nElements, dcArray.GetLength(1) - 1);
                                                         for (int prey = 1; prey <= nPrey; prey++)
                                                         {
                                                             dcArray[predIdx, prey] = dietShifted[prey];
@@ -5718,7 +5719,16 @@ case "list_ecosim_scenarios":
                                     }
                                 }
 
-                                // ── Enqueue pending SQL writes + immediate SQL ──
+                                // ── Enqueue pending writes (inside lock — dictionary only) ──
+                                lock (_dietLock)
+                                {
+                                    for (int preyIdx = 1; preyIdx <= nPrey; preyIdx++)
+                                    {
+                                        _pendingDietWrites[(predIndex, preyIdx)] = dietShifted[preyIdx];
+                                    }
+                                }
+
+                                // ── Immediate SQL writes (outside lock — may do I/O) ──
                                 var connStr = GetConnectionString(core);
                                 var predInput = SafeGetIndexedProperty(core, "EcopathGroupInputs", predIndex);
                                 int predGroupId = 0;
@@ -5726,79 +5736,63 @@ case "list_ecosim_scenarios":
                                     predGroupId = Convert.ToInt32(
                                         SafeGetProperty(predInput, "GroupID") ?? SafeGetProperty(predInput, "DBID"));
 
-                                OleDbConnection conn = null;
                                 if (!string.IsNullOrEmpty(connStr) && predGroupId > 0)
-                                    conn = new OleDbConnection(connStr);
-
-                                lock (_dietLock)
                                 {
-                                    if (conn != null)
+                                    OleDbConnection sqlConn = null;
+                                    try
                                     {
-                                        try
-                                        {
-                                            conn.Open();
-                                            for (int preyIdx = 1; preyIdx <= nPrey; preyIdx++)
-                                            {
-                                                float val = dietShifted[preyIdx];
-                                                if (val != 0f)
-                                                {
-                                                    _pendingDietWrites[(predIndex, preyIdx)] = val;
-
-                                                    int preyGroupId = 0;
-                                                    var preyInput = SafeGetIndexedProperty(core, "EcopathGroupInputs", preyIdx);
-                                                    if (preyInput != null)
-                                                    {
-                                                        preyGroupId = Convert.ToInt32(
-                                                            SafeGetProperty(preyInput, "GroupID") ?? SafeGetProperty(preyInput, "DBID"));
-                                                    }
-                                                    if (preyGroupId <= 0)
-                                                    {
-                                                        EwEMcpFileLog.Warn($"SetGenericValues: diet_comp skip SQL for preyIdx={preyIdx}, could not resolve prey GroupID");
-                                                        continue;
-                                                    }
-
-                                                    using (var cmd = new OleDbCommand(
-                                                        "UPDATE [EcopathDietComp] SET [Diet] = @v WHERE [PredID] = @p1 AND [PreyID] = @p2",
-                                                        conn))
-                                                    {
-                                                        cmd.Parameters.AddWithValue("@v", val);
-                                                        cmd.Parameters.AddWithValue("@p1", predGroupId);
-                                                        cmd.Parameters.AddWithValue("@p2", preyGroupId);
-                                                        int rows = cmd.ExecuteNonQuery();
-                                                        if (rows == 0)
-                                                        {
-                                                            using (var insertCmd = new OleDbCommand(
-                                                                "INSERT INTO [EcopathDietComp] ([PredID], [PreyID], [Diet]) VALUES (@p1, @p2, @v)",
-                                                                conn))
-                                                            {
-                                                                insertCmd.Parameters.AddWithValue("@p1", predGroupId);
-                                                                insertCmd.Parameters.AddWithValue("@p2", preyGroupId);
-                                                                insertCmd.Parameters.AddWithValue("@v", val);
-                                                                insertCmd.ExecuteNonQuery();
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                            conn.Close();
-                                        }
-                                        catch (Exception sqlex)
-                                        {
-                                            try { conn?.Close(); } catch { }
-                                            EwEMcpFileLog.Warn($"SetGenericValues: diet_comp SQL failed: {sqlex.GetType().Name}");
-                                        }
-                                    }
-                                    else
-                                    {
+                                        sqlConn = new OleDbConnection(connStr);
+                                        sqlConn.Open();
                                         for (int preyIdx = 1; preyIdx <= nPrey; preyIdx++)
                                         {
                                             float val = dietShifted[preyIdx];
-                                            if (val != 0f)
-                                                _pendingDietWrites[(predIndex, preyIdx)] = val;
+                                            int preyGroupId = 0;
+                                            var preyInput = SafeGetIndexedProperty(core, "EcopathGroupInputs", preyIdx);
+                                            if (preyInput != null)
+                                            {
+                                                preyGroupId = Convert.ToInt32(
+                                                    SafeGetProperty(preyInput, "GroupID") ?? SafeGetProperty(preyInput, "DBID"));
+                                            }
+                                            if (preyGroupId <= 0)
+                                            {
+                                                EwEMcpFileLog.Warn($"SetGenericValues: diet_comp skip SQL for preyIdx={preyIdx}, could not resolve prey GroupID");
+                                                continue;
+                                            }
+
+                                            using (var cmd = new OleDbCommand(
+                                                "UPDATE [EcopathDietComp] SET [Diet] = @v WHERE [PredID] = @p1 AND [PreyID] = @p2",
+                                                sqlConn))
+                                            {
+                                                cmd.Parameters.AddWithValue("@v", val);
+                                                cmd.Parameters.AddWithValue("@p1", predGroupId);
+                                                cmd.Parameters.AddWithValue("@p2", preyGroupId);
+                                                int rows = cmd.ExecuteNonQuery();
+                                                if (rows == 0)
+                                                {
+                                                    using (var insertCmd = new OleDbCommand(
+                                                        "INSERT INTO [EcopathDietComp] ([PredID], [PreyID], [Diet]) VALUES (@p1, @p2, @v)",
+                                                        sqlConn))
+                                                    {
+                                                        insertCmd.Parameters.AddWithValue("@p1", predGroupId);
+                                                        insertCmd.Parameters.AddWithValue("@p2", preyGroupId);
+                                                        insertCmd.Parameters.AddWithValue("@v", val);
+                                                        insertCmd.ExecuteNonQuery();
+                                                    }
+                                                }
+                                            }
                                         }
+                                        sqlConn.Close();
+                                    }
+                                    catch (Exception sqlex)
+                                    {
+                                        try { sqlConn?.Close(); } catch { }
+                                        EwEMcpFileLog.Warn($"SetGenericValues: diet_comp SQL failed: {sqlex.GetType().Name}");
+                                    }
+                                    finally
+                                    {
+                                        sqlConn?.Dispose();
                                     }
                                 }
-                                conn?.Dispose();
                             }
                             catch (Exception dex)
                             {
@@ -6238,12 +6232,13 @@ private static object MapPropertyNameToVarNameFlag(string propertyName, Type enu
                 var value = property.GetValue(entity, null);
 
                 // Shift DietComp from 1-based internal layout back to 0-based for
-                // the Python client. The internal array stores diet[1] = group 1 value;
-                // the Python client expects diet[0] = group 1 value.
+                // the Python client. The internal array stores diet[1] = group 1 value
+                // (index 0 is unused). The Python client expects diet[0] = group 1 value
+                // with no trailing/unused slot.
                 if (string.Equals(property.Name, "DietComp", StringComparison.OrdinalIgnoreCase) &&
                     value is float[] dietInternal && dietInternal.Length > 1)
                 {
-                    var dietClient = new float[dietInternal.Length];
+                    var dietClient = new float[dietInternal.Length - 1];
                     for (int i = 1; i < dietInternal.Length; i++)
                         dietClient[i - 1] = dietInternal[i];
                     return ToJToken(dietClient);
