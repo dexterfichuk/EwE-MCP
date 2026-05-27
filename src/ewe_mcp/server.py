@@ -1725,13 +1725,17 @@ async def get_ecosim_pp_forcing(index: int) -> dict[str, Any]:
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
 async def get_ecosim_group_results(
-    index: int,
+    index: int | None = None,
     variables: list[str] | None = None,
     start_time: int | None = None,
     end_time: int | None = None,
     fleet_index: int | None = None,
+    list: bool = False,
 ) -> dict[str, Any]:
     """Read Ecosim group result time-series after a run.
+
+    Set `list=True` to return results for all groups instead of a single
+    group by index. When `list=True`, the `index` parameter is ignored.
 
     Known variable names: biomass, biomass_rel, catch, catch_rel,
     feeding_time, fish_mort, pred_mort, total_mort, tl,
@@ -1746,7 +1750,9 @@ async def get_ecosim_group_results(
     Unknown variable names will be rejected by the EwE plugin with
     a descriptive error.
     """
-    params: dict[str, Any] = {"index": index}
+    params: dict[str, Any] = {}
+    if index is not None:
+        params["index"] = index
     if variables is not None:
         params["variables"] = variables
     if start_time is not None:
@@ -1755,6 +1761,8 @@ async def get_ecosim_group_results(
         params["end_time"] = end_time
     if fleet_index is not None:
         params["fleet_index"] = fleet_index
+    if list:
+        params["list"] = True
     return await _send("get_ecosim_group_results", params, timeout=TIMEOUT_LONG)
 
 

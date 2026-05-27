@@ -128,6 +128,38 @@ async def test_ecosim_run_and_fetch_results(sample_model_path):
 
 @live
 @pytest.mark.asyncio
+async def test_ecosim_list_all_group_results(sample_model_path):
+    await _ensure_ecosim_loaded(sample_model_path)
+
+    run = await run_ecosim()
+    assert run["started"] is True
+
+    state = await _wait_for_ecosim_completed()
+    assert state["has_ecosim_ran"] is True
+
+    all_results = await get_ecosim_group_results(
+        list=True,
+        variables=["biomass", "catch"],
+        start_time=1,
+        end_time=3,
+    )
+    assert "results" in all_results
+    assert all_results["total_count"] >= 1
+    assert len(all_results["results"]) == all_results["total_count"]
+
+    # Verify structure of each group result
+    for g in all_results["results"]:
+        assert "index" in g
+        assert "name" in g
+        assert "series" in g
+        assert "biomass" in g["series"]
+        assert "catch" in g["series"]
+        assert len(g["series"]["biomass"]) == 3
+        assert len(g["series"]["catch"]) == 3
+
+
+@live
+@pytest.mark.asyncio
 async def test_ecosim_result_bounds_error(sample_model_path):
     await _ensure_ecosim_loaded(sample_model_path)
     await run_ecosim()

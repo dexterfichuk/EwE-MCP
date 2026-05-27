@@ -1862,16 +1862,19 @@ case "list_ecosim_scenarios":
                 }
 
                 // Load the dataset before importing so ActiveDatasetIndex >= 0.
+                // Use the actual iDataset from the append rather than a hardcoded index,
+                // because dataset 1 may not exist or may not be the one we just created.
                 var preloadMethod = core.GetType().GetMethod("LoadTimeSeries",
                     new[] { typeof(int), typeof(bool) });
+                var preloadIdx = (createNewSet && iDataset > 0) ? iDataset : 1;
                 if (preloadMethod != null)
                 {
                     try
                     {
-                        preloadMethod.Invoke(core, new object[] { 1, false });
-                        stepLog.Add("Preload dataset 1: OK");
+                        preloadMethod.Invoke(core, new object[] { preloadIdx, false });
+                        stepLog.Add($"Preload dataset {preloadIdx}: OK");
                     }
-                    catch (Exception le) { stepLog.Add($"Preload dataset 1: {le.Message}"); }
+                    catch (Exception le) { stepLog.Add($"Preload dataset {preloadIdx}: {le.Message}"); }
                 }
 
                 // Use AddTimeSeries instead of ImportEcosimTimeSeries because
@@ -1902,6 +1905,27 @@ case "list_ecosim_scenarios":
                         var tsTypeVal = SafeGetProperty(tsItem, "TimeSeriesType");
                         var weight = Convert.ToSingle(SafeIntProperty(tsItem, "WtType"));
                         var nPts = SafeIntProperty(tsItem, "nPoints");
+
+                        // Validate pool indices against current model dimensions to prevent
+                        // IndexOutOfRangeException inside EwE's AddTimeSeries code.
+                        // pool may be a group index (1..nGroups) or fleet index (1..nFleets),
+                        // or 0 for forcing/global series. Use the larger dimension as upper bound.
+                        var nGroups = SafeIntProperty(core, "nGroups");
+                        var nFleets = SafeIntProperty(core, "nFleets");
+                        var maxPool = Math.Max(nGroups, nFleets);
+                        if (pool < 0 || pool > maxPool)
+                        {
+                            numErrors++;
+                            stepLog.Add($"AddTimeSeries({importIdx}): 'DatPool' value {pool} is outside valid range 0..{maxPool} (nGroups={nGroups}, nFleets={nFleets})");
+                            continue;
+                        }
+                        if (poolSec < 0 || poolSec > nGroups)
+                        {
+                            numErrors++;
+                            stepLog.Add($"AddTimeSeries({importIdx}): 'DatPoolSec' value {poolSec} is outside valid group range 0..{nGroups}");
+                            continue;
+                        }
+
                         var values = new float[nPts];
                         for (int vi = 1; vi <= nPts; vi++)
                         {
@@ -3194,17 +3218,76 @@ case "list_ecosim_scenarios":
             var name = RequiredString(parameters, "name");
             var description = parameters?["description"]?.ToString() ?? string.Empty;
             var core = RequireCore();
-            if (SafeIntProperty(core, "ActiveEcosimScenarioIndex") < 1)
+
+            // Support optional source_index: load that scenario first before copying.
+            // If omitted, the active scenario is copied.
+            var sourceIndex = OptionalInt(parameters, "source_index");
+            var originalActive = SafeIntProperty(core, "ActiveEcosimScenarioIndex");
+
+            if (sourceIndex.HasValue)
             {
-                throw new EwEMcpException("ecosim_scenario_not_loaded", "Load an Ecosim scenario before copying it.");
+                var nScenarios = SafeIntProperty(core, "nEcosimScenarios");
+                if (sourceIndex.Value < 1 || sourceIndex.Value > nScenarios)
+                {
+                    throw new EwEMcpException("index_out_of_range",
+                        $"source_index {sourceIndex.Value} is outside 1..{nScenarios}");
+                }
+                // Load the source scenario so it becomes active, then copy it
+                if (!core.LoadEcosimScenario(sourceIndex.Value))
+                {
+                    throw new EwEMcpException("scenario_load_failed",
+                        $"Failed to load Ecosim scenario {sourceIndex.Value} for copying.");
+                }
+            }
+            else if (originalActive < 1)
+            {
+                throw new EwEMcpException("ecosim_scenario_not_loaded",
+                    "Load an Ecosim scenario before copying it, or provide a source_index.");
             }
 
-            var ok = core.SaveEcosimScenarioAs(name, description);
+            var copyOk = false;
+            int newActiveIndex = 0;
+            try
+            {
+                copyOk = core.SaveEcosimScenarioAs(name, description);
+                newActiveIndex = SafeIntProperty(core, "ActiveEcosimScenarioIndex");
+
+                if (!copyOk)
+                {
+                    // SaveEcosimScenarioAs failed but may have left state inconsistent.
+                    // Try to reload the original active scenario.
+                    if (originalActive > 0)
+                    {
+                        try { core.LoadEcosimScenario(originalActive); } catch { }
+                    }
+                    throw new EwEMcpException("ecosim_copy_failed",
+                        $"Failed to copy Ecosim scenario as '{name}'. The EwE core returned an error. " +
+                        "This may occur if the model state is inconsistent (e.g., " +
+                        "groups/fleets were added after the source scenario was created). " +
+                        "Verify that all scenarios are compatible with the current model structure.");
+                }
+            }
+            catch (EwEMcpException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                // Wrap any unexpected exception from the EwE core
+                if (originalActive > 0)
+                {
+                    try { core.LoadEcosimScenario(originalActive); } catch { }
+                }
+                throw new EwEMcpException("ecosim_copy_failed",
+                    $"Ecosim scenario copy threw an exception: {ex.Message}");
+            }
+
             return new JObject
             {
-                ["copied"] = ok,
+                ["copied"] = true,
                 ["name"] = name,
-                ["active_index"] = SafeIntProperty(core, "ActiveEcosimScenarioIndex")
+                ["active_index"] = newActiveIndex,
+                ["source_index_used"] = sourceIndex ?? originalActive
             };
         }
 
@@ -3628,16 +3711,42 @@ case "list_ecosim_scenarios":
 
     #endregion
 
-    private JObject GetEcosimGroupResults(JObject parameters)
+        private JObject GetEcosimGroupResults(JObject parameters)
         {
             var core = RequireCore();
             EnsureEcosimRan(core);
-            var index = RequiredInt(parameters, "index");
-            var groupCount = SafeIntProperty(core, "nGroups");
-            if (index < 1 || index > groupCount)
+
+            var listAll = OptionalBool(parameters, "list");
+
+            if (listAll)
             {
-                throw new EwEMcpException("index_out_of_range", $"Ecosim group result index {index} is outside 1..{groupCount}");
+                var groupCount = SafeIntProperty(core, "nGroups");
+                var results = new JArray();
+                for (var i = 1; i <= groupCount; i++)
+                {
+                    results.Add(BuildEcosimGroupResult(core, i, parameters));
+                }
+                return new JObject
+                {
+                    ["results"] = results,
+                    ["total_count"] = groupCount
+                };
             }
+
+            // Accept "index" or "scenario_index" as the group index
+            var index = OptionalInt(parameters, "index")
+                ?? OptionalInt(parameters, "scenario_index")
+                ?? throw new EwEMcpException("missing_parameter", "Missing required integer parameter: index");
+            var maxGroup = SafeIntProperty(core, "nGroups");
+            if (index < 1 || index > maxGroup)
+            {
+                throw new EwEMcpException("index_out_of_range", $"Ecosim group result index {index} is outside 1..{maxGroup}");
+            }
+            return BuildEcosimGroupResult(core, index, parameters);
+        }
+
+        private JObject BuildEcosimGroupResult(cCore core, int index, JObject parameters)
+        {
             var output = SafeGetIndexedProperty(core, "EcosimGroupOutputs", index);
             if (output == null)
             {
