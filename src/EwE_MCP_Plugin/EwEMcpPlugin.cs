@@ -1219,11 +1219,28 @@ case "list_ecosim_scenarios":
                 var property = FindWritableProperty(target.Entity, pair.Key, target.NormalizedDomain);
                 if (property == null)
                 {
-                    result[pair.Key] = new JObject
+                    // Check if the property exists but is indexed (requires
+                    // validate_indexed_value instead of validate_values).
+                    var indexedProp = FindAsIndexedProperty(target.Entity, pair.Key, target.NormalizedDomain);
+                    if (indexedProp != null)
                     {
-                        ["valid"] = false,
-                        ["reason"] = "unknown_or_readonly_variable"
-                    };
+                        var indexParams = indexedProp.GetIndexParameters();
+                        var paramNames = string.Join(", ", indexParams.Select(p => p.Name));
+                        result[pair.Key] = new JObject
+                        {
+                            ["valid"] = false,
+                            ["reason"] = "indexed_variable",
+                            ["message"] = $"Variable '{pair.Key}' is indexed ({indexParams.Length} index parameter(s): {paramNames}). Use validate_indexed_value instead of validate_values."
+                        };
+                    }
+                    else
+                    {
+                        result[pair.Key] = new JObject
+                        {
+                            ["valid"] = false,
+                            ["reason"] = "unknown_or_readonly_variable"
+                        };
+                    }
                     continue;
                 }
 
