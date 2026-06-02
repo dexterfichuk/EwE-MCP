@@ -3738,15 +3738,45 @@ case "list_ecosim_scenarios":
         private JObject GetPredatorsOf(JObject parameters)
         {
             var core = RequireCore();
-            var preyIndex = RequiredInt(parameters, "index");
             var maxGroups = SafeIntProperty(core, "nGroups");
-            if (preyIndex < 1 || preyIndex > maxGroups)
+
+            var preyName = OptionalString(parameters, "name");
+            int? preyIndexOpt = OptionalInt(parameters, "index");
+            int preyIndex;
+
+            if (!string.IsNullOrWhiteSpace(preyName))
             {
-                throw new EwEMcpException("index_out_of_range", $"Prey group index {preyIndex} is outside 1..{maxGroups}");
+                // Resolve name to index (case-insensitive)
+                preyIndex = 0;
+                for (var i = 1; i <= maxGroups; i++)
+                {
+                    var g = SafeGetIndexedProperty(core, "EcopathGroupInputs", i);
+                    if (g != null && string.Equals(SafeStringProperty(g, "Name"), preyName.Trim(), StringComparison.OrdinalIgnoreCase))
+                    {
+                        preyIndex = i;
+                        break;
+                    }
+                }
+                if (preyIndex == 0)
+                {
+                    throw new EwEMcpException("name_not_found", $"Group name '{preyName}' not found");
+                }
+            }
+            else if (preyIndexOpt.HasValue)
+            {
+                preyIndex = preyIndexOpt.Value;
+                if (preyIndex < 1 || preyIndex > maxGroups)
+                {
+                    throw new EwEMcpException("index_out_of_range", $"Prey group index {preyIndex} is outside 1..{maxGroups}");
+                }
+            }
+            else
+            {
+                throw new EwEMcpException("missing_parameter", "Either 'name' or 'index' is required");
             }
 
             var preyInput = SafeGetIndexedProperty(core, "EcopathGroupInputs", preyIndex);
-            var preyName = SafeStringProperty(preyInput, "Name");
+            preyName = SafeStringProperty(preyInput, "Name");
 
             var predators = new JArray();
             for (var predIdx = 1; predIdx <= maxGroups; predIdx++)

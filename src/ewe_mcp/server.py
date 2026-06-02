@@ -1668,17 +1668,74 @@ async def get_ecosim_group_input(index: int) -> dict[str, Any]:
 
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
-async def get_predators_of(index: int) -> dict[str, Any]:
+async def get_predators_of(
+    index: int | None = None, name: str | None = None
+) -> dict[str, Any]:
     """List all predators that eat a given prey group.
 
     Returns each predator's group index, name, diet fraction (from
     Ecopath diet composition), and vulnerability multiplier (vul_mult,
     from Ecosim if an Ecosim scenario is loaded).
 
-    Use this instead of manually iterating get_indexed_value on diet_comp
-    for every group.
+    Use either `index` (numeric group index) or `name` (exact group name,
+    case-insensitive) to identify the prey group.  Prefer `name` to avoid
+    index confusion.
     """
-    return await _send("get_predators_of", {"index": index})
+    params: dict[str, Any] = {}
+    if name is not None:
+        params["name"] = name
+    elif index is not None:
+        params["index"] = index
+    else:
+        raise ValueError("Either 'name' or 'index' is required")
+    return await _send("get_predators_of", params)
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=False))
+async def set_vul_mult_by_name(
+    prey: str, predator: str, value: float
+) -> dict[str, Any]:
+    """Set the vulnerability multiplier for a prey-predator pair by name.
+
+    Resolves group names to indices internally, then calls set_indexed_value
+    on ecosim_group_input.vul_mult.  Safer than setting indices manually.
+
+    Args:
+        prey: Exact prey group name (case-insensitive), e.g. "Herring A"
+        predator: Exact predator group name, e.g. "Steller sea lions"
+        value: New vul_mult value (minimum 1.0, higher = more vulnerable)
+    """
+    # Resolve prey and predator names to indices
+    prey_result = await _send("search_entities", {
+        "domain": "ecopath_groups",
+        "name_contains": prey,
+    })
+    pred_result = await _send("search_entities", {
+        "domain": "ecopath_groups",
+        "name_contains": predator,
+    })
+
+    def _find_exact(results, target_name):
+        for r in results:
+            if r.get("name", "").strip().lower() == target_name.strip().lower():
+                return r.get("index")
+        return None
+
+    prey_idx = _find_exact(prey_result.get("results", []), prey)
+    pred_idx = _find_exact(pred_result.get("results", []), predator)
+
+    if prey_idx is None:
+        raise ValueError(f"Prey group '{prey}' not found")
+    if pred_idx is None:
+        raise ValueError(f"Predator group '{predator}' not found")
+
+    return await _send("set_indexed_value", {
+        "domain": "ecosim_group_input",
+        "index": prey_idx,
+        "variable": "vul_mult",
+        "indices": [pred_idx],
+        "value": value,
+    })
 
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
