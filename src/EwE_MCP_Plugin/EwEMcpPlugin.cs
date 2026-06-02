@@ -3842,7 +3842,7 @@ case "list_ecosim_scenarios":
                 }
                 return new JObject
                 {
-                    ["results"] = results,
+                    ["groups"] = results,
                     ["total_count"] = groupCount
                 };
             }
@@ -3941,6 +3941,20 @@ case "list_ecosim_scenarios":
         private JObject ExportEcosimResults(JObject parameters)
         {
             var path = RequiredString(parameters, "path");
+            // Validate path
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                throw new EwEMcpException("missing_parameter", "path is required");
+            }
+            var ext = System.IO.Path.GetExtension(path).ToLowerInvariant();
+            if (ext != ".csv" && ext != ".txt")
+            {
+                throw new EwEMcpException("invalid_parameter", "path must have a .csv or .txt extension");
+            }
+            if (path.Contains(".."))
+            {
+                throw new EwEMcpException("invalid_parameter", "path must not contain directory traversal");
+            }
             var core = RequireCore();
             var method = core.GetType().GetMethods(BindingFlags.Instance | BindingFlags.Public)
                 .FirstOrDefault(m =>
@@ -4513,6 +4527,14 @@ case "list_ecosim_scenarios":
         {
             var core = RequireCore();
             string path = parameters?["path"]?.ToString();
+            if (!string.IsNullOrWhiteSpace(path))
+            {
+                // Check raw input for directory traversal before path resolution
+                if (path.Contains(".."))
+                {
+                    throw new EwEMcpException("invalid_parameter", "path must not contain directory traversal");
+                }
+            }
             bool ok;
             if (string.IsNullOrWhiteSpace(path))
                 ok = core.Save();
@@ -5128,11 +5150,12 @@ case "list_ecosim_scenarios":
             {
                 throw new EwEMcpException("invalid_parameter", "path must have a .csv or .txt extension");
             }
-            var fullPath = System.IO.Path.GetFullPath(path);
-            if (fullPath.Contains(".."))
+            // Check raw input for directory traversal before Path.GetFullPath resolves it away
+            if (path.Contains(".."))
             {
                 throw new EwEMcpException("invalid_parameter", "path must not contain directory traversal");
             }
+            var fullPath = System.IO.Path.GetFullPath(path);
             var core = RequireCore();
             var sm = SafeGetProperty(core, "StateMonitor");
             bool hasRan = false;

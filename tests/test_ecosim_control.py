@@ -143,12 +143,12 @@ async def test_ecosim_list_all_group_results(sample_model_path):
         start_time=1,
         end_time=3,
     )
-    assert "results" in all_results
+    assert "groups" in all_results
     assert all_results["total_count"] >= 1
-    assert len(all_results["results"]) == all_results["total_count"]
+    assert len(all_results["groups"]) == all_results["total_count"]
 
     # Verify structure of each group result
-    for g in all_results["results"]:
+    for g in all_results["groups"]:
         assert "index" in g
         assert "name" in g
         assert "series" in g
