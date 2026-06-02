@@ -1668,6 +1668,20 @@ async def get_ecosim_group_input(index: int) -> dict[str, Any]:
 
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+async def get_predators_of(index: int) -> dict[str, Any]:
+    """List all predators that eat a given prey group.
+
+    Returns each predator's group index, name, diet fraction (from
+    Ecopath diet composition), and vulnerability multiplier (vul_mult,
+    from Ecosim if an Ecosim scenario is loaded).
+
+    Use this instead of manually iterating get_indexed_value on diet_comp
+    for every group.
+    """
+    return await _send("get_predators_of", {"index": index})
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
 async def list_ecosim_fleet_inputs() -> dict[str, Any]:
     """List Ecosim fleet input parameters for the active scenario.
 

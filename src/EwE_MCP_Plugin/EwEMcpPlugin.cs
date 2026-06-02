@@ -444,6 +444,8 @@ case "list_ecosim_scenarios":
                 return ListEcosimGroupInputs();
             case "get_ecosim_group_input":
                 return GetEcosimGroupInput(request.Params);
+            case "get_predators_of":
+                return GetPredatorsOf(request.Params);
             case "list_ecosim_fleet_inputs":
                 return ListEcosimFleetInputs();
             case "get_ecosim_fleet_input":
@@ -3727,6 +3729,63 @@ case "list_ecosim_scenarios":
     }
 
     #endregion
+
+        private JObject GetPredatorsOf(JObject parameters)
+        {
+            var core = RequireCore();
+            var preyIndex = RequiredInt(parameters, "index");
+            var maxGroups = SafeIntProperty(core, "nGroups");
+            if (preyIndex < 1 || preyIndex > maxGroups)
+            {
+                throw new EwEMcpException("index_out_of_range", $"Prey group index {preyIndex} is outside 1..{maxGroups}");
+            }
+
+            var preyInput = SafeGetIndexedProperty(core, "EcopathGroupInputs", preyIndex);
+            var preyName = SafeStringProperty(preyInput, "Name");
+
+            var predators = new JArray();
+            for (var predIdx = 1; predIdx <= maxGroups; predIdx++)
+            {
+                if (predIdx == preyIndex) continue;
+
+                var predInput = SafeGetIndexedProperty(core, "EcopathGroupInputs", predIdx);
+                if (predInput == null) continue;
+
+                var dietAmount = SafeGetIndexedProperty(predInput, "DietComp", preyIndex);
+                if (!IsNonZero(dietAmount)) continue;
+
+                var entry = new JObject
+                {
+                    ["index"] = predIdx,
+                    ["name"] = SafeStringProperty(predInput, "Name"),
+                    ["diet_fraction"] = ToJToken(dietAmount)
+                };
+
+                try
+                {
+                    var ecosimInput = SafeGetIndexedProperty(core, "EcosimGroupInputs", predIdx);
+                    if (ecosimInput != null)
+                    {
+                        var vulMult = SafeGetIndexedProperty(ecosimInput, "VulMult", preyIndex);
+                        if (vulMult != null)
+                        {
+                            entry["vul_mult"] = ToJToken(vulMult);
+                        }
+                    }
+                }
+                catch { }
+
+                predators.Add(entry);
+            }
+
+            return new JObject
+            {
+                ["prey_index"] = preyIndex,
+                ["prey_name"] = preyName,
+                ["predators"] = predators,
+                ["total_predators"] = predators.Count
+            };
+        }
 
         private JObject GetEcosimGroupResults(JObject parameters)
         {
