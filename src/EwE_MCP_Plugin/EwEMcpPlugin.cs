@@ -1881,11 +1881,11 @@ case "list_ecosim_scenarios":
                 }
 
                 // Load the dataset before importing so ActiveDatasetIndex >= 0.
-                // Use the actual iDataset from the append rather than a hardcoded index,
+                // Use the actual iDataset (new or active) rather than a hardcoded index,
                 // because dataset 1 may not exist or may not be the one we just created.
                 var preloadMethod = core.GetType().GetMethod("LoadTimeSeries",
                     new[] { typeof(int), typeof(bool) });
-                var preloadIdx = (createNewSet && iDataset > 0) ? iDataset : 1;
+                var preloadIdx = iDataset > 0 ? iDataset : 1;
                 if (preloadMethod != null)
                 {
                     try
@@ -3254,6 +3254,11 @@ case "list_ecosim_scenarios":
                 // Load the source scenario so it becomes active, then copy it
                 if (!core.LoadEcosimScenario(sourceIndex.Value))
                 {
+                    // Restore original active scenario before failing
+                    if (originalActive > 0)
+                    {
+                        try { core.LoadEcosimScenario(originalActive); } catch { }
+                    }
                     throw new EwEMcpException("scenario_load_failed",
                         $"Failed to load Ecosim scenario {sourceIndex.Value} for copying.");
                 }
@@ -3763,10 +3768,13 @@ case "list_ecosim_scenarios":
 
                 try
                 {
-                    var ecosimInput = SafeGetIndexedProperty(core, "EcosimGroupInputs", predIdx);
+                    // VulMult on a group's Ecosim input is indexed by PREDATOR group
+                    // (confirmed by EwE source cEcoSimGroupInput.VulMult(iPredGroup)).
+                    // So EcoSimGroupInputs[prey].VulMult[predator] = vulnerability of prey to predator.
+                    var ecosimInput = SafeGetIndexedProperty(core, "EcosimGroupInputs", preyIndex);
                     if (ecosimInput != null)
                     {
-                        var vulMult = SafeGetIndexedProperty(ecosimInput, "VulMult", preyIndex);
+                        var vulMult = SafeGetIndexedProperty(ecosimInput, "VulMult", predIdx);
                         if (vulMult != null)
                         {
                             entry["vul_mult"] = ToJToken(vulMult);
