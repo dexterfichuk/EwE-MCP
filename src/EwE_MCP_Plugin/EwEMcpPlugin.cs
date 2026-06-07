@@ -3349,16 +3349,65 @@ case "list_ecosim_scenarios":
             var core = RequireCore();
             var sm = SafeGetProperty(core, "StateMonitor");
             var activeIndex = SafeIntProperty(core, "ActiveEcosimScenarioIndex");
+            var isRunning = SafeInvokeBool(sm, "IsEcosimRunning");
+            var hasRan = SafeInvokeBool(sm, "HasEcosimRan");
+            var hasInitialized = SafeInvokeBool(sm, "HasEcosimInitialized");
+            var execState = SafeInvokeToString(sm, "CoreExecutionState") ?? string.Empty;
+
+            // Compute derived run_state
+            string runState;
+            string ecoSimDetail;
+
+            if (isRunning)
+            {
+                runState = "running";
+                ecoSimDetail = "Ecosim is running";
+            }
+            else if (hasRan)
+            {
+                runState = "completed";
+                ecoSimDetail = "Ecosim has completed";
+            }
+            else if (execState.IndexOf("Error", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                runState = "error";
+                ecoSimDetail = "Ecosim encountered an error";
+            }
+            else if (execState.IndexOf("Stopped", StringComparison.OrdinalIgnoreCase) >= 0
+                     || execState.IndexOf("Stop", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                runState = "stopped";
+                ecoSimDetail = "Ecosim was stopped";
+            }
+            else if (hasInitialized)
+            {
+                runState = "initialized";
+                ecoSimDetail = "Ecosim is initialized but not yet run";
+            }
+            else
+            {
+                runState = "idle";
+                ecoSimDetail = "Ecosim scenario loaded, not initialized";
+            }
+
+            // Improve detail when we have the execution state
+            if (!string.IsNullOrWhiteSpace(execState) && !isRunning)
+            {
+                ecoSimDetail = execState;
+            }
+
             var state = new JObject
             {
-                ["core_execution_state"] = SafeInvokeToString(sm, "CoreExecutionState"),
+                ["run_state"] = runState,
+                ["ecosim_detail"] = ecoSimDetail,
+                ["core_execution_state"] = execState,
                 ["is_busy"] = SafeInvokeBool(sm, "IsBusy"),
                 ["has_ecopath_loaded"] = SafeInvokeBool(sm, "HasEcopathLoaded"),
                 ["has_ecopath_ran"] = SafeInvokeBool(sm, "HasEcopathRan"),
                 ["has_ecosim_loaded"] = SafeInvokeBool(sm, "HasEcosimLoaded"),
-                ["has_ecosim_initialized"] = SafeInvokeBool(sm, "HasEcosimInitialized"),
-                ["is_ecosim_running"] = SafeInvokeBool(sm, "IsEcosimRunning"),
-                ["has_ecosim_ran"] = SafeInvokeBool(sm, "HasEcosimRan"),
+                ["has_ecosim_initialized"] = hasInitialized,
+                ["is_ecosim_running"] = isRunning,
+                ["has_ecosim_ran"] = hasRan,
                 ["active_scenario_index"] = activeIndex > 0 ? JToken.FromObject(activeIndex) : JValue.CreateNull(),
                 ["scenario_count"] = SafeIntProperty(core, "nEcosimScenarios"),
                 ["years"] = SafeIntProperty(core, "nEcosimYears"),

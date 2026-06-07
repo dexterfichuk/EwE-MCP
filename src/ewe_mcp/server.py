@@ -1593,11 +1593,22 @@ async def create_ecosim_scenario(
 
 
 @mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
-async def copy_ecosim_scenario(name: str, description: str = "") -> dict[str, Any]:
-    """Copy the active Ecosim scenario under a new name and load the copy."""
+async def copy_ecosim_scenario(
+    name: str,
+    description: str = "",
+    source_index: int | None = None,
+) -> dict[str, Any]:
+    """Copy an Ecosim scenario under a new name and load the copy.
+
+    If source_index is provided, that scenario is loaded before copying.
+    If omitted, the currently active scenario is copied.
+    """
+    params: dict[str, Any] = {"name": name, "description": description}
+    if source_index is not None:
+        params["source_index"] = source_index
     return await _send(
         "copy_ecosim_scenario",
-        {"name": name, "description": description},
+        params,
         timeout=TIMEOUT_LONG,
     )
 
