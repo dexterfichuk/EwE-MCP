@@ -3319,6 +3319,11 @@ case "list_ecosim_scenarios":
         {
             var index = RequiredInt(parameters, "index");
             var core = RequireCore();
+            var nScenarios = SafeIntProperty(core, "nEcosimScenarios");
+            if (index < 1 || index > nScenarios)
+            {
+                throw new EwEMcpException("index_out_of_range", $"Ecosim scenario index {index} is outside 1..{nScenarios}");
+            }
             var activeIndex = SafeIntProperty(core, "ActiveEcosimScenarioIndex");
             if (index == activeIndex)
             {
