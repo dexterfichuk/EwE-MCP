@@ -735,10 +735,10 @@ case "list_ecosim_scenarios":
             {
                 case "ecopath_groups":
                 case "ecopath_group":
-                    return ListEcopathGroups();
+                    return ListGenericEntities("ecopath_groups");
                 case "ecopath_fleets":
                 case "ecopath_fleet":
-                    return ListEcopathFleets();
+                    return ListGenericEntities("ecopath_fleets");
                 case "ecopath_group_outputs":
                 case "ecopath_group_output":
                     return ListGenericEntities("ecopath_group_outputs");
