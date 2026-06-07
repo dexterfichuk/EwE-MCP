@@ -294,6 +294,8 @@ namespace EwE_MCP_Plugin
                 return ValidateIndexedValue(request.Params);
             case "search_entities":
                 return SearchEntities(request.Params);
+            case "resolve_entity_name":
+                return ResolveEntityName(request.Params);
             case "get_values_range":
                 return GetValuesRange(request.Params);
             case "set_values_range":
@@ -472,9 +474,13 @@ case "list_ecosim_scenarios":
                     return GetEcopathRunState();
                 case "get_ecopath_stats":
                     return GetEcopathStats();
-                case "get_ecopath_group_diagnostics":
-                    return GetEcopathGroupDiagnostics();
-                case "get_ecopath_fleet_diagnostics":
+            case "get_ecopath_group_enriched":
+                return GetEcopathGroupEnriched(request.Params);
+            case "get_ecopath_group_diagnostics":
+                return GetEcopathGroupDiagnostics();
+            case "get_ecopath_fleet_diagnostics_enriched":
+                return GetEcopathFleetDiagnosticsEnriched();
+            case "get_ecopath_fleet_diagnostics":
                     return GetEcopathFleetDiagnostics();
                 case "get_mti_matrix":
                     return GetMtiMatrix();
@@ -506,7 +512,7 @@ case "list_ecosim_scenarios":
             case "get_batch_blocked_commands":
                 return GetBatchBlockedCommands();
             default:
-                    throw new EwEMcpException("unknown_command", $"Unknown command type: {request.Type}");
+                    throw new EwEMcpException("unknown_command", $"Unknown command type '{request.Type}'. This may indicate a version mismatch between Python server and C# plugin.");
             }
         }
 
@@ -806,7 +812,7 @@ case "list_ecosim_scenarios":
                 case "ui_commands":
                     return ListUiCommands();
                 default:
-                    throw new EwEMcpException("unknown_domain", $"Unknown domain: {domain}");
+                    throw new EwEMcpException("unknown_domain", $"Unknown domain '{domain}'. Use list_domains() to see valid domain names.");
             }
         }
 
@@ -1015,6 +1021,41 @@ case "list_ecosim_scenarios":
                 ["match_count"] = matched,
                 ["total_count"] = count
             };
+        }
+
+        private JObject ResolveEntityName(JObject parameters)
+        {
+            var domain = RequiredString(parameters, "domain");
+            var name = RequiredString(parameters, "name").Trim();
+            var normalized = NormalizeDomain(domain);
+            var core = RequireCore();
+            var count = GetDomainCount(core, normalized);
+
+            for (var i = 1; i <= count; i++)
+            {
+                try
+                {
+                    var target = ResolveEntity(normalized, i);
+                    var entityName = SafeStringProperty(target.Entity, "Name");
+                    if (entityName != null && string.Equals(entityName.Trim(), name, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return new JObject
+                        {
+                            ["domain"] = target.NormalizedDomain,
+                            ["index"] = i,
+                            ["name"] = entityName,
+                            ["type"] = target.Entity.GetType().FullName
+                        };
+                    }
+                }
+                catch (EwEMcpException)
+                {
+                    continue;
+                }
+            }
+            throw new EwEMcpException("name_not_found",
+                $"No entity named '{name}' found in domain '{normalized}'. " +
+                "Use list_domains() and search_entities() to explore available entities.");
         }
 
         private JObject BuildSearchRow(object entity, string domain, int? index, JObject propertyFilters)
@@ -2282,9 +2323,27 @@ case "list_ecosim_scenarios":
         private JObject GetEcospaceGroupResults(JObject parameters)
         {
             var core = RequireCore();
+            var listAll = OptionalBool(parameters, "list");
+
+            if (listAll)
+            {
+                var groupCount = SafeIntProperty(core, "nGroups");
+                var results = new JArray();
+                for (var i = 1; i <= groupCount; i++)
+                {
+                    results.Add(BuildSingleEcospaceGroupResult(core, i, parameters));
+                }
+                return new JObject { ["groups"] = results, ["total_count"] = groupCount };
+            }
+
             int index = RequiredInt(parameters, "index");
+            return BuildSingleEcospaceGroupResult(core, index, parameters);
+        }
+
+        private JObject BuildSingleEcospaceGroupResult(cCore core, int index, JObject parameters)
+        {
             var groupCount = SafeIntProperty(core, "nGroups");
-            if (index < 1 || index > groupCount) throw new EwEMcpException("index_out_of_range", $"Ecospace group index {index} outside 1..{groupCount}");
+            if (index < 1 || index > groupCount) throw new EwEMcpException("index_out_of_range", $"Ecospace group index {index} is outside valid range 1..{groupCount}. Use list_ecopath_groups() to see valid group indices.");
             var output = SafeGetIndexedProperty(core, "EcospaceGroupOutput", index);
             if (output == null) throw new EwEMcpException("entity_unavailable", $"Ecospace group output {index} unavailable. Run Ecospace first.");
             var maxTime = SafeIntProperty(core, "nEcospaceTimeSteps");
@@ -2318,9 +2377,27 @@ case "list_ecosim_scenarios":
         private JObject GetEcospaceFleetResults(JObject parameters)
         {
             var core = RequireCore();
+            var listAll = OptionalBool(parameters, "list");
+
+            if (listAll)
+            {
+                var fleetCount = SafeIntProperty(core, "nFleets");
+                var results = new JArray();
+                for (var i = 1; i <= fleetCount; i++)
+                {
+                    results.Add(BuildSingleEcospaceFleetResult(core, i, parameters));
+                }
+                return new JObject { ["fleets"] = results, ["total_count"] = fleetCount };
+            }
+
             int index = RequiredInt(parameters, "index");
+            return BuildSingleEcospaceFleetResult(core, index, parameters);
+        }
+
+        private JObject BuildSingleEcospaceFleetResult(cCore core, int index, JObject parameters)
+        {
             var fleetCount = SafeIntProperty(core, "nFleets");
-            if (index < 1 || index > fleetCount) throw new EwEMcpException("index_out_of_range", $"Ecospace fleet index {index} outside 1..{fleetCount}");
+            if (index < 1 || index > fleetCount) throw new EwEMcpException("index_out_of_range", $"Ecospace fleet index {index} is outside valid range 1..{fleetCount}. Use list_ecopath_fleets() to see valid fleet indices.");
             var output = SafeGetIndexedProperty(core, "EcospaceFleetOutput", index);
             if (output == null) throw new EwEMcpException("entity_unavailable", $"Ecospace fleet output {index} unavailable. Run Ecospace first.");
             var maxTime = SafeIntProperty(core, "nEcospaceTimeSteps");
@@ -2348,7 +2425,8 @@ case "list_ecosim_scenarios":
                 }
                 series[variable] = arr;
             }
-            return new JObject { ["index"] = index, ["time_start"] = start, ["time_end"] = end, ["time_steps"] = maxTime, ["series"] = series };
+            var fleetInput = SafeGetIndexedProperty(core, "EcopathFleetInputs", index);
+            return new JObject { ["index"] = index, ["name"] = SafeStringProperty(fleetInput, "Name"), ["time_start"] = start, ["time_end"] = end, ["time_steps"] = maxTime, ["series"] = series };
         }
 
         private JObject GetEcospaceHabitat(JObject parameters)
@@ -2830,14 +2908,32 @@ case "list_ecosim_scenarios":
         private JObject GetEcotracerGroupResults(JObject parameters)
         {
             var core = RequireCore();
+            var listAll = OptionalBool(parameters, "list");
+
+            if (listAll)
+            {
+                var groupCount = SafeIntProperty(core, "nGroups");
+                var results = new JArray();
+                for (var i = 1; i <= groupCount; i++)
+                {
+                    results.Add(BuildSingleEcotracerGroupResult(core, i, parameters));
+                }
+                return new JObject { ["groups"] = results, ["total_count"] = groupCount };
+            }
+
             int index = RequiredInt(parameters, "index");
+            return BuildSingleEcotracerGroupResult(core, index, parameters);
+        }
+
+        private JObject BuildSingleEcotracerGroupResult(cCore core, int index, JObject parameters)
+        {
             var results = SafeGetProperty(core, "EcotracerGroupResults");
             if (results == null) throw new EwEMcpException("core_unavailable", "Ecotracer group results not available. Run Ecosim/Ecospace with Ecotracer enabled first.");
             int nTimeSteps = SafeIntProperty(core, "nEcosimTimeSteps");
             if (nTimeSteps < 1) nTimeSteps = SafeIntProperty(core, "nEcospaceTimeSteps");
-        var start = OptionalInt(parameters, "start_time") ?? 1;
-        if (nTimeSteps < 1) throw new EwEMcpException("ecotracer_results_unavailable", "No time steps available for Ecotracer results.");
-        var end = OptionalInt(parameters, "end_time") ?? Math.Min(nTimeSteps, start + 119);
+            var start = OptionalInt(parameters, "start_time") ?? 1;
+            if (nTimeSteps < 1) throw new EwEMcpException("ecotracer_results_unavailable", "No time steps available for Ecotracer results.");
+            var end = OptionalInt(parameters, "end_time") ?? Math.Min(nTimeSteps, start + 119);
             if (start < 1 || start > nTimeSteps || end < start || end > nTimeSteps)
                 throw new EwEMcpException("time_range_out_of_range", $"Time range {start}..{end} outside 1..{nTimeSteps}");
             var variables = OptionalStringArray(parameters, "variables") ?? new[] { "concentration", "conbio" };
@@ -2859,7 +2955,8 @@ case "list_ecosim_scenarios":
                 }
                 series[variable] = arr;
             }
-            return new JObject { ["index"] = index, ["time_start"] = start, ["time_end"] = end, ["series"] = series };
+            var groupInput = SafeGetIndexedProperty(core, "EcopathGroupInputs", index);
+            return new JObject { ["index"] = index, ["name"] = SafeStringProperty(groupInput, "Name"), ["time_start"] = start, ["time_end"] = end, ["time_steps"] = nTimeSteps, ["series"] = series };
         }
 
         private JObject CreateEcotracerScenario(JObject parameters)
@@ -3908,7 +4005,7 @@ case "list_ecosim_scenarios":
             var maxGroup = SafeIntProperty(core, "nGroups");
             if (index < 1 || index > maxGroup)
             {
-                throw new EwEMcpException("index_out_of_range", $"Ecosim group result index {index} is outside 1..{maxGroup}");
+                throw new EwEMcpException("index_out_of_range", $"Ecosim group result index {index} is outside valid range 1..{maxGroup}. Use list_ecopath_groups() to see valid group indices.");
             }
             return BuildEcosimGroupResult(core, index, parameters);
         }
@@ -3918,7 +4015,7 @@ case "list_ecosim_scenarios":
             var output = SafeGetIndexedProperty(core, "EcosimGroupOutputs", index);
             if (output == null)
             {
-                throw new EwEMcpException("entity_unavailable", $"Ecosim group output {index} is unavailable. Run Ecosim first.");
+                throw new EwEMcpException("entity_unavailable", $"Ecosim group output {index} is unavailable. Run Ecosim first with run_ecosim(), then wait_for_ecosim_completion().");
             }
 
             var timeRange = EcosimTimeRange(core, parameters);
@@ -4029,7 +4126,7 @@ case "list_ecosim_scenarios":
             var sm = SafeGetProperty(core, "StateMonitor");
             if (!SafeInvokeBool(sm, "HasEcosimRan"))
             {
-                throw new EwEMcpException("ecosim_results_unavailable", "Run Ecosim before reading Ecosim result time-series.");
+                throw new EwEMcpException("ecosim_results_unavailable", "Ecosim must be run first. Use run_ecosim() then wait_for_ecosim_completion() before reading Ecosim result time-series.");
             }
         }
 
@@ -4038,13 +4135,13 @@ case "list_ecosim_scenarios":
             var max = SafeIntProperty(core, "nEcosimTimeSteps");
             if (max < 1)
             {
-                throw new EwEMcpException("ecosim_results_unavailable", "Ecosim has no result timesteps.");
+                throw new EwEMcpException("ecosim_results_unavailable", "Ecosim has no result timesteps. Run Ecosim first with run_ecosim().");
             }
             var start = OptionalInt(parameters, "start_time") ?? 1;
             var end = OptionalInt(parameters, "end_time") ?? Math.Min(max, start + 119);
             if (start < 1 || start > max || end < start || end > max)
             {
-                throw new EwEMcpException("time_range_out_of_range", $"Ecosim time range {start}..{end} is outside 1..{max}");
+                throw new EwEMcpException("time_range_out_of_range", $"Ecosim time range {start}..{end} is outside 1..{max}. Check n_ecosim_timesteps via get_ecosim_run_state().");
             }
             return Tuple.Create(start, end);
         }
@@ -5075,6 +5172,139 @@ case "list_ecosim_scenarios":
             return new JObject { ["fleets"] = fleets, ["total_count"] = fleetCount };
         }
 
+        private JObject GetEcopathGroupEnriched(JObject parameters)
+        {
+            int index = RequiredInt(parameters, "index");
+            var core = RequireCore();
+            var group = BuildEcopathGroup(core, index, true);
+
+            // Enrich with diagnostics if Ecopath has run
+            var sm = SafeGetProperty(core, "StateMonitor");
+            if (sm != null && SafeInvokeBool(sm, "HasEcopathRan") && group["output"] != null)
+            {
+                try
+                {
+                    var diag = GetEcopathGroupDiagnostics();
+                    var diagGroup = ((JArray)diag["groups"])
+                        .FirstOrDefault(g => (int)g["index"] == index) as JObject;
+                    if (diagGroup != null)
+                    {
+                        var values = diagGroup["values"] as JObject;
+                        var enriched = group["output"] as JObject ?? new JObject();
+                        // Guard against error objects from ReadScalarValues: only
+                        // enrich with actual numeric values, not error JObjects.
+                        if (IsNumericToken(values["EEOutput"])) enriched["ee"] = values["EEOutput"];
+                        if (IsNumericToken(values["TTLX"])) enriched["trophic_level"] = values["TTLX"];
+                        if (IsNumericToken(values["PBOutput"])) enriched["pb_computed"] = values["PBOutput"];
+                        if (IsNumericToken(values["GEOutput"])) enriched["ge"] = values["GEOutput"];
+                        group["output"] = enriched;
+                    }
+                    group["_enrichment"] = new JObject
+                    {
+                        ["succeeded"] = diagGroup != null,
+                        ["sources"] = new JArray { "get_ecopath_group_diagnostics" }
+                    };
+                }
+                catch (Exception ex)
+                {
+                    group["_enrichment"] = new JObject
+                    {
+                        ["succeeded"] = false,
+                        ["sources"] = new JArray { "get_ecopath_group_diagnostics" },
+                        ["error"] = ex.Message
+                    };
+                }
+            }
+            else
+            {
+                group["_enrichment"] = new JObject
+                {
+                    ["succeeded"] = false,
+                    ["sources"] = new JArray()
+                };
+            }
+            return group;
+        }
+
+        private JObject GetEcopathFleetDiagnosticsEnriched()
+        {
+            var core = RequireCore();
+            var fleetDiag = GetEcopathFleetDiagnostics();
+
+            // Only enrich if Ecopath has run (same guard as group enrichment)
+            var sm = SafeGetProperty(core, "StateMonitor");
+            if (sm == null || !SafeInvokeBool(sm, "HasEcopathRan"))
+            {
+                fleetDiag["_enrichment"] = new JObject
+                {
+                    ["succeeded"] = false,
+                    ["sources"] = new JArray()
+                };
+                return fleetDiag;
+            }
+
+            try
+            {
+                var groupDiag = GetEcopathGroupDiagnostics();
+                var groupBiomass = new Dictionary<int, float>();
+                foreach (var g in ((JArray)groupDiag["groups"]))
+                {
+                    var gObj = g as JObject;
+                    var gidx = gObj?["index"]?.Value<int?>();
+                    var values = gObj?["values"] as JObject;
+                    var bio = values?["Biomass"];
+                    if (gidx.HasValue && IsNumericToken(bio))
+                    {
+                        groupBiomass[gidx.Value] = (float)bio;
+                    }
+                }
+
+                if (fleetDiag["fleets"] is JArray fleets)
+                {
+                    foreach (var fleet in fleets)
+                    {
+                        var fObj = fleet as JObject;
+                        if (fObj?["catch_by_group"] is JArray catchByGroup)
+                        {
+                            foreach (var fg in catchByGroup)
+                            {
+                                var fgObj = fg as JObject;
+                                var groupIdx = fgObj?["group_index"]?.Value<int?>();
+                                var catchVal = fgObj?["catch_total"];
+                                if (groupIdx.HasValue)
+                                {
+                                    float catchFloat = 0f;
+                                    if (catchVal?.Type == JTokenType.Float || catchVal?.Type == JTokenType.Integer)
+                                        catchFloat = (float)catchVal;
+                                    if (groupBiomass.TryGetValue(groupIdx.Value, out var bio) && bio > 0)
+                                    {
+                                        // Always set fishing_mortality when catch data exists,
+                                        // even for zero-catch groups (F=0).
+                                        fgObj["fishing_mortality"] = catchFloat / bio;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                fleetDiag["_enrichment"] = new JObject
+                {
+                    ["succeeded"] = true,
+                    ["sources"] = new JArray { "get_ecopath_group_diagnostics" }
+                };
+            }
+            catch (Exception ex)
+            {
+                fleetDiag["_enrichment"] = new JObject
+                {
+                    ["succeeded"] = false,
+                    ["sources"] = new JArray { "get_ecopath_group_diagnostics" },
+                    ["error"] = ex.Message
+                };
+            }
+            return fleetDiag;
+        }
+
         private JObject GetMtiMatrix()
         {
             var core = RequireCore();
@@ -5366,9 +5596,6 @@ case "list_ecosim_scenarios":
             "shutdown_server",
             "invoke_ui_command",
             "import_time_series",
-            "set_values",
-            "set_indexed_value",
-            "set_values_range",
             "export_ecosim_results",
 
 
@@ -5388,7 +5615,23 @@ case "list_ecosim_scenarios":
             foreach (var item in commands)
             {
                 var type = item?["type"]?.ToString();
-                if (BatchBlockedCommands.Contains(type ?? string.Empty))
+                // Allow set_values / set_indexed_value / set_values_range in batch
+                // ONLY when navigate is explicitly False (no UI navigation).
+                if (type == "set_values" || type == "set_indexed_value" || type == "set_values_range")
+                {
+                    var nav = item?["params"]?["navigate"];
+                    if (nav != null && nav.Type == JTokenType.Boolean && !(bool)nav)
+                    {
+                        // navigate=False — allow in batch
+                    }
+                    else
+                    {
+                        throw new EwEMcpException("blocked_batch_command",
+                            $"{type} requires navigate=False in batch. " +
+                            "Explicitly set navigate=False to batch this command.");
+                    }
+                }
+                else if (BatchBlockedCommands.Contains(type ?? string.Empty))
                 {
                     throw new EwEMcpException("blocked_batch_command", $"{type} is not allowed in batch");
                 }
@@ -6349,7 +6592,7 @@ private static object MapPropertyNameToVarNameFlag(string propertyName, Type enu
                 case "taxa":
                     return "taxa";
                 default:
-                    throw new EwEMcpException("unknown_domain", $"Unknown domain: {domain}");
+                    throw new EwEMcpException("unknown_domain", $"Unknown domain '{domain}'. Use list_domains() to see valid domain names.");
             }
         }
 
@@ -7728,6 +7971,18 @@ private static PropertyInfo FindReadableProperty(object entity, string variable,
             {
                 return false;
             }
+        }
+
+        /// <summary>
+        /// Returns true if the JToken is a numeric value (Integer or Float),
+        /// not an error object from ReadScalarValues. Rejects null, error
+        /// objects, strings, and other non-numeric token types.
+        /// </summary>
+        private static bool IsNumericToken(JToken token)
+        {
+            if (token == null) return false;
+            var type = token.Type;
+            return type == JTokenType.Integer || type == JTokenType.Float;
         }
 
         private JObject ExportActivePlot(JObject parameters)

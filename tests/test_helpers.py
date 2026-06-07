@@ -391,3 +391,84 @@ class TestResultVariableConstants:
     def test_no_duplicates(self):
         for const in self.RESULT_VAR_CONSTANTS:
             assert len(const) == len(set(const)), f"Duplicates found in {const}"
+
+
+# ── Error code → hint mapping (_ERROR_CODE_HINTS + error_hint_for_exception) ─
+
+
+def test_error_code_hints_cover_ecosim():
+    from ewe_mcp.helpers import _ERROR_CODE_HINTS
+    hint = _ERROR_CODE_HINTS["ecosim_results_unavailable"]
+    assert "run_ecosim" in hint
+    assert "wait_for_ecosim_completion" in hint
+
+
+def test_error_code_hints_cover_value_out_of_range():
+    from ewe_mcp.helpers import _ERROR_CODE_HINTS
+    hint = _ERROR_CODE_HINTS["value_out_of_range"]
+    assert "validate_values" in hint
+
+
+def test_error_code_hints_cover_unknown_variable():
+    from ewe_mcp.helpers import _ERROR_CODE_HINTS
+    hint = _ERROR_CODE_HINTS["unknown_variable"]
+    assert "list_variables" in hint
+
+
+def test_error_code_hints_cover_unknown_domain():
+    from ewe_mcp.helpers import _ERROR_CODE_HINTS
+    hint = _ERROR_CODE_HINTS["unknown_domain"]
+    assert "list_domains" in hint
+
+
+def test_error_code_hints_cover_time_range():
+    from ewe_mcp.helpers import _ERROR_CODE_HINTS
+    hint = _ERROR_CODE_HINTS["time_range_out_of_range"]
+    assert "start_time" in hint or "get_ecosim_run_state" in hint
+
+
+def test_error_code_hints_cover_ecopath():
+    from ewe_mcp.helpers import _ERROR_CODE_HINTS
+    hint = _ERROR_CODE_HINTS["ecopath_results_unavailable"]
+    assert "run_ecopath" in hint
+
+
+def test_error_code_hints_cover_ecospace():
+    from ewe_mcp.helpers import _ERROR_CODE_HINTS
+    hint = _ERROR_CODE_HINTS["ecospace_results_unavailable"]
+    assert "run_ecospace" in hint
+
+
+def test_error_code_hints_cover_ecotracer():
+    from ewe_mcp.helpers import _ERROR_CODE_HINTS
+    hint = _ERROR_CODE_HINTS["ecotracer_results_unavailable"]
+    assert "Ecotracer" in hint
+
+
+def test_error_code_hints_cover_core_unavailable():
+    from ewe_mcp.helpers import _ERROR_CODE_HINTS
+    hint = _ERROR_CODE_HINTS["core_unavailable"]
+    assert "not available" in hint or "not enabled" in hint
+
+
+def test_error_code_hints_cover_conversion_failed():
+    from ewe_mcp.helpers import _ERROR_CODE_HINTS
+    hint = _ERROR_CODE_HINTS["conversion_failed"]
+    assert "get_variable_metadata" in hint
+
+
+def test_error_code_hints_has_all_required_keys():
+    from ewe_mcp.helpers import _ERROR_CODE_HINTS
+    required = [
+        "ecosim_results_unavailable",
+        "ecopath_results_unavailable",
+        "index_out_of_range",
+        "missing_parameter",
+        "unknown_variable",
+        "unknown_domain",
+        "value_out_of_range",
+        "entity_unavailable",
+        "core_unavailable",
+    ]
+    for key in required:
+        assert key in _ERROR_CODE_HINTS, f"Missing hint for error code: {key}"

@@ -90,9 +90,6 @@ BATCH_BLOCKED_COMMANDS = frozenset(
         "shutdown_server",
         "invoke_ui_command",
         "import_time_series",
-        "set_values_range",
-        "set_values",
-        "set_indexed_value",
     }
 )
 
@@ -168,6 +165,100 @@ def get_port() -> int:
 
 def get_token() -> str:
     return os.environ.get("EWE_MCP_TOKEN", DEFAULT_TOKEN)
+
+
+# ── Error code → actionable hint mapping ──────────────────────────────
+
+_ERROR_CODE_HINTS: dict[str, str] = {
+    "ecosim_results_unavailable":
+        "Ecosim must be run first. Use run_ecosim() then wait_for_ecosim_completion() "
+        "before reading results. You can check the current state with get_ecosim_run_state().",
+    "ecopath_results_unavailable":
+        "Ecopath must be run first. Use run_ecopath() then check get_ecopath_run_state().",
+    "ecospace_results_unavailable":
+        "Ecospace must be run first. Load an Ecospace scenario then use run_ecospace() "
+        "before reading results.",
+    "ecotracer_results_unavailable":
+        "Ecotracer must be run as part of Ecosim/Ecospace with ContaminantTracing enabled. "
+        "Run Ecosim or Ecospace first, then read Ecotracer results.",
+    "index_out_of_range":
+        "The index is outside the valid range. Use the list_<domain> tool "
+        "(e.g., list_ecopath_groups, list_ecopath_fleets, list_ecosim_scenarios) "
+        "to see valid indices and their current counts.",
+    "missing_parameter":
+        "A required parameter was not provided. Check the tool signature — most tools "
+        "that need an entity index call it 'index', and value tools need a 'values' dict.",
+    "unknown_variable":
+        "The variable name was not found on this entity. Use list_variables(domain, index) "
+        "to see the available variable names. Some variables are indexed and require "
+        "get_indexed_value / set_indexed_value instead of get_values / set_values.",
+    "unknown_indexed_variable":
+        "The requested indexed variable was not found. Use list_variables(domain, index) "
+        "to see available indexed variables and their required index parameters.",
+    "unknown_ecosim_result_variable":
+        "The requested result variable is not supported. Use the tool's documented variable "
+        "list (check the function docstring), or omit 'variables' to get all available data.",
+    "unknown_ecospace_result_variable":
+        "The requested Ecospace result variable is not supported. Supported variables: "
+        "biomass, relative_biomass (groups), catch_biomass, value (fleets).",
+    "unknown_ecotracer_result_variable":
+        "The requested Ecotracer result variable is not supported. Supported variables: "
+        "concentration, conbio.",
+    "unknown_domain":
+        "Unknown domain name. Use list_domains() to see all valid entity domains "
+        "(e.g., ecopath_group, ecosim_group_input, ecospace_habitat).",
+    "unknown_command":
+        "Unknown command type. This may indicate a version mismatch between the Python "
+        "MCP server and the C# plugin. Check both are from the same build.",
+    "value_out_of_range":
+        "EwE rejected this value as out of range. Use validate_values() before "
+        "set_values() to check constraints. Use get_variable_metadata(domain, variable) "
+        "to see min/max ranges for a specific variable.",
+    "time_range_out_of_range":
+        "The requested time range exceeds the simulation duration. Check n_timesteps via "
+        "get_ecosim_run_state() or get_ecospace_run_state() before requesting results, "
+        "and adjust start_time/end_time accordingly.",
+    "entity_unavailable":
+        "The requested entity (group, fleet, scenario, habitat) is not available. "
+        "It may not exist in the current model, may have been deleted, or may "
+        "require a scenario to be loaded first. Use the list_<domain> tool to "
+        "see what entities are available.",
+    "core_unavailable":
+        "A required EwE core subsystem is not available. This often means the "
+        "requested module (MSE, Monte Carlo, Ecotracer) is not enabled in the "
+        "current scenario or model configuration.",
+    "cannot_delete_active_scenario":
+        "Cannot delete the currently loaded scenario. Use load_ecosim_scenario() "
+        "or load_ecospace_scenario() to switch to a different scenario first, "
+        "then retry the delete.",
+    "scenario_load_failed":
+        "Failed to load the scenario. It may be corrupted, incompatible with the "
+        "current model version, or reference groups/fleets that no longer exist. "
+        "Try creating a new scenario instead.",
+    "ecosim_copy_failed":
+        "Failed to copy the Ecosim scenario. This can occur if groups or fleets "
+        "were added after the source scenario was created. Create a fresh scenario "
+        "from the current model state instead.",
+    "conversion_failed":
+        "The value could not be converted to the required type for this variable. "
+        "Use get_variable_metadata(domain, variable) to check the expected type.",
+    "dialog_command_blocked":
+        "This UI command opens a modal dialog and is blocked in MCP mode. Use a "
+        "dedicated MCP tool when available, or enable dialog_watcher_enabled in "
+        "the plugin config for supervised workflows.",
+    "unsupported_operation":
+        "This operation is not supported by the current EwE build or configuration. "
+        "Check diagnose() output for plugin version info, or use a different approach.",
+    "create_failed":
+        "Failed to create a new entity. Check that the name is unique and that "
+        "all required parameters are provided.",
+    "blocked_batch_command":
+        "This command cannot be used inside batch_commands. Use a separate "
+        "non-batched call for this operation.",
+    "name_not_found":
+        "No entity matched the given name. Use search_entities() to find entities "
+        "by partial name, or list_<domain> to see all entities with their names.",
+}
 
 
 def error_hint(message: str) -> str | None:

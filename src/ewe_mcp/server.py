@@ -32,6 +32,7 @@ from ewe_mcp.helpers import (
     STATUS_CODE_MAP,
     TIMEOUT_DEFAULT,
     TIMEOUT_LONG,
+    _ERROR_CODE_HINTS,
     cache_batch_blocked_commands,
     enrich_diagnose,
     error_hint,
@@ -125,6 +126,30 @@ def _send_sync(
         raise
 
 
+def _error_hint_for_exception(exc: Exception) -> str | None:
+    """Return an actionable hint for any exception type.
+
+    For EwEMCPError exceptions from the C# plugin, uses error-code-based matching
+    first, then falls back to string-based matching on the message.
+    For all other exceptions, uses the existing string-based error_hint() matching.
+    """
+    if isinstance(exc, EwEMCPError):
+        code_hint = _ERROR_CODE_HINTS.get(exc.code)
+        if code_hint:
+            return code_hint
+        # Fall back to string matching — EwEMCPError messages now include [code] prefix
+        hint = error_hint(str(exc))
+        if hint:
+            return hint
+        # Generic fallback for unknown EwEMCPError codes
+        return (
+            f"EwE plugin returned error code '{exc.code}'. "
+            "Check the plugin log at %APPDATA%\\Ecopath with Ecosim\\EwE_MCP_Plugin.log "
+            "on the Windows VM for details."
+        )
+    return error_hint(str(exc))
+
+
 async def _send(
     command_type: str,
     params: dict[str, Any] | None = None,
@@ -139,9 +164,9 @@ async def _send(
             logger.info("OK:  %s", command_type)
             return result
         except Exception as exc:
-            hint = error_hint(str(exc))
+            hint = _error_hint_for_exception(exc)
             logger.warning("ERR: %s — %s", command_type, exc)
-            if hint and not isinstance(exc, EwEMCPError):
+            if hint:
                 raise RuntimeError(f"{exc}\n\nHINT: {hint}") from exc
             raise
 
@@ -767,34 +792,13 @@ async def list_ecopath_groups() -> dict[str, Any]:
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
 async def get_ecopath_group(index: int) -> dict[str, Any]:
-    """Get one Ecopath functional group, including non-zero diet entries."""
-    group = await _send("get_ecopath_group", {"index": index})
-    run_state = await _send("get_ecopath_run_state")
-    if run_state.get("has_ecopath_ran") and "output" in group:
-        try:
-            diag = await _send("get_ecopath_group_diagnostics")
-            diag_group = next(
-                (g for g in diag.get("groups", []) if g["index"] == index), None
-            )
-            if diag_group:
-                values = diag_group.get("values", {})
-                enriched_output = dict(group["output"])
-                if "EEOutput" in values:
-                    enriched_output["ee"] = values["EEOutput"]
-                if "TTLX" in values:
-                    enriched_output["trophic_level"] = values["TTLX"]
-                if "PBOutput" in values:
-                    enriched_output["pb_computed"] = values["PBOutput"]
-                    if "GEOutput" in values and values["GEOutput"] is not None:
-                        enriched_output["ge"] = values["GEOutput"]
-                group["output"] = enriched_output
-        except Exception:
-            logger.warning(
-                "Failed to enrich ecopath group %d with diagnostics",
-                index,
-                exc_info=True,
-            )
-    return group
+    """Get one Ecopath functional group with auto-enriched output.
+
+    Includes diet composition, output values (if Ecopath has run), and
+    enrichment metadata (EE, trophic level, P/B, GE). Enrichment status
+    is reported in the `_enrichment` field.
+    """
+    return await _send("get_ecopath_group_enriched", {"index": index})
 
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
@@ -1079,49 +1083,69 @@ async def get_ecospace_fleet_input(index: int) -> dict[str, Any]:
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
 async def get_ecospace_group_results(
-    index: int,
+    index: int | None = None,
     variables: list[str] | None = None,
     start_time: int | None = None,
     end_time: int | None = None,
+    list: bool = False,
 ) -> dict[str, Any]:
     """Read Ecospace group result time-series after a run.
+
+    Set `list=True` to return results for all groups instead of a single
+    group by index. When `list=True`, the `index` parameter is ignored.
 
     Known variable names: biomass, relative_biomass.
     If variables is None, all available variables are returned.
     Unknown variable names will be rejected by the EwE plugin with
     a descriptive error.
     """
-    params: dict[str, Any] = {"index": index}
+    if not list and index is None:
+        raise ValueError("Either 'index' or 'list=True' is required")
+    params: dict[str, Any] = {}
+    if index is not None:
+        params["index"] = index
     if variables is not None:
         params["variables"] = variables
     if start_time is not None:
         params["start_time"] = start_time
     if end_time is not None:
         params["end_time"] = end_time
+    if list:
+        params["list"] = True
     return await _send("get_ecospace_group_results", params, timeout=TIMEOUT_LONG)
 
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
 async def get_ecospace_fleet_results(
-    index: int,
+    index: int | None = None,
     variables: list[str] | None = None,
     start_time: int | None = None,
     end_time: int | None = None,
+    list: bool = False,
 ) -> dict[str, Any]:
     """Read Ecospace fleet result time-series after a run.
+
+    Set `list=True` to return results for all fleets instead of a single
+    fleet by index. When `list=True`, the `index` parameter is ignored.
 
     Known variable names: catch_biomass, value.
     If variables is None, all available variables are returned.
     Unknown variable names will be rejected by the EwE plugin with
     a descriptive error.
     """
-    params: dict[str, Any] = {"index": index}
+    if not list and index is None:
+        raise ValueError("Either 'index' or 'list=True' is required")
+    params: dict[str, Any] = {}
+    if index is not None:
+        params["index"] = index
     if variables is not None:
         params["variables"] = variables
     if start_time is not None:
         params["start_time"] = start_time
     if end_time is not None:
         params["end_time"] = end_time
+    if list:
+        params["list"] = True
     return await _send("get_ecospace_fleet_results", params, timeout=TIMEOUT_LONG)
 
 
@@ -1174,14 +1198,17 @@ async def get_ecospace_habitat(index: int) -> dict[str, Any]:
     """
     try:
         return await _send("get_ecospace_habitat", {"index": index})
-    except EwEMCPError as exc:
-        if exc.code == "entity_unavailable":
+    except RuntimeError as exc:
+        # _send wraps EwEMCPError in RuntimeError with HINT — check if the
+        # underlying error was entity_unavailable and add Ecospace-specific context.
+        cause = exc.__cause__
+        if isinstance(cause, EwEMCPError) and cause.code == "entity_unavailable":
             raise RuntimeError(
                 f"Ecospace habitat at index {index} could not be resolved. "
                 "This typically happens when the Ecospace scenario was recently "
                 "created and habitats have not been fully initialized. "
                 "Ensure the scenario has been saved and the basemap is configured."
-            ) from exc
+            ) from cause
         raise
 
 
@@ -1396,12 +1423,16 @@ async def get_ecotracer_group_input(index: int) -> dict[str, Any]:
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
 async def get_ecotracer_group_results(
-    index: int,
+    index: int | None = None,
     variables: list[str] | None = None,
     start_time: int | None = None,
     end_time: int | None = None,
+    list: bool = False,
 ) -> dict[str, Any]:
     """Read Ecotracer group result time-series after a run.
+
+    Set `list=True` to return results for all groups instead of a single
+    group by index. When `list=True`, the `index` parameter is ignored.
 
     Known variable names: concentration, conbio.
     Defaults to at most 120 timesteps (start_time..start_time+119) when
@@ -1410,13 +1441,19 @@ async def get_ecotracer_group_results(
     Unknown variable names will be rejected by the EwE plugin with
     a descriptive error.
     """
-    params: dict[str, Any] = {"index": index}
+    if not list and index is None:
+        raise ValueError("Either 'index' or 'list=True' is required")
+    params: dict[str, Any] = {}
+    if index is not None:
+        params["index"] = index
     if variables is not None:
         params["variables"] = variables
     if start_time is not None:
         params["start_time"] = start_time
     if end_time is not None:
         params["end_time"] = end_time
+    if list:
+        params["list"] = True
     return await _send("get_ecotracer_group_results", params, timeout=TIMEOUT_LONG)
 
 
@@ -1740,13 +1777,104 @@ async def set_vul_mult_by_name(
     if pred_idx is None:
         raise ValueError(f"Predator group '{predator}' not found")
 
-    return await _send("set_indexed_value", {
+    result = await _send("set_indexed_value", {
         "domain": "ecosim_group_input",
         "index": prey_idx,
         "variable": "vul_mult",
         "indices": [pred_idx],
         "value": value,
     })
+    result["_resolved"] = {
+        "prey": {"name": prey, "index": prey_idx},
+        "predator": {"name": predator, "index": pred_idx},
+    }
+    return result
+
+
+# ── Name-based entity access ──────────────────────────────────────
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+async def resolve_name(domain: str, name: str) -> dict[str, Any]:
+    """Resolve an entity name to its numeric index in a domain.
+
+    Args:
+        domain: Domain name (e.g., 'ecopath_group', 'ecosim_group_input',
+                'ecospace_habitat'). Use list_domains() to see all options.
+        name: Exact entity name (case-insensitive).
+
+    Returns:
+        Dict with domain, index, name, and type fields.
+    Raises:
+        EwEMCPError with code 'name_not_found' if no exact match exists.
+    """
+    if not name.strip():
+        raise ValueError("name must not be empty")
+    return await _send("resolve_entity_name", {"domain": domain, "name": name.strip()})
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+async def get_values_by_name(
+    domain: str,
+    name: str,
+    variables: list[str] | None = None,
+) -> dict[str, Any]:
+    """Get values from an entity by name instead of numeric index.
+
+    Resolves the entity name to its index internally, then reads the
+    requested variables. Safer than managing numeric indices manually.
+
+    Args:
+        domain: Domain name (e.g., 'ecopath_group', 'ecosim_group_input').
+        name: Exact entity name (case-insensitive).
+        variables: Optional list of variable names to read. If None, all
+                   readable scalar variables are returned.
+    """
+    if not name.strip():
+        raise ValueError("name must not be empty")
+    resolved = await _send("resolve_entity_name", {"domain": domain, "name": name})
+    params: dict[str, Any] = {
+        "domain": domain,
+        "index": resolved["index"],
+        "navigate": False,
+    }
+    if variables is not None:
+        params["variables"] = variables
+    result = await _send("get_values", params)
+    result["_resolved"] = dict(resolved)
+    return result
+
+
+@mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
+async def set_values_by_name(
+    domain: str,
+    name: str,
+    values: dict[str, Any],
+    navigate: bool = False,
+) -> dict[str, Any]:
+    """Set values on an entity by name instead of numeric index.
+
+    Resolves the entity name to its index internally, then writes the
+    given values. Safer than managing numeric indices manually.
+
+    Args:
+        domain: Domain name (e.g., 'ecopath_group', 'ecosim_group_input').
+        name: Exact entity name (case-insensitive).
+        values: Dict of variable-name to value to set.
+        navigate: Whether to navigate the EwE UI to show the change.
+                  Defaults to False for quiet background access.
+    """
+    if not name.strip():
+        raise ValueError("name must not be empty")
+    resolved = await _send("resolve_entity_name", {"domain": domain, "name": name})
+    result = await _send("set_values", {
+        "domain": domain,
+        "index": resolved["index"],
+        "values": values,
+        "navigate": navigate,
+    })
+    result["_resolved"] = dict(resolved)
+    return result
 
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
@@ -1922,41 +2050,12 @@ async def get_ecopath_group_diagnostics() -> dict[str, Any]:
 async def get_ecopath_fleet_diagnostics() -> dict[str, Any]:
     """Fetch fleet-level Ecopath catch, landings, and discard breakdowns after an Ecopath run.
 
-    Also computes fishing mortality (F = catch / biomass) for each fleet/group pair
-    when group biomass is available from Ecopath group diagnostics.
+    Auto-enriched with fishing mortality (F = catch / biomass) for each fleet/group
+    pair. Enrichment status reported in `_enrichment` field. Includes
+    `status_code_map` for interpreting status flag values.
     """
-    fleet_diag = await _send("get_ecopath_fleet_diagnostics")
+    fleet_diag = await _send("get_ecopath_fleet_diagnostics_enriched")
     fleet_diag["status_code_map"] = STATUS_CODE_MAP
-
-    # Enrich with fishing mortality (F = catch / biomass) from group diagnostics
-    try:
-        group_diag = await _send("get_ecopath_group_diagnostics")
-        group_biomass: dict[int, float] = {}
-        for g in group_diag.get("groups", []):
-            gidx = g.get("index")
-            values = g.get("values", {})
-            bio = values.get("Biomass")
-            if gidx is not None and bio is not None and isinstance(bio, (int, float)):
-                group_biomass[gidx] = float(bio)
-
-        if group_biomass and "fleets" in fleet_diag:
-            for fleet in fleet_diag["fleets"]:
-                for fg in fleet.get("catch_by_group", []):
-                    group_idx = fg.get("group_index")
-                    catch_val = fg.get("catch_total")
-                    if (
-                        group_idx is not None
-                        and group_idx in group_biomass
-                        and catch_val is not None
-                        and isinstance(catch_val, (int, float))
-                        and group_biomass[group_idx] > 0
-                    ):
-                        fg["fishing_mortality"] = catch_val / group_biomass[group_idx]
-    except Exception:
-        logger.warning(
-            "Failed to enrich fleet diagnostics with fishing mortality", exc_info=True
-        )
-
     return fleet_diag
 
 
@@ -2397,14 +2496,16 @@ async def set_values_by_name_batch(
 
 @mcp.tool(
     description="Execute multiple EwE MCP commands in one round-trip. "
-    "Blocked commands include eval, model load/save/close, simulation runs/stops, view capture, and scenario mutations/loads.",
+    "Blocked commands include eval, model load/save/close, simulation runs/stops, view capture, and scenario mutations. "
+    "set_values/set_indexed_value/set_values_range allowed only with navigate=False.",
 )
 async def batch_commands(commands: list[dict[str, Any]]) -> dict[str, Any]:
     """Execute multiple non-blocked commands through the EwE plugin.
 
     Blocked commands include eval, model lifecycle, simulation runs/stops,
-    view capture, scenario mutations/loads, set_values, set_indexed_value,
-    and other destructive operations.
+    view capture, scenario mutations, and other destructive operations.
+    set_values / set_indexed_value / set_values_range are allowed in batch
+    ONLY when navigate=False is explicitly set for every command.
     """
     # Use cached value or hardcoded fallback (non-blocking).
     blocked = get_batch_blocked_commands()
@@ -2424,6 +2525,41 @@ async def batch_commands(commands: list[dict[str, Any]]) -> dict[str, Any]:
             if isinstance(entry, dict) and "domain" in entry:
                 entry["domain"] = normalize_domain_name(entry["domain"])
     return result
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+async def call_command(
+    command_type: str,
+    params: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Execute any EwE plugin command directly by name.
+
+    Use this for simple read-only operations that don't need Python-side
+    enrichment or safety checks. For operations that combine multiple
+    plugin calls (e.g., get_ecopath_group, which enriches with diagnostics),
+    use the dedicated tool instead.
+
+    Args:
+        command_type: The C# plugin command name (e.g., "list_ecopath_groups",
+                      "get_ecosim_group_input", "get_ecospace_run_state").
+        params: Optional dict of parameters for the command.
+
+    Blocked: model lifecycle, simulation runs/stops, destructive mutations,
+             eval, view capture, exports. Use dedicated tools for those.
+    """
+    if not command_type:
+        raise ValueError("command_type is required")
+    blocked = get_batch_blocked_commands()
+    # set_values / set_indexed_value / set_values_range are allowed in
+    # batch_commands with navigate=False, but never in call_command which
+    # bypasses the navigate gate. Block them unconditionally here.
+    blocked_direct = blocked | frozenset({"set_values", "set_indexed_value", "set_values_range"})
+    if command_type in blocked_direct:
+        raise ValueError(
+            f"Command {command_type!r} is blocked from direct execution. "
+            "Use the dedicated MCP tool for this operation."
+        )
+    return await _send(command_type, params)
 
 
 @mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
