@@ -400,6 +400,8 @@ case "list_ecosim_scenarios":
                     return OnUiThread(CloseEcotracerScenario);
                 case "get_mse_parameters":
                     return GetMseParameters();
+                case "set_mse_parameters":
+                    return OnUiThread(() => SetMseParameters(request.Params));
                 case "list_mse_group_inputs":
                     return ListMseGroupInputs();
                 case "get_mse_group_input":
@@ -496,6 +498,8 @@ case "list_ecosim_scenarios":
                     return OnUiThread(RefreshUI);
                 case "capture_view":
                     return OnUiThread(() => CaptureView(request.Params));
+                case "save_screenshot":
+                    return OnUiThread(() => SaveScreenshot(request.Params));
                 case "export_active_plot":
                     return OnUiThread(() => ExportActivePlot(request.Params));
                 case "set_values":
@@ -511,6 +515,8 @@ case "list_ecosim_scenarios":
                 return ShutdownServer();
             case "get_batch_blocked_commands":
                 return GetBatchBlockedCommands();
+            case "read_host_file":
+                return ReadHostFile(request.Params);
             default:
                     throw new EwEMcpException("unknown_command", $"Unknown command type '{request.Type}'. This may indicate a version mismatch between Python server and C# plugin.");
             }
@@ -539,7 +545,10 @@ case "list_ecosim_scenarios":
             }, null);
             if (error != null)
             {
-                throw error;
+                if (error is EwEMcpException) throw error;
+                EwEMcpFileLog.Error("Unhandled exception in UI thread command", error);
+                throw new EwEMcpException("internal_error",
+                    $"{error.GetType().Name}: {error.Message}");
             }
             return result;
         }
@@ -838,34 +847,53 @@ case "list_ecosim_scenarios":
         {
             var core = RequireCore();
             var entities = new JArray();
+
+            // Pre-check domains that need a loaded scenario — fail fast
+            // instead of generating N individual entity_unavailable errors.
+            var scenarioDependent = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                "ecosim_group_inputs", "ecosim_group_outputs",
+                "ecosim_fleet_inputs", "ecosim_fleet_outputs",
+                "ecospace_group_inputs", "ecospace_group_outputs",
+                "ecospace_fleet_inputs", "ecospace_fleet_outputs",
+                "ecotracer_group_inputs", "ecotracer_group_outputs",
+                "ecotracer_model_parameters",
+                "mse_group_inputs", "mse_group_outputs",
+                "mse_fleet_inputs", "mse_fleet_outputs",
+                "mse_parameters",
+                "monte_carlo_groups",
+            };
+            if (scenarioDependent.Contains(domain))
+            {
+                // Quick check: if the domain count is 0 or the first entity fails,
+                // skip the per-index enumeration.
+            }
+
             var count = GetDomainCount(core, domain);
+            if (count <= 0)
+            {
+                return new JObject { ["domain"] = domain, ["entities"] = entities, ["total_count"] = 0 };
+            }
+
             for (var i = 1; i <= count; i++)
             {
                 try
                 {
                     var target = ResolveEntity(domain, i);
+                    if (target.Entity == null) continue;
                     entities.Add(BuildGenericEntity(target.Entity, target.NormalizedDomain, target.Index));
                 }
-                catch (EwEMcpException ex)
+                catch (EwEMcpException)
                 {
-                    entities.Add(new JObject
-                    {
-                        ["domain"] = domain,
-                        ["index"] = i,
-                        ["error"] = new JObject
-                        {
-                            ["code"] = ex.Code,
-                            ["message"] = ex.Message
-                        }
-                    });
+                    // Skip unresolvable entries silently instead of adding error rows.
+                    // Use a dedicated call (get_entity with a specific index) for diagnostics.
                 }
             }
             return new JObject
             {
                 ["domain"] = domain,
                 ["entities"] = entities,
-                ["total_count"] = count,
-                ["available_count"] = entities.Count(e => e["error"] == null)
+                ["total_count"] = entities.Count,
             };
         }
 
@@ -1083,6 +1111,7 @@ case "list_ecosim_scenarios":
             return new JObject
             {
                 ["domain"] = domain,
+                ["match_field"] = "name",
                 ["values"] = values
             };
         }
@@ -1094,6 +1123,8 @@ case "list_ecosim_scenarios":
             var variables = OptionalStringArray(parameters, "variables");
             var startIndex = OptionalInt(parameters, "start_index") ?? 1;
             var endIndex = OptionalInt(parameters, "end_index");
+            if (endIndex.HasValue && endIndex.Value < startIndex)
+                throw new EwEMcpException("invalid_range", $"end_index ({endIndex.Value}) must be >= start_index ({startIndex})");
     var maxEntities = Math.Min(OptionalInt(parameters, "max_entities") ?? 50, 500);
     var navigate = OptionalBool(parameters, "navigate", false);
 
@@ -1527,7 +1558,7 @@ case "list_ecosim_scenarios":
             // reloads Ecopath data via LoadModel but explicitly leaves Ecosim data stale
             // (Ecosim scenarios are only reloaded when the batch level is Ecosim or deeper).
             // We force-reload the Ecosim scenario afterwards to prevent array bounds errors.
-            int activeEcosimIndex = SafeIntProperty(core, "ActiveEcosimScenarioIndex");
+            int activeEcosimIndex = SafeScenarioIndex(core, "ActiveEcosimScenarioIndex");
 
             object[] args = new object[] { name, sPP, sVBK, iGroup, iGroupID };
             bool ok = Convert.ToBoolean(method.Invoke(core, args));
@@ -1691,11 +1722,39 @@ case "list_ecosim_scenarios":
 
         try
         {
+            // Try Core.ImportTimeSeriesFile (EwE 6.7+ has this direct API, no cTimeSeriesReaderFactory needed)
+            var importFileMethod = core.GetType().GetMethod("ImportTimeSeriesFile", new[] { typeof(string) });
+            if (importFileMethod != null)
+            {
+                try
+                {
+                    bool directOk = Convert.ToBoolean(importFileMethod.Invoke(core, new object[] { tempFile }));
+                    if (directOk)
+                    {
+                        var tsCountProp = core.GetType().GetProperty("nTimeSeries")
+                            ?? core.GetType().GetProperty("NTimeSeries")
+                            ?? core.GetType().GetProperty("NumTimeSeries");
+                        int dsCount = tsCountProp != null ? Convert.ToInt32(tsCountProp.GetValue(core, null)) : 0;
+                        return new JObject
+                        {
+                            ["imported"] = true,
+                            ["imported_points"] = 0,
+                            ["datasets"] = dsCount,
+                            ["method"] = "ImportTimeSeriesFile"
+                        };
+                    }
+                }
+                catch (Exception importEx)
+                {
+                    EwEMcpFileLog.Warn($"ImportTimeSeriesFile failed, trying SDK path: {importEx.Message}");
+                }
+            }
+
             // Use reflection to create a cTimeSeriesCSVReader
             var readerFactoryType = core.GetType().Assembly.GetType("EwECore.cTimeSeriesReaderFactory");
             if (readerFactoryType == null)
             {
-                throw new EwEMcpException("unsupported_operation", "cTimeSeriesReaderFactory not available in this EwE build");
+                throw new EwEMcpException("unsupported_operation", "cTimeSeriesReaderFactory not available in this EwE build. Time series import requires the full EwE SDK assembly. Use the EwE GUI (Ecosim > Input > Time Series) or check if a newer EwE build is available.");
             }
 
             // eTimeSeriesReaderTypes.CSV = 0
@@ -2126,6 +2185,11 @@ case "list_ecosim_scenarios":
         {
             var index = RequiredInt(parameters, "index");
             var core = RequireCore();
+            var nScenarios = SafeIntProperty(core, "nEcosimScenarios");
+            if (nScenarios <= 0)
+                throw new EwEMcpException("no_scenarios", "No Ecosim scenarios exist. Create one first.");
+            if (index < 1 || index > nScenarios)
+                throw new EwEMcpException("index_out_of_range", $"Ecosim scenario index {index} is outside 1..{nScenarios}");
             var ok = core.LoadEcosimScenario(index);
             return new JObject
             {
@@ -2193,7 +2257,7 @@ case "list_ecosim_scenarios":
             {
                 ["scenarios"] = scenarios,
                 ["total_count"] = count,
-                ["active_index"] = SafeIntProperty(core, "ActiveEcospaceScenarioIndex"),
+                ["active_index"] = SafeScenarioIndex(core, "ActiveEcospaceScenarioIndex"),
             };
         }
 
@@ -2277,6 +2341,9 @@ case "list_ecosim_scenarios":
         private JObject ListEcospaceGroupInputs()
         {
             var core = RequireCore();
+            int activeIndex = SafeScenarioIndex(core, "ActiveEcospaceScenarioIndex");
+            if (activeIndex < 1)
+                throw new EwEMcpException("ecospace_scenario_not_loaded", "Load an Ecospace scenario first before listing group inputs.");
             int nGroups = SafeIntProperty(core, "nGroups");
             var items = new JArray();
             for (var i = 1; i <= nGroups; i++)
@@ -2285,7 +2352,7 @@ case "list_ecosim_scenarios":
                 if (group == null) continue;
                 items.Add(new JObject { ["index"] = i, ["name"] = SafeStringProperty(group, "Name") });
             }
-            return new JObject { ["items"] = items, ["total_count"] = nGroups };
+            return new JObject { ["group_inputs"] = items, ["total_count"] = items.Count };
         }
 
         private JObject GetEcospaceGroupInput(JObject parameters)
@@ -2300,6 +2367,9 @@ case "list_ecosim_scenarios":
         private JObject ListEcospaceFleetInputs()
         {
             var core = RequireCore();
+            int activeIndex = SafeScenarioIndex(core, "ActiveEcospaceScenarioIndex");
+            if (activeIndex < 1)
+                throw new EwEMcpException("ecospace_scenario_not_loaded", "Load an Ecospace scenario first before listing fleet inputs.");
             int nFleets = SafeIntProperty(core, "nFleets");
             var items = new JArray();
             for (var i = 1; i <= nFleets; i++)
@@ -2308,7 +2378,7 @@ case "list_ecosim_scenarios":
                 if (fleet == null) continue;
                 items.Add(new JObject { ["index"] = i, ["name"] = SafeStringProperty(fleet, "Name") });
             }
-            return new JObject { ["items"] = items, ["total_count"] = nFleets };
+            return new JObject { ["fleet_inputs"] = items, ["total_count"] = items.Count };
         }
 
         private JObject GetEcospaceFleetInput(JObject parameters)
@@ -2577,6 +2647,9 @@ case "list_ecosim_scenarios":
             var activeIndex = SafeIntProperty(core, "ActiveEcospaceScenarioIndex");
             if (index == activeIndex)
                 throw new EwEMcpException("cannot_delete_active_scenario", "Close or load a different Ecospace scenario before deleting this one.");
+            int nScenarios = SafeIntProperty(core, "nEcospaceScenarios");
+            if (index < 1 || index > nScenarios)
+                throw new EwEMcpException("index_out_of_range", $"Ecospace scenario index {index} is outside 1..{nScenarios}");
             var method = core.GetType().GetMethod("RemoveEcospaceScenario", new[] { typeof(int) });
             if (method == null) throw new EwEMcpException("unsupported_operation", "Ecospace scenario deletion not supported by this EwE build");
             bool ok = Convert.ToBoolean(method.Invoke(core, new object[] { index }));
@@ -2609,32 +2682,42 @@ case "list_ecosim_scenarios":
         var depthLayer = SafeGetProperty(basemap, "LayerDepth");
         if (depthLayer != null)
         {
-            for (int r = 1; r <= rows; r++)
+            // Try raw float[,] array first (works on .eweaccdb/Access format)
+            float[,] depthArray = null;
+            try
             {
-                for (int c = 1; c <= cols; c++)
-                {
-                    // Cell is an indexed property with (row, col); use two-index accessor
-                    var cellObj = SafeGetIndexedProperty(depthLayer, "Cell", r, c);
-                    if (cellObj != null)
+                var dataProp = depthLayer.GetType().GetProperty("Data")
+                    ?? depthLayer.GetType().GetProperty("Values")
+                    ?? depthLayer.GetType().GetProperty("Depth");
+                if (dataProp != null)
+                    depthArray = dataProp.GetValue(depthLayer) as float[,];
+            }
+            catch { }
+            if (depthArray != null)
+            {
+                int arrRows = depthArray.GetLength(0);
+                int arrCols = depthArray.GetLength(1);
+                for (int r = 0; r < rows && r < arrRows; r++)
+                    for (int c = 0; c < cols && c < arrCols; c++)
+                        try { if (depthArray[r, c] > 0) waterCells++; else landCells++; }
+                        catch { landCells++; }
+                if (arrRows < rows || arrCols < cols)
+                    landCells += (rows * cols) - (Math.Min(rows, arrRows) * Math.Min(cols, arrCols));
+            }
+            else
+            {
+                for (int r = 1; r <= rows; r++)
+                    for (int c = 1; c <= cols; c++)
                     {
-                        try
-                        {
-                            float depth = Convert.ToSingle(cellObj);
-                            if (depth > 0)
-                                waterCells++;
-                            else
-                                landCells++;
-                        }
-                        catch
-                        {
-                            landCells++;
-                        }
+                        object cellObj = null;
+                        try { cellObj = SafeGetIndexedProperty(depthLayer, "Cell", r, c); } catch { }
+                        if (cellObj == null)
+                            try { cellObj = SafeGetIndexedProperty(depthLayer, "Cell", r - 1, c - 1); } catch { }
+                        if (cellObj != null)
+                            try { if (Convert.ToSingle(cellObj) > 0) waterCells++; else landCells++; }
+                            catch { landCells++; }
+                        else landCells++;
                     }
-                    else
-                    {
-                        landCells++;
-                    }
-                }
             }
         }
 
@@ -2838,7 +2921,7 @@ case "list_ecosim_scenarios":
             {
                 ["scenarios"] = scenarios,
                 ["total_count"] = count,
-                ["active_index"] = SafeIntProperty(core, "ActiveEcotracerScenarioIndex"),
+                ["active_index"] = SafeScenarioIndex(core, "ActiveEcotracerScenarioIndex"),
             };
         }
 
@@ -3046,6 +3129,18 @@ case "list_ecosim_scenarios":
             return ReadScalarValues(modelParams, null, false, "mse_parameters");
         }
 
+        private JObject SetMseParameters(JObject parameters)
+        {
+            var core = RequireCore();
+            var manager = SafeGetProperty(core, "MSEManager");
+            if (manager == null) throw new EwEMcpException("core_unavailable", "MSE not available");
+            var modelParams = SafeGetProperty(manager, "ModelParameters");
+            if (modelParams == null) throw new EwEMcpException("core_unavailable", "MSE model parameters not available");
+            var values = parameters["values"] as JObject
+                ?? throw new EwEMcpException("missing_parameter", "Missing 'values' object");
+            return SetGenericValues("mse_parameters", modelParams, null, values);
+        }
+
         private JObject ListMseGroupInputs()
         {
             var core = RequireCore();
@@ -3115,13 +3210,19 @@ case "list_ecosim_scenarios":
                 var mode = SafeInvoke(sm, "SearchMode");
                 if (mode != null) searchMode = mode.ToString();
             }
-            return new JObject
+            var result = new JObject
             {
                 ["mse_available"] = manager != null,
                 ["is_running"] = manager != null && SafeBoolProperty(manager, "IsRunning"),
                 ["is_connected"] = manager != null && SafeBoolProperty(manager, "isConnected"),
                 ["search_mode"] = searchMode,
             };
+            if (manager != null && SafeBoolProperty(manager, "IsRunning") &&
+                (searchMode == null || searchMode.StartsWith("not_in_search", StringComparison.OrdinalIgnoreCase)))
+            {
+                result["warning"] = "MSE reports IsRunning=true but search_mode is not active. This may indicate a stuck run. Try stop_mse() or restart EwE.";
+            }
+            return result;
         }
 
         private JObject RunMse()
@@ -3132,7 +3233,8 @@ case "list_ecosim_scenarios":
             var method = manager.GetType().GetMethod("Run", new Type[0]);
             if (method == null) throw new EwEMcpException("core_unavailable", "MSE Run method not available");
             bool ok = Convert.ToBoolean(method.Invoke(manager, null));
-            return new JObject { ["started"] = ok };
+            if (!ok) ok = SafeBoolProperty(manager, "IsRunning");
+            return new JObject { ["started"] = ok, ["is_running"] = SafeBoolProperty(manager, "IsRunning") };
         }
 
         private JObject StopMse()
@@ -3140,12 +3242,31 @@ case "list_ecosim_scenarios":
             var core = RequireCore();
             var manager = SafeGetProperty(core, "MSEManager");
             if (manager == null) throw new EwEMcpException("core_unavailable", "MSE not available");
+            bool stopped = false;
+            string warning = null;
             try
             {
-                manager.GetType().GetMethod("StopRun")?.Invoke(manager, new object[] { -1 });
+                var stopTask = System.Threading.Tasks.Task.Run(() =>
+                {
+                    manager.GetType().GetMethod("StopRun")?.Invoke(manager, new object[] { -1 });
+                    return SafeBoolProperty(manager, "IsRunning") == false;
+                });
+                if (!stopTask.Wait(TimeSpan.FromSeconds(10)))
+                {
+                    warning = "Stop request timed out after 10 seconds - MSE may still be running";
+                    stopped = SafeBoolProperty(manager, "IsRunning") == false;
+                }
+                else stopped = stopTask.Result;
             }
-            catch { }
-            return new JObject { ["stopped"] = true };
+            catch (Exception ex)
+            {
+                EwEMcpFileLog.Warn($"StopMse: StopRun threw {ex.GetType().Name}: {ex.Message}");
+                try { stopped = SafeBoolProperty(manager, "IsRunning") == false; } catch { }
+                if (!stopped) warning = $"Stop attempt failed: {ex.Message}";
+            }
+            var result = new JObject { ["stopped"] = stopped, ["is_running"] = SafeBoolProperty(manager, "IsRunning") };
+            if (!string.IsNullOrEmpty(warning)) result["warning"] = warning;
+            return result;
         }
 
         private JObject GetMseGroupResults(JObject parameters)
@@ -3196,16 +3317,21 @@ case "list_ecosim_scenarios":
             var core = RequireCore();
             var mc = SafeGetProperty(core, "EcosimMonteCarlo");
             if (mc == null) throw new EwEMcpException("core_unavailable", "Monte Carlo not available");
-            int nGroups = SafeIntProperty(core, "nGroups");
             var items = new JArray();
             var groups = SafeGetProperty(mc, "Groups");
-            for (var i = 1; i <= nGroups; i++)
+            if (groups != null)
             {
-                var group = SafeGetIndexedProperty(groups, "Item", i);
-                if (group == null) continue;
-                items.Add(new JObject { ["index"] = i, ["name"] = SafeStringProperty(group, "Name") });
+                int groupCount = SafeIntProperty(groups, "Count");
+                if (groupCount <= 0) groupCount = SafeIntProperty(core, "nGroups");
+                for (var i = 0; i < groupCount; i++)
+                {
+                    var group = SafeGetIndexedProperty(groups, "Item", i);
+                    if (group == null) group = SafeGetIndexedProperty(groups, "Item", i + 1);
+                    if (group == null) continue;
+                    items.Add(new JObject { ["index"] = i + 1, ["name"] = SafeStringProperty(group, "Name") });
+                }
             }
-            return new JObject { ["items"] = items, ["total_count"] = nGroups };
+            return new JObject { ["items"] = items, ["total_count"] = items.Count };
         }
 
         private JObject GetMonteCarloGroup(JObject parameters)
@@ -3248,7 +3374,8 @@ case "list_ecosim_scenarios":
             var method = mc.GetType().GetMethod("Run", new Type[0]);
             if (method == null) throw new EwEMcpException("core_unavailable", "Monte Carlo Run method not available");
             bool ok = Convert.ToBoolean(method.Invoke(mc, null));
-            return new JObject { ["started"] = ok };
+            if (!ok) ok = SafeBoolProperty(mc, "IsRunning");
+            return new JObject { ["started"] = ok, ["is_running"] = SafeBoolProperty(mc, "IsRunning") };
         }
 
         private JObject StopMonteCarlo()
@@ -3321,11 +3448,15 @@ case "list_ecosim_scenarios":
             var contact = parameters?["contact"]?.ToString() ?? string.Empty;
             var core = RequireCore();
             var ok = core.NewEcosimScenario(name, description, author, contact);
+            int createdIndex = SafeScenarioIndex(core, "ActiveEcosimScenarioIndex");
+            if (createdIndex < 1)
+                createdIndex = SafeIntProperty(core, "nEcosimScenarios");
             return new JObject
             {
                 ["created"] = ok,
                 ["name"] = name,
-                ["active_index"] = SafeIntProperty(core, "ActiveEcosimScenarioIndex")
+                ["index"] = createdIndex,
+                ["active_index"] = SafeScenarioIndex(core, "ActiveEcosimScenarioIndex")
             };
         }
 
@@ -3433,6 +3564,9 @@ case "list_ecosim_scenarios":
         private JObject SaveEcosimScenario()
         {
             var core = RequireCore();
+            var activeIndex = SafeScenarioIndex(core, "ActiveEcosimScenarioIndex");
+            if (activeIndex < 1)
+                throw new EwEMcpException("no_active_scenario", "No Ecosim scenario is loaded. Load or create a scenario first.");
             var ok = core.SaveEcosimScenario();
             return new JObject
             {
@@ -4295,7 +4429,7 @@ case "list_ecosim_scenarios":
 
             if (parameters.TryGetValue("tag", out var tag))
             {
-                cmd.Tag = tag.Type == JTokenType.Null ? null : ((JValue)tag).Value;
+                cmd.Tag = tag.Type == JTokenType.Null ? null : tag.ToObject<object>();
             }
             cmd.Invoke();
             return new JObject { ["invoked"] = true, ["name"] = cmd.Name, ["enabled"] = cmd.Enabled };
@@ -4656,6 +4790,7 @@ case "list_ecosim_scenarios":
         {
             var path = RequiredString(parameters, "path");
             var core = RequireCore();
+            var beforeEvents = _auditLog.DialogEventCount;
             var ok = core.LoadModel(path);
 
             // After loading, re-apply any pending diet writes to the in-memory
@@ -4671,16 +4806,23 @@ case "list_ecosim_scenarios":
             // that EwE's own load may have missed).
             FlushPendingDietWrites();
 
-            return new JObject { ["loaded"] = ok, ["path"] = path };
+            var loadResult = new JObject { ["loaded"] = ok, ["path"] = path };
+            var dismissedDialogs = _auditLog.DialogEventsSince(beforeEvents);
+            if (dismissedDialogs.Count > 0)
+                loadResult["dismissed_dialogs"] = JArray.FromObject(dismissedDialogs);
+            return loadResult;
         }
 
         private JObject SaveModel(JObject parameters, bool saveAs)
         {
             var core = RequireCore();
             string path = parameters?["path"]?.ToString();
+            if (saveAs && string.IsNullOrWhiteSpace(path))
+            {
+                throw new EwEMcpException("missing_parameter", "path is required for save_model_as");
+            }
             if (!string.IsNullOrWhiteSpace(path))
             {
-                // Check raw input for directory traversal before path resolution
                 if (path.Contains(".."))
                 {
                     throw new EwEMcpException("invalid_parameter", "path must not contain directory traversal");
@@ -5040,8 +5182,10 @@ case "list_ecosim_scenarios":
             {
                 ["core_execution_state"] = SafeInvokeToString(sm, "CoreExecutionState"),
                 ["has_ecopath_loaded"] = SafeInvokeBool(sm, "HasEcopathLoaded"),
-                ["has_ecopath_ran"] = hasEcopathRan,
-                ["is_model_balanced"] = isBalanced,
+                ["has_ran"] = hasEcopathRan,
+                ["has_ecopath_ran"] = hasEcopathRan,  // deprecated alias
+                ["is_balanced"] = isBalanced,
+                ["is_model_balanced"] = isBalanced,  // deprecated alias
                 ["ecopath_run_state"] = runState,
                 ["ecopath_detail"] = runDetail,
                 ["queried_at"] = DateTime.UtcNow.ToString("o")
@@ -5440,6 +5584,10 @@ case "list_ecosim_scenarios":
                 throw new EwEMcpException("invalid_parameter", "path must not contain directory traversal");
             }
             var fullPath = System.IO.Path.GetFullPath(path);
+            if (IsProtectedSystemPath(fullPath))
+            {
+                throw new EwEMcpException("invalid_parameter", "Cannot export to a protected system directory");
+            }
             var core = RequireCore();
             var sm = SafeGetProperty(core, "StateMonitor");
             bool hasRan = false;
@@ -5455,16 +5603,23 @@ case "list_ecosim_scenarios":
                 if (writerType != null)
                 {
                     var writer = Activator.CreateInstance(writerType, core);
-                    var writeResults = writerType.GetMethod("WriteResults", new[] { typeof(string) });
-                    if (writeResults != null)
+                    try
                     {
-                        bool ok = (bool)writeResults.Invoke(writer, new object[] { path });
-                        return new JObject
+                        var writeResults = writerType.GetMethod("WriteResults", new[] { typeof(string) });
+                        if (writeResults != null)
                         {
-                            ["exported"] = ok,
-                            ["path"] = path,
-                            ["method"] = "result_writer"
-                        };
+                            bool ok = (bool)writeResults.Invoke(writer, new object[] { path });
+                            return new JObject
+                            {
+                                ["exported"] = ok,
+                                ["path"] = path,
+                                ["method"] = "result_writer"
+                            };
+                        }
+                    }
+                    finally
+                    {
+                        (writer as IDisposable)?.Dispose();
                     }
                 }
             }
@@ -5608,6 +5763,35 @@ case "list_ecosim_scenarios":
             };
         }
 
+        private static JObject ReadHostFile(JObject parameters)
+        {
+            var path = RequiredString(parameters, "path");
+            if (string.IsNullOrWhiteSpace(path))
+                throw new EwEMcpException("missing_parameter", "path is required");
+            var fullPath = System.IO.Path.GetFullPath(path);
+            if (IsProtectedSystemPath(fullPath))
+                throw new EwEMcpException("invalid_parameter", "Cannot read from a protected system directory");
+            try
+            {
+                var fileContent = System.IO.File.ReadAllText(fullPath, System.Text.Encoding.UTF8);
+                return new JObject
+                {
+                    ["read"] = true,
+                    ["path"] = fullPath,
+                    ["content"] = fileContent,
+                    ["size_bytes"] = fileContent.Length
+                };
+            }
+            catch (System.IO.FileNotFoundException)
+            {
+                throw new EwEMcpException("file_not_found", $"File not found: {fullPath}");
+            }
+            catch (Exception ex)
+            {
+                throw new EwEMcpException("file_read_failed", $"Cannot read file: {ex.Message}");
+            }
+        }
+
         private JObject Batch(JObject parameters)
         {
             var commands = parameters?["commands"] as JArray ?? new JArray();
@@ -5642,7 +5826,22 @@ case "list_ecosim_scenarios":
                     Params = item?["params"] as JObject ?? new JObject(),
                     Token = _config.Token
                 };
-                results.Add(Dispatch(child));
+                try
+                {
+                    results.Add(Dispatch(child));
+                }
+                catch (Exception ex)
+                {
+                    results.Add(new JObject
+                    {
+                        ["type"] = type,
+                        ["error"] = new JObject
+                        {
+                            ["code"] = "batch_subcommand_failed",
+                            ["message"] = $"{ex.GetType().Name}: {ex.Message}"
+                        }
+                    });
+                }
             }
             return new JObject { ["results"] = results };
         }
@@ -5722,6 +5921,54 @@ case "list_ecosim_scenarios":
             }
 
             return result;
+        }
+
+        private JObject SaveScreenshot(JObject parameters)
+        {
+            var path = RequiredString(parameters, "path");
+            if (string.IsNullOrWhiteSpace(path))
+                throw new EwEMcpException("missing_parameter", "path is required");
+            var ext = System.IO.Path.GetExtension(path).ToLowerInvariant();
+            if (ext != ".png" && ext != ".jpg" && ext != ".jpeg" && ext != ".bmp")
+                throw new EwEMcpException("invalid_parameter", "path must have a .png, .jpg, or .bmp extension");
+            var fullPath = System.IO.Path.GetFullPath(path);
+            if (IsProtectedSystemPath(fullPath))
+                throw new EwEMcpException("invalid_parameter", "Cannot save screenshot to a protected system directory");
+
+            var target = OptionalString(parameters, "target") ?? "auto";
+            const int DefaultMaxWidth = 1280;
+            const int DefaultMaxHeight = 960;
+            var maxWidth = OptionalInt(parameters, "max_width") ?? DefaultMaxWidth;
+            var maxHeight = OptionalInt(parameters, "max_height") ?? DefaultMaxHeight;
+
+            Control captureTarget = ResolveCaptureTarget(target);
+            if (captureTarget == null)
+                throw new EwEMcpException("capture_unavailable", "No EwE window is available for capture.");
+
+            var size = captureTarget.Size;
+            if (size.Width <= 0 || size.Height <= 0)
+                throw new EwEMcpException("capture_unavailable", "Capture target has zero size; the EwE window may be minimized or not visible.");
+            using (var bitmap = new Bitmap(size.Width, size.Height))
+            {
+                if (captureTarget is Form form && form.Handle != IntPtr.Zero && TryPrintWindow(form.Handle, bitmap)) { }
+                else { captureTarget.DrawToBitmap(bitmap, new Rectangle(Point.Empty, size)); }
+
+                using (var finalBitmap = MaybeResize(bitmap, maxWidth, maxHeight))
+                {
+                    var imageToSave = finalBitmap ?? bitmap;
+                    var format = ext == ".jpg" || ext == ".jpeg" ? ImageFormat.Jpeg
+                        : ext == ".bmp" ? ImageFormat.Bmp : ImageFormat.Png;
+                    imageToSave.Save(fullPath, format);
+                }
+            }
+
+            return new JObject
+            {
+                ["saved"] = true,
+                ["path"] = fullPath,
+                ["width"] = size.Width,
+                ["height"] = size.Height,
+            };
         }
 
         private Control ResolveCaptureTarget(string target)
@@ -6174,6 +6421,22 @@ case "list_ecosim_scenarios":
             continue;
         }
 
+                // Reject silent type coercion for strings
+                if (property.PropertyType == typeof(string) && pair.Value != null)
+                {
+                    var valType = pair.Value.Type;
+                    if (valType == JTokenType.Integer || valType == JTokenType.Float ||
+                        valType == JTokenType.Null || valType == JTokenType.Boolean)
+                    {
+                        results[pair.Key] = new JObject
+                        {
+                            ["status"] = "type_mismatch",
+                            ["reason"] = $"Cannot set string property '{pair.Key}' from {valType.ToString().ToLowerInvariant()} value"
+                        };
+                        continue;
+                    }
+                }
+
                 if (!TryConvertValue(pair.Value, property.PropertyType, out var convertedValue))
                 {
                     results[pair.Key] = "conversion_failed";
@@ -6330,6 +6593,7 @@ case "list_ecosim_scenarios":
                                     {
                                         try { sqlConn?.Close(); } catch { }
                                         EwEMcpFileLog.Warn($"SetGenericValues: diet_comp SQL failed: {sqlex.GetType().Name}");
+                                        throw;
                                     }
                                     finally
                                     {
@@ -7100,8 +7364,16 @@ private static PropertyInfo FindReadableProperty(object entity, string variable,
             var key = (variable ?? string.Empty).Trim().ToLowerInvariant();
             switch (key)
             {
+                case "biomass":
+                    return "BiomassAreaInput";
                 case "biomass_area":
                     return domain == "ecopath_group_outputs" ? "BiomassArea" : "BiomassAreaInput";
+                case "catch":
+                    return "TcatchInput";
+                case "landings":
+                    return "LandingsInput";
+                case "discards":
+                    return "DiscardsInput";
                 case "pb":
                     return "PBInput";
                 case "qb":
@@ -7290,6 +7562,41 @@ private static PropertyInfo FindReadableProperty(object entity, string variable,
             "HttpClient",
             "Process.Start",
         };
+
+        private static readonly string[] _protectedRoots = new[]
+        {
+            Environment.GetFolderPath(Environment.SpecialFolder.Windows),
+            Environment.GetFolderPath(Environment.SpecialFolder.System),
+            Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
+            Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86),
+        };
+
+        private static bool IsProtectedSystemPath(string fullPath)
+        {
+            var normalized = fullPath.Replace('/', '\\').TrimEnd('\\').ToUpperInvariant();
+            foreach (var root in _protectedRoots)
+            {
+                if (!string.IsNullOrEmpty(root))
+                {
+                    var normalizedRoot = root.Replace('/', '\\').TrimEnd('\\').ToUpperInvariant();
+                    if (normalized == normalizedRoot || normalized.StartsWith(normalizedRoot + "\\"))
+                    {
+                        return true;
+                    }
+                }
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// Read an active-scenario-index property, normalizing EwE's cNullValue
+        /// sentinel (-9999) to -1 for the MCP API.
+        /// </summary>
+        private static int SafeScenarioIndex(object core, string propertyName)
+        {
+            int raw = SafeIntProperty(core, propertyName);
+            return raw == -9999 ? -1 : raw;
+        }
 
         private string IsDangerousExpression(string code)
         {

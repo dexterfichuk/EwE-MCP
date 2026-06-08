@@ -598,6 +598,7 @@ namespace EwE_MCP_Plugin
             }
             _pendingDialogEvents.Enqueue(evt);
             _auditLog.Add("dialog_watcher", "captured", evt["data"]?.ToString(Formatting.None) ?? "unknown");
+            _auditLog.AddDialogEvent(evt);
         }
         if (dialogEventDroppedCount > 0)
         {

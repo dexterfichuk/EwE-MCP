@@ -358,13 +358,25 @@ async def list_ui_commands() -> dict[str, Any]:
 
 
 @mcp.tool()
-async def invoke_ui_command(name: str, tag: str | None = None) -> dict[str, Any]:
-    """Invoke a named EwE UI command. Optional tag is passed as cCommand.Tag."""
-    params: dict[str, Any] = {"name": name}
+async def invoke_ui_command(
+    name: str | None = None,
+    command: str | None = None,
+    tag: str | None = None,
+) -> dict[str, Any]:
+    """Invoke a named EwE UI command.
+
+    Args:
+        name: The EwE UI command name (preferred).
+        command: Alias for 'name' (backward compatibility).
+        tag: Optional tag passed as cCommand.Tag.
+    """
+    cmd_name = name or command
+    if not cmd_name:
+        raise ValueError("Either 'name' or 'command' parameter is required")
+    params: dict[str, Any] = {"name": cmd_name}
     if tag is not None:
         params["tag"] = tag
     return await _send("invoke_ui_command", params)
-
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
 async def list_navigation_nodes() -> dict[str, Any]:
@@ -496,13 +508,10 @@ async def list_entities(domain: str) -> dict[str, Any]:
 
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
-async def get_entity(domain: str, index: int | None = None) -> dict[str, Any]:
-    """Get one entity from a supported EwE domain."""
-    params: dict[str, Any] = {"domain": domain}
-    if index is not None:
-        params["index"] = index
+async def get_entity(domain: str, index: int) -> dict[str, Any]:
+    """Get one entity from a supported EwE domain. Domain and index are both required."""
+    params: dict[str, Any] = {"domain": domain, "index": index}
     return await _send("get_entity", params)
-
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
 async def list_variables(domain: str, index: int | None = None) -> dict[str, Any]:
@@ -531,7 +540,16 @@ async def get_values(
     variables: list[str] | None = None,
     navigate: bool = True,
 ) -> dict[str, Any]:
-    """Read values from an EwE entity. Pass navigate=False to avoid changing the visible EwE screen."""
+    """Read values from an EwE entity. Pass navigate=False to avoid changing the visible EwE screen.
+
+    When index is provided, variables is required to avoid returning all fields.
+    Use list_variables(domain, index) to see available field names.
+    """
+    if index is not None and not variables:
+        raise ValueError(
+            "variables is required when index is provided. "
+            "Use list_variables(domain, index) to see available fields."
+        )
     params: dict[str, Any] = {"domain": domain, "navigate": navigate}
     if index is not None:
         params["index"] = index
@@ -610,31 +628,17 @@ async def validate_indexed_value(
 async def search_entities(
     domain: str,
     name_contains: str | None = None,
+    search: str | None = None,
     property_filters: dict[str, str] | None = None,
     max_results: int = 100,
 ) -> dict[str, Any]:
-    """Search entities in an EwE domain by name substring and/or property value filters.
-
-    Avoids iterating all entities client-side. Returns matching entity indices,
-    names, and optionally the filtered property values. Use this instead of
-    list_entities + client-side filtering when you need to find specific rows
-    on a screen (e.g., groups containing "Snook", fleets with a given
-    effort_conversion_factor).
-
-    Args:
-        domain: EwE entity domain (e.g. "ecopath_groups", "ecopath_fleets",
-            "ecosim_group_inputs", "taxa").
-        name_contains: Case-insensitive substring to match against entity Name.
-        property_filters: Dict of {variable_name: value_substring} for
-            case-insensitive substring matching on scalar properties.
-            Only entities where ALL filters match are returned.
-        max_results: Maximum number of matching entities to return (default 100).
-    """
+    """Search entities in an EwE domain by name substring and/or property value filters."""
     if max_results < 1:
         raise ValueError("max_results must be a positive integer")
     params: dict[str, Any] = {"domain": domain, "max_results": max_results}
-    if name_contains is not None:
-        params["name_contains"] = name_contains
+    effective_name = name_contains or search
+    if effective_name is not None:
+        params["name_contains"] = effective_name
     if property_filters is not None:
         params["property_filters"] = property_filters
     result = await _send("search_entities", params)
@@ -869,7 +873,8 @@ async def create_ecopath_fleet(name: str) -> dict[str, Any]:
 
 @mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
 async def import_time_series(
-    data: str,
+    data: str | None = None,
+    path: str | None = None,
     import_type: str = "biomass",
     dataset_name: str = "MCP Import",
     delimiter: str = ",",
@@ -878,56 +883,21 @@ async def import_time_series(
     enable_on_load: bool = True,
     pool_indices: list[int] | None = None,
 ) -> dict[str, Any]:
-    """Import time series data programmatically into EwE, bypassing the file dialog.
-
-    Accepts CSV-formatted time series data as a string. Two formats are
-    auto-detected by inspecting the first row:
-
-    * Simple row‑per‑year layout (detected when the first column header starts
-      with \"year\"): Converts to EwE's native column-oriented CSV. Each
-      remaining column becomes a time series named after the column header.
-      Pool indices default to 1, 2, … sequentially. Type from import_type.
-
-      Example:  Year,Group1,Group2
-                1990,100,200
-                1991,110,210
-
-    * EwE native column‑oriented format (first cell empty or not \"year\"):
-
-      ,Series1,Series2,…     ← first cell optional; col count – 1 = n series
-      weight,1,1,…           ← optional per‑series weights
-      pool,idx1,idx2,…       ← per‑series group/fleet indices (1‑based)
-      type,biomass,catch,…   ← per‑series type names or integer codes
-      y1,val,val,…           ← first year + per‑series values
-
-    Requires an Ecosim scenario to be loaded first.
-
-    Note: Rows with more or fewer columns than the header will raise an error.
-    Previously, short rows were silently zero-padded — this is no longer supported.
-
-    Args:
-        data: CSV-formatted time series data as a string.
-        import_type: Default type for simple format: \"catch\", \"effort\",
-            \"biomass\", or \"forcing\".
-        dataset_name: Name for the new time series dataset.
-        delimiter: Column delimiter character (default: comma).
-        decimal_separator: Decimal separator character (default: period).
-        interval: Time step interval: \"annual\" or \"timestep\".
-        enable_on_load: Whether to enable time series after loading.
-        pool_indices: Optional per-series 1‑based group or fleet index list.
-            Only used with simple format. Defaults to 1, 2, 3, … sequentially.
-            For \"effort\" type, indices reference fleets; all other types
-            reference groups.
-    """
+    """Import time series data into EwE. Accepts CSV string or path on EwE host."""
     import csv
     import io as _io
-
     import_type = import_type.lower()
     if import_type not in _VALID_IMPORT_TYPES:
         raise ValueError(f"import_type must be one of {sorted(_VALID_IMPORT_TYPES)}, got '{import_type}'")
     if delimiter == decimal_separator:
-        raise ValueError(f"delimiter ('{delimiter}') and decimal_separator ('{decimal_separator}') cannot be the same character")
-    if not data.strip():
+        raise ValueError(f"delimiter and decimal_separator cannot be the same")
+    if not data and path:
+        _reject_path_traversal(path)
+        import_result = await _send("read_host_file", {"path": path})
+        data = import_result.get("content", "")
+        if not data:
+            raise ValueError(f"File at {path} is empty or unreadable")
+    if not data or not data.strip():
         raise ValueError("data must not be empty")
 
     # Auto-detect format: if the first cell of the header starts with "year"
@@ -1201,7 +1171,7 @@ async def get_ecospace_habitat(index: int) -> dict[str, Any]:
     except RuntimeError as exc:
         # _send wraps EwEMCPError in RuntimeError with HINT — check if the
         # underlying error was entity_unavailable and add Ecospace-specific context.
-        cause = exc.__cause__
+        cause = exc.__cause__ or exc
         if isinstance(cause, EwEMCPError) and cause.code == "entity_unavailable":
             raise RuntimeError(
                 f"Ecospace habitat at index {index} could not be resolved. "
@@ -1513,7 +1483,12 @@ async def get_mse_parameters() -> dict[str, Any]:
     return await _send("get_mse_parameters")
 
 
-@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+@mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
+async def set_mse_parameters(values: dict[str, Any]) -> dict[str, Any]:
+    """Set MSE model parameters (e.g., ntrials). Use get_mse_parameters() first."""
+    return await _send("set_mse_parameters", {"values": values}, timeout=TIMEOUT_LONG)
+
+
 async def list_mse_group_inputs() -> dict[str, Any]:
     """List MSE group input parameters."""
     return await _send("list_mse_group_inputs")
@@ -1634,15 +1609,17 @@ async def copy_ecosim_scenario(
     name: str,
     description: str = "",
     source_index: int | None = None,
+    index: int | None = None,
 ) -> dict[str, Any]:
     """Copy an Ecosim scenario under a new name and load the copy.
 
-    If source_index is provided, that scenario is loaded before copying.
+    If source_index or index is provided, that scenario is loaded before copying.
     If omitted, the currently active scenario is copied.
     """
+    effective_index = source_index or index
     params: dict[str, Any] = {"name": name, "description": description}
-    if source_index is not None:
-        params["source_index"] = source_index
+    if effective_index is not None:
+        params["source_index"] = effective_index
     return await _send(
         "copy_ecosim_scenario",
         params,

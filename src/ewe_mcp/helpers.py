@@ -90,6 +90,9 @@ BATCH_BLOCKED_COMMANDS = frozenset(
         "shutdown_server",
         "invoke_ui_command",
         "import_time_series",
+        "set_values",
+        "set_indexed_value",
+        "set_values_range",
     }
 )
 

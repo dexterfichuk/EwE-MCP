@@ -259,7 +259,15 @@ namespace EwE_MCP_Plugin
     {
         private readonly object _gate = new object();
         private readonly Queue<JObject> _entries = new Queue<JObject>();
+        private readonly List<JObject> _dialogEvents = new List<JObject>();
+        private int _dialogEventCount;
         private const int MaxEntries = 1000;
+        private const int MaxDialogEvents = 200;
+
+        public int DialogEventCount
+        {
+            get { lock (_gate) { return _dialogEventCount; } }
+        }
 
         public IEnumerable<JObject> Entries
         {
@@ -287,6 +295,32 @@ namespace EwE_MCP_Plugin
                 {
                     _entries.Dequeue();
                 }
+            }
+        }
+
+        public void AddDialogEvent(JObject evt)
+        {
+            lock (_gate)
+            {
+                _dialogEvents.Add(evt);
+                _dialogEventCount++;
+                while (_dialogEvents.Count > MaxDialogEvents)
+                    _dialogEvents.RemoveAt(0);
+            }
+        }
+
+        public List<JObject> DialogEventsSince(int count)
+        {
+            lock (_gate)
+            {
+                if (count >= _dialogEventCount)
+                    return new List<JObject>();
+                var start = Math.Max(0, _dialogEvents.Count - (_dialogEventCount - count));
+                if (start >= _dialogEvents.Count) return new List<JObject>();
+                var result = new List<JObject>();
+                for (var i = start; i < _dialogEvents.Count; i++)
+                    result.Add(_dialogEvents[i]);
+                return result;
             }
         }
     }
