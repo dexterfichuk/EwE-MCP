@@ -57,7 +57,7 @@ def get_herring_results(client):
     """Extract herring J and A biomass from latest run."""
     r = client.command_result("get_ecosim_group_results", {"list": True})
     results = {}
-    for gr in r.get("results", []):
+    for gr in r.get("groups", []):
         if gr["index"] in (GROUP_HERRING_J, GROUP_HERRING_A):
             s = gr["summary"]
             name = "herring_j" if gr["index"] == GROUP_HERRING_J else "herring_a"
