@@ -4,12 +4,13 @@
     "ewe-mcp": {
       "type": "local",
       "command": ["uv", "run", "ewe-mcp"],
+      "timeout": 120000,
       "environment": {
         "EWE_MCP_HOST": "127.0.0.1",
         "EWE_MCP_PORT": "19877",
         "EWE_MCP_TOKEN": "ewe-mcp-local-dev"
       },
-      "enabled": false
+      "enabled": true
     }
   }
 }

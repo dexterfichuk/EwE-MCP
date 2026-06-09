@@ -68,6 +68,9 @@ def test_destructive_tools_have_annotations():
         "discard_changes",
         "save_ecosim_scenario",
         "shutdown_server",
+        "create_ecopath_groups",
+        "create_ecopath_fleets",
+        "set_diet_matrix",
     }
     not_in_batch = destructive_annotated - BATCH_BLOCKED_COMMANDS - batch_proxy
     assert not not_in_batch, (

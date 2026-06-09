@@ -3,6 +3,7 @@
 This repo builds an MCP bridge for a live Ecopath with Ecosim (EwE) desktop process. Treat the EwE process and sample models as shared state: inspect first, mutate carefully, and restore anything you change.
 
 ## Quick Context
+- **macOS user home is `/Users/dexterfichuk` (f-i-c-h-u-k, NOT "fuchik" — `/Users/dexterfuchik` is a hallucination and does not exist)**
 - Main repo: `/Users/dexterfichuk/Projects/EwE-MCP`
 - EwE source/reference tree: `/Users/dexterfichuk/Downloads/Eii.Ecopath-master`
 - Live Windows VM: `dexter@192.168.64.2`

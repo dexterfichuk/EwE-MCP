@@ -11,6 +11,10 @@ DOMAIN_CONFIG: dict[str, dict[str, Any]] = {
     "ecopath_fleet": {"match_fields": ["name"]},
     "ecosim_group_input": {"match_fields": ["name"]},
     "ecosim_fleet_input": {"match_fields": ["name"]},
+    "ecotracer_group_input": {"match_fields": ["name"]},
+    "monte_carlo_group": {"match_fields": ["name"]},
+    "ecospace_group_input": {"match_fields": ["name"]},
+    "ecospace_fleet_input": {"match_fields": ["name"]},
 }
 
 
@@ -30,6 +34,17 @@ STATIC_WRITABLE_FIELDS: dict[str, set[str]] = {
         "rel_q",
         "effort_conversion_factor",
         "sail_cost",
+    },
+    "ecotracer_group_input": {"name"},
+    "monte_carlo_group": {"name"},
+    "ecospace_group_input": {"name"},
+    "ecospace_fleet_input": {
+        "name",
+        "sail_cost",
+        "relative_effort",
+        "effort_capacity",
+        "rel_q",
+        "effort_conversion_factor",
     },
 }
 

@@ -11,6 +11,7 @@ DEFAULT_PORT = 9877
 DEFAULT_TOKEN = "ewe-mcp-local-dev"
 TIMEOUT_DEFAULT = 30
 TIMEOUT_LONG = 120
+TIMEOUT_CREATE_SCENARIO = 180  # scenario creation can be slow (database I/O + UI thread)
 RECV_CHUNK_SIZE = 65_536
 DEFAULT_MAX_RESPONSE_SIZE = 10 * 1024 * 1024
 
@@ -418,6 +419,10 @@ _DOMAIN_ALIASES: dict[str, str] = {
     "ecopath_groups": "ecopath_group",
     "ecopath_fleets": "ecopath_fleet",
     "ecospace_habitats": "ecospace_habitat",
+    "ecotracer_group_inputs": "ecotracer_group_input",
+    "monte_carlo_groups": "monte_carlo_group",
+    "ecospace_group_inputs": "ecospace_group_input",
+    "ecospace_fleet_inputs": "ecospace_fleet_input",
 }
 
 # Non-exhaustive map of common eStatusFlags composite codes.
