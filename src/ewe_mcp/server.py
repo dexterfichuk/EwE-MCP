@@ -30,6 +30,7 @@ from ewe_mcp.data_sources.sealifebase import query_sealifebase as _query_sealife
 from ewe_mcp.data_sources.globi import query_globi as _query_globi
 from ewe_mcp.helpers import (
     STATUS_CODE_MAP,
+    TIMEOUT_CREATE_SCENARIO,
     TIMEOUT_DEFAULT,
     TIMEOUT_LONG,
     _ERROR_CODE_HINTS,
@@ -162,13 +163,68 @@ async def _send(
             if should_filter_sentinels():
                 result = filter_sentinels(result)
             logger.info("OK:  %s", command_type)
-            return result
+        except (TimeoutError, socket.timeout) as exc:
+            # Socket timeout: invalidate connection so next call creates a fresh one.
+            # _send_sync already calls _invalidate_connection() for OSError (parent class),
+            # but TimeoutError may not reach there in all asyncio.to_thread flows,
+            # so we invalidate explicitly here for defense-in-depth.
+            _invalidate_connection()
+            hint = _error_hint_for_exception(exc)
+            logger.warning("TIMEOUT: %s — %s", command_type, exc)
+            if hint:
+                raise RuntimeError(f"{exc}\n\nHINT: {hint}") from exc
+            raise
         except Exception as exc:
             hint = _error_hint_for_exception(exc)
+            try:
+                events = _get_connection().notifications
+                if events:
+                    logger.warning("Dialog events detected after failed %s: %s", command_type, events)
+                    dialog_hint = (
+                        f"\n\nDIALOG BLOCKING: {len(events)} dialog(s) are blocking the EwE GUI. "
+                        f"Events: {events}. "
+                        f"Use get_dialog_events() to inspect, or enable dialog_watcher_enabled."
+                    )
+                    hint = (hint or "") + dialog_hint
+            except Exception:
+                pass
             logger.warning("ERR: %s — %s", command_type, exc)
             if hint:
                 raise RuntimeError(f"{exc}\n\nHINT: {hint}") from exc
             raise
+
+    # Piggyback dialog events on success responses so agents see them immediately.
+    # Deduplicate by (title, text) and cap to most recent 10 unique events to prevent
+    # unbounded accumulation (e.g. persistent dialog loops causing 2GB "response too large" errors).
+    MAX_DIALOG_EVENTS = 10
+    try:
+        events = _get_connection().notifications
+        if events:
+            seen: dict[tuple[str, str], int] = {}
+            deduped: list[dict[str, Any]] = []
+            for event in events:
+                key = (event.get("title", ""), event.get("text", ""))
+                if key not in seen:
+                    seen[key] = 1
+                    entry = dict(event)
+                    entry["count"] = 1
+                    deduped.append(entry)
+                else:
+                    seen[key] += 1
+                    # Update the last entry's count in place
+                    if deduped and deduped[-1].get("title") == event.get("title") and deduped[-1].get("text") == event.get("text"):
+                        deduped[-1]["count"] = seen[key]
+                    else:
+                        # The duplicate is not at the end; find and update
+                        for entry in deduped:
+                            if entry.get("title") == event.get("title") and entry.get("text") == event.get("text"):
+                                entry["count"] = seen[key]
+                                break
+            # Cap to most recent MAX_DIALOG_EVENTS
+            result["_dialog_events"] = deduped[-MAX_DIALOG_EVENTS:]
+    except Exception:
+        pass
+    return result
 
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
@@ -416,6 +472,9 @@ async def load_model(path: str) -> dict[str, Any]:
     (e.g., a database conversion prompt). Try restarting EwE
     with dialog watcher enabled (EWE_MCP_DIALOG_WATCHER=1) or
     convert the model manually before loading.
+
+    After batch-creating groups or fleets (e.g., via create_ecopath_groups or create_ecopath_fleets),
+    save then reload the model to make new entities visible in list queries.
     """
     _reject_path_traversal(path)
     return await _send("load_model", {"path": path}, timeout=TIMEOUT_LONG)
@@ -467,19 +526,79 @@ async def discard_changes() -> dict[str, Any]:
     return await _send("discard_changes")
 
 
+async def _validate_before_save() -> str | None:
+    """Check model groups for sentinel values that would cause a save failure.
+
+    Returns None if validation passes, or an error string describing the issue.
+    """
+    try:
+        groups_result = await _send("list_ecopath_groups")
+    except Exception as exc:
+        # If we cannot list groups, let the save proceed and fail naturally
+        logger.warning("Pre-save validation skipped (cannot list groups): %s", exc)
+        return None
+
+    groups = groups_result.get("groups", [])
+    if not groups:
+        return None  # No groups to validate
+
+    sentinel_fields = {"biomass_area", "pb", "qb", "ee"}
+    problematic: list[str] = []
+
+    for group in groups:
+        group_sentinels: list[str] = []
+        inp = group.get("input", {})
+        for field in sentinel_fields:
+            val = inp.get(field)
+            if val is not None and val == -9999:
+                group_sentinels.append(field)
+        if group_sentinels:
+            problematic.append(
+                f"{group['name']} (idx {group['index']}): {', '.join(group_sentinels)}"
+            )
+
+    if problematic:
+        return (
+            "Cannot save: the following groups have sentinel (-9999) values in critical fields, "
+            "which would corrupt the model database on save:\n"
+            + "\n".join(f"  - {p}" for p in problematic)
+            + "\n\nUse set_values(domain='ecopath_group', index=<idx>, "
+            "values={'biomass': <value>, 'pb': <value>, 'qb': <value>, 'ee': <value>}, "
+            "navigate=False) to set valid values before saving."
+        )
+    return None
+
+
 @mcp.tool()
 async def save_model(path: str | None = None) -> dict[str, Any]:
-    """Save the current model, optionally to a new path."""
+    """Save the current model, optionally to a new path.
+
+    After batch-creating groups or fleets (e.g., via create_ecopath_groups or create_ecopath_fleets),
+    you must save + reload for the new entities to appear in list queries.
+
+    Before saving, validates that no groups have sentinel (-9999) values in
+    critical fields (biomass, P/B, Q/B, EE) which would corrupt the database.
+    """
     if path is not None:
         _reject_path_traversal(path)
     params = {"path": path} if path else {}
+    error = await _validate_before_save()
+    if error:
+        raise ValueError(error)
     return await _send("save_model", params, timeout=TIMEOUT_LONG)
 
 
 @mcp.tool()
 async def save_model_as(path: str) -> dict[str, Any]:
-    """Save the current model to a new path."""
+    """Save the current model to a new path.
+
+    Before saving, validates that no groups have sentinel (-9999) values in
+    critical fields (biomass, P/B, Q/B, EE) which would corrupt the database.
+    """
     _reject_path_traversal(path)
+    error = await _validate_before_save()
+    if error:
+        raise ValueError(error)
     return await _send("save_model_as", {"path": path}, timeout=TIMEOUT_LONG)
 
 
@@ -544,6 +663,8 @@ async def get_values(
 
     When index is provided, variables is required to avoid returning all fields.
     Use list_variables(domain, index) to see available field names.
+
+    For reading multiple entities at once, use get_values_range or batch_commands.
     """
     if index is not None and not variables:
         raise ValueError(
@@ -757,6 +878,16 @@ def _get_writable_fields(domain: str) -> frozenset:
     return static
 
 
+def _csv_float(val: Any) -> str:
+    """Format a float for CSV output with consistent .6f precision.
+
+    Returns empty string for None or sentinel (-9999) values.
+    """
+    if val is None or val == -9999:
+        return ""
+    return f"{float(val):.6f}"
+
+
 def _empty_batch_summary() -> dict[str, int]:
     return {
         "total": 0,
@@ -840,6 +971,8 @@ async def create_ecopath_group(
     counts are not immediately refreshed. The group may not appear in
     list_ecopath_groups until the model is saved and reloaded. Use
     save_model followed by load_model to see the new group.
+
+    For creating multiple groups at once, use create_ecopath_groups.
     """
     if group_type is None:
         raise ValueError("group_type is required (0=consumer, 1=producer, 2=detritus)")
@@ -860,6 +993,87 @@ async def create_ecopath_group(
 
 
 @mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
+async def create_ecopath_groups(groups: list[dict[str, Any]], auto_reload: bool = True) -> dict[str, Any]:
+    """Create multiple Ecopath functional groups in one call.
+
+    Each group dict requires:
+        name (str): Name for the new group.
+        group_type (int): 0=consumer, 1=producer, 2=detritus.
+
+    Optional fields per group:
+        biomass (float): Initial biomass value.
+        pb_ratio (float): Production/biomass ratio.
+        qb_ratio (float): Consumption/biomass ratio.
+        ee (float): Ecotrophic efficiency.
+
+    Creates groups one at a time (each is written directly to the database by
+    the C# plugin), then optionally saves + reloads to refresh in-memory core
+    counts.  Set `auto_reload=False` to skip the final save+load for speed
+    (useful when creating many groups at once — save+load separately after).
+
+    Returns a summary of created/failed groups.
+
+    For creating a single group, use create_ecopath_group instead.
+    """
+    if not groups:
+        raise ValueError("At least one group definition is required")
+
+    created: list[dict[str, Any]] = []
+    errors: list[dict[str, Any]] = []
+    model_path: str | None = None
+
+    for i, g in enumerate(groups):
+        try:
+            if not isinstance(g, dict):
+                raise ValueError(f"Group definition must be a dict, got {type(g).__name__}")
+            name = g.get("name", "")
+            if not name:
+                raise ValueError("Group definition missing required 'name' field")
+            group_type = g.get("group_type")
+            if group_type not in (0, 1, 2):
+                raise ValueError(
+                    f"group_type must be 0 (consumer), 1 (producer), or 2 (detritus), "
+                    f"got {group_type!r}"
+                )
+            params: dict[str, Any] = {"name": name, "group_type": group_type}
+            for opt in ("biomass", "pb_ratio", "qb_ratio", "ee"):
+                val = g.get(opt)
+                if val is not None:
+                    params[opt] = val
+            result = await _send("create_ecopath_group", params)
+            created.append({"name": name, "index": result.get("group_index")})
+        except Exception as exc:
+            errors.append({
+                "index": i,
+                "name": g.get("name", f"<group {i}>"),
+                "error": str(exc),
+            })
+            continue
+
+    # Save + reload at the end if auto_reload is enabled (default).
+    # Skip for speed when creating many groups — caller saves+reloads separately.
+    if auto_reload and created:
+        try:
+            info = await _send("get_model_info")
+            model_path = info.get("path") or info.get("file_name")
+            if model_path:
+                await _send("save_model", timeout=TIMEOUT_LONG)
+                await _send("load_model", {"path": model_path}, timeout=TIMEOUT_LONG)
+        except Exception as exc:
+            logger.warning("Final save/reload after group creation failed: %s — "
+                          "groups are in the database, reload model to see them", exc)
+
+    return {
+        "status": "success" if len(errors) == 0 else "partial_success" if created else "failed",
+        "total": len(groups),
+        "created": len(created),
+        "failed": len(errors),
+        "created_groups": created,
+        "errors": errors if errors else None,
+    }
+
+
+@mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
 async def create_ecopath_fleet(name: str) -> dict[str, Any]:
     """Create a new Ecopath fishing fleet.
 
@@ -867,8 +1081,65 @@ async def create_ecopath_fleet(name: str) -> dict[str, Any]:
     counts are not immediately refreshed. The fleet may not appear in
     list_ecopath_fleets until the model is saved and reloaded. Use
     save_model followed by load_model to see the new fleet.
+
+    For creating multiple fleets at once, use create_ecopath_fleets.
     """
     return await _send("create_ecopath_fleet", {"name": name})
+
+
+@mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
+async def create_ecopath_fleets(names: list[str], auto_reload: bool = True) -> dict[str, Any]:
+    """Create multiple Ecopath fishing fleets in one call.
+
+    Creates fleets one at a time (each is written directly to the database by
+    the C# plugin), then optionally saves + reloads to refresh in-memory core
+    counts.  Set `auto_reload=False` to skip the final save+load for speed.
+    Returns a summary of created/failed fleets.
+
+    For creating a single fleet, use create_ecopath_fleet instead.
+    """
+    if not names:
+        raise ValueError("At least one fleet name is required")
+
+    created: list[dict[str, Any]] = []
+    errors: list[dict[str, Any]] = []
+    model_path: str | None = None
+
+    for i, name in enumerate(names):
+        try:
+            if not name or not name.strip():
+                raise ValueError("Fleet name must be a non-empty string")
+            result = await _send("create_ecopath_fleet", {"name": name.strip()})
+            created.append({"name": name.strip(), "index": result.get("fleet_index")})
+        except Exception as exc:
+            errors.append({
+                "index": i,
+                "name": name,
+                "error": str(exc),
+            })
+            continue
+
+    # Save + reload at the end if auto_reload is enabled (default).
+    # Skip for speed — caller saves+reloads separately with auto_reload=False.
+    if auto_reload and created:
+        try:
+            info = await _send("get_model_info")
+            model_path = info.get("path") or info.get("file_name")
+            if model_path:
+                await _send("save_model", timeout=TIMEOUT_LONG)
+                await _send("load_model", {"path": model_path}, timeout=TIMEOUT_LONG)
+        except Exception as exc:
+            logger.warning("Final save/reload after fleet creation failed: %s — "
+                          "fleets are in the database, reload model to see them", exc)
+
+    return {
+        "status": "success" if not errors else "partial_failure",
+        "total": len(names),
+        "created": len(created),
+        "failed": len(errors),
+        "created_fleets": created,
+        "errors": errors or None,
+    }
 
 
 @mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
@@ -1591,7 +1862,25 @@ async def create_ecosim_scenario(
     author: str = "",
     contact: str = "",
 ) -> dict[str, Any]:
-    """Create and load a new Ecosim scenario."""
+    """Create and load a new Ecosim scenario.
+
+    Sends a ping first to flush any pending dialog events before the
+    potentially slow scenario-creation call.  The creation timeout is
+    180s (TIMEOUT_CREATE_SCENARIO) because the operation runs on the
+    EwE UI thread and may involve database I/O or dialog prompts.
+
+    If the command times out, the scenario may still have been created
+    on the EwE side.  Call ``list_ecosim_scenarios`` to check.
+    """
+    # Flush pending dialog events before the potentially slow create call
+    try:
+        await _send("ping")
+        # Read and discard any pending notifications so a blocking dialog
+        # (if present) is delivered to the plugin before the create call.
+        _get_connection().notifications
+    except (ConnectionError, OSError, TimeoutError, RuntimeError):
+        logger.debug("create_ecosim_scenario: pre-ping not required")
+
     return await _send(
         "create_ecosim_scenario",
         {
@@ -1600,7 +1889,7 @@ async def create_ecosim_scenario(
             "author": author,
             "contact": contact,
         },
-        timeout=TIMEOUT_LONG,
+        timeout=TIMEOUT_CREATE_SCENARIO,
     )
 
 
@@ -1768,6 +2057,3111 @@ async def set_vul_mult_by_name(
     return result
 
 
+@mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
+async def set_diet_matrix(diets: dict[str, dict[str, float]]) -> dict[str, Any]:
+    """Set diet compositions for multiple predator groups in one call.
+
+    Accepts a structured dict mapping predator group names to their prey
+    fractions. Each predator's diet fractions should sum to approximately 1.0.
+
+    Example:
+        {
+            "Snook": {"Mullet": 0.4, "Shrimp": 0.3, "Crabs": 0.3},
+            "Red Drum": {"Mullet": 0.5, "Crabs": 0.5},
+        }
+
+    Resolves all names to indices from a single list_ecopath_groups call,
+    builds flat diet_comp arrays, and sends all set_values via a single
+    batch command with navigate=False — just 2 round-trips total regardless
+    of how many predators or prey are specified.
+
+    For setting a single diet entry, use set_indexed_value with
+    variable="diet_comp" instead.
+    """
+    if not diets:
+        raise ValueError("At least one predator diet definition is required")
+
+    # Step 1: Get group list (builds name → index mapping in one call)
+    try:
+        groups_result = await _send("list_ecopath_groups")
+        groups = groups_result.get("groups", [])
+        n_groups = len(groups)
+    except Exception as exc:
+        return {"status": "failed", "error": f"Cannot determine group count: {exc}"}
+
+    if n_groups == 0:
+        return {"status": "failed", "error": "No groups found in the current model"}
+
+    # Build local name → index lookup from the group list (casefold for case-insensitive matching)
+    name_to_index: dict[str, int] = {}
+    for g in groups:
+        gname = g.get("name", "")
+        gidx = g.get("index")
+        if gname and gidx is not None:
+            name_to_index[gname.casefold()] = int(gidx)
+
+    # Step 2: Resolve names locally and build batch set_values commands
+    resolution_errors: list[dict[str, Any]] = []
+    diet_errors: list[dict[str, Any]] = []
+    batch_cmds: list[dict[str, Any]] = []
+
+    for pred_name, prey_fractions in diets.items():
+        pred_idx = name_to_index.get(pred_name.casefold())
+        if pred_idx is None:
+            resolution_errors.append({"predator": pred_name, "error": "Name not found in model"})
+            continue
+
+        diet_array = [0.0] * n_groups
+        has_valid = False
+        for prey_name, fraction in prey_fractions.items():
+            prey_idx = name_to_index.get(prey_name.casefold())
+            if prey_idx is not None:
+                if 1 <= prey_idx <= n_groups:
+                    diet_array[prey_idx - 1] = fraction
+                    has_valid = True
+                else:
+                    diet_errors.append({
+                        "predator": pred_name,
+                        "prey": prey_name,
+                        "error": f"Prey index {prey_idx} out of range (1..{n_groups})",
+                    })
+            else:
+                diet_errors.append({
+                    "predator": pred_name,
+                    "prey": prey_name,
+                    "error": "Name not found in model",
+                })
+
+        if not has_valid:
+            diet_errors.append({
+                "predator": pred_name,
+                "prey": list(prey_fractions.keys()),
+                "error": "No prey names could be resolved for this predator",
+            })
+            continue
+
+        batch_cmds.append({
+            "type": "set_values",
+            "params": {
+                "domain": "ecopath_group",
+                "index": pred_idx,
+                "values": {"diet_comp": diet_array},
+                "navigate": False,
+            },
+        })
+
+    if not batch_cmds:
+        return {
+            "status": "failed",
+            "error": "No valid diet entries could be constructed",
+            "resolution_errors": resolution_errors,
+            "diet_errors": diet_errors,
+        }
+
+    # Step 3: Send ONE batch command with ALL set_values calls
+    send_errors: list[dict[str, Any]] = []
+    batch_failed_indices: set[int] = set()
+    n_applied = 0
+
+    try:
+        batch_result = await _send("batch", {"commands": batch_cmds}, timeout=TIMEOUT_LONG)
+        results_list = batch_result.get("results", []) if isinstance(batch_result, dict) else []
+        for i, sub in enumerate(results_list):
+            if isinstance(sub, dict) and sub.get("status") == "error":
+                pred_idx = (batch_cmds[i]["params"]["index"]
+                            if i < len(batch_cmds) else None)
+                send_errors.append({
+                    "predator_index": pred_idx,
+                    "error": sub.get("message", str(sub)),
+                })
+                if pred_idx is not None:
+                    batch_failed_indices.add(pred_idx)
+            else:
+                n_applied += 1
+    except Exception as exc:
+        send_errors.append({"predator_index": None, "error": str(exc)})
+
+    # Step 4: Verify diet_comp was actually set (silent batch failures can leave
+    # the last predator with all-zero diet).  Read back diet_comp for all predators
+    # in the batch that had non-zero expected entries, and retry any that show
+    # all-zero when they shouldn't.
+    round_trips = 2  # list_ecopath_groups + batch set_values
+    retried_predators: list[dict[str, Any]] = []
+    verified_ok: list[dict[str, Any]] = []
+
+    # Gather predator indices and their expected diet arrays for verification
+    verify_targets: list[tuple[int, list[float]]] = []
+    for cmd in batch_cmds:
+        pidx = cmd["params"]["index"]
+        expected = cmd["params"]["values"]["diet_comp"]
+        # Only verify predators that had non-zero expected entries
+        if any(abs(v) > 1e-9 for v in expected):
+            verify_targets.append((pidx, expected))
+
+    if verify_targets:
+        verify_cmds: list[dict[str, Any]] = [
+            {
+                "type": "get_values",
+                "params": {
+                    "domain": "ecopath_group",
+                    "index": pidx,
+                    "variables": ["diet_comp"],
+                    "navigate": False,
+                },
+            }
+            for pidx, _ in verify_targets
+        ]
+        try:
+            verify_result = await _send("batch", {"commands": verify_cmds}, timeout=TIMEOUT_LONG)
+            round_trips += 1  # verification batch
+            verify_results = verify_result.get("results", []) if isinstance(verify_result, dict) else []
+            for i, sub in enumerate(verify_results):
+                if i >= len(verify_targets):
+                    break
+                pidx, expected_diet = verify_targets[i]
+                needs_retry = pidx in batch_failed_indices  # batch already failed
+
+                if not needs_retry and isinstance(sub, dict) and sub.get("status") == "success":
+                    actual_diet = sub.get("values", {}).get("diet_comp")
+                    if actual_diet is not None:
+                        # Check if actual diet is all-zero (or near-zero)
+                        actual_non_zero = any(abs(v) > 1e-9 for v in actual_diet)
+                        if not actual_non_zero:
+                            needs_retry = True
+                            logger.warning(
+                                "set_diet_matrix: predator index %d has all-zero diet after "
+                                "batch (expected non-zero), retrying individually",
+                                pidx,
+                            )
+
+                if needs_retry:
+                    try:
+                        retry_result = await _send(
+                            "set_values",
+                            {
+                                "domain": "ecopath_group",
+                                "index": pidx,
+                                "values": {"diet_comp": expected_diet},
+                                "navigate": False,
+                            },
+                            timeout=TIMEOUT_LONG,
+                        )
+                        round_trips += 1  # retry set_values
+                        retried_predators.append({
+                            "predator_index": pidx,
+                            "result": retry_result.get("result", str(retry_result)),
+                        })
+                        # Count as applied if it wasn't already counted
+                        if pidx in batch_failed_indices:
+                            n_applied += 1
+                    except Exception as retry_exc:
+                        round_trips += 1  # failed retry attempt
+                        retried_predators.append({
+                            "predator_index": pidx,
+                            "error": str(retry_exc),
+                        })
+                else:
+                    verified_ok.append({
+                        "predator_index": pidx,
+                        "verified": True,
+                    })
+        except Exception as exc:
+            logger.warning("set_diet_matrix: verification batch failed: %s", exc)
+
+    diet_verification: dict[str, Any] = {
+        "verified_count": len(verified_ok),
+        "retried_count": len(retried_predators),
+    }
+    if verified_ok:
+        diet_verification["verified"] = verified_ok
+    if retried_predators:
+        diet_verification["retried"] = retried_predators
+
+    status = "success"
+    n_expected = len(diets) - len(resolution_errors)
+    if diet_errors or resolution_errors:
+        status = "partial_success" if n_applied else "failed"
+    elif send_errors or retried_predators:
+        # send_errors and retried_predators may have been resolved by retry;
+        # consider it success if all expected predators were eventually applied
+        if n_applied >= n_expected:
+            status = "success"
+        else:
+            status = "partial_success" if n_applied else "failed"
+
+    return {
+        "status": status,
+        "total_predators": len(diets),
+        "n_applied": n_applied,
+        "n_groups": n_groups,
+        "batch_size": len(batch_cmds),
+        "round_trips": round_trips,
+        "resolution_errors": resolution_errors or None,
+        "diet_errors": diet_errors or None,
+        "send_errors": send_errors or None,
+        "diet_verification": diet_verification,
+    }
+
+
+# ── Diet CSV import/export ────────────────────────────────────────
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+async def export_diet_csv(path: str | None = None) -> dict[str, Any]:
+    """Export the current diet composition matrix as a CSV.
+
+    Builds a CSV of predator × prey diet fractions from the loaded model
+    and returns the CSV content. If a path is provided, also attempts to
+    write the CSV to a file on the EwE host machine.
+
+    The CSV format uses group names as column headers:
+
+        Predator,Group1,Group2,...,GroupN
+        PredatorName,0.10,0.00,0.25,...,0.00
+
+    Args:
+        path: Optional path on the EwE host to write the CSV file.
+              The CSV content is always returned regardless.
+
+    Returns:
+        Dict with status, n_groups, csv (content), and path info.
+    """
+    import csv
+    import io as _io
+
+    # Step 1: Get all groups (name + index)
+    groups_result = await _send("list_ecopath_groups")
+    groups = groups_result.get("groups", [])
+    if not groups:
+        raise ValueError("No groups found in the current model")
+
+    group_names: list[str] = []
+    group_indices: list[int] = []
+    for g in groups:
+        gname = g.get("name", "")
+        gidx = g.get("index")
+        if gname and gidx is not None:
+            group_names.append(gname)
+            group_indices.append(int(gidx))
+
+    n_groups = len(group_names)
+    if n_groups == 0:
+        raise ValueError("No valid groups found in the current model")
+
+    # Step 2: Batch get diet_comp for ALL groups (navigate=False avoids UI flicker)
+    batch_cmds: list[dict[str, Any]] = []
+    for idx in group_indices:
+        batch_cmds.append({
+            "type": "get_values",
+            "params": {
+                "domain": "ecopath_group",
+                "index": idx,
+                "variables": ["diet_comp"],
+                "navigate": False,
+            },
+        })
+
+    batch_result = await _send("batch", {"commands": batch_cmds}, timeout=TIMEOUT_LONG)
+    results_list = batch_result.get("results", [])
+
+    # Step 3: Build diet_matrix: group_index → diet_comp array
+    diet_matrix: dict[int, list[float]] = {}
+    for i, sub in enumerate(results_list):
+        if isinstance(sub, dict) and sub.get("status") != "error":
+            sub_idx = sub.get("index")
+            if sub_idx is None and i < len(group_indices):
+                sub_idx = group_indices[i]
+            if sub_idx is not None:
+                values = sub.get("values", {}) if isinstance(sub, dict) else {}
+                diet_comp = values.get("diet_comp", [])
+                if isinstance(diet_comp, list):
+                    diet_matrix[int(sub_idx)] = [
+                        float(v) if v is not None else 0.0 for v in diet_comp
+                    ]
+
+    # Step 4: Build CSV
+    output = _io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["Predator"] + group_names)
+
+    for idx in group_indices:
+        row_name = group_names[idx - 1]  # groups are 1-based
+        diet = diet_matrix.get(idx, [])
+        row_values: list[str] = [row_name]
+        for prey_idx in range(n_groups):
+            val = 0.0
+            if prey_idx < len(diet):
+                val = diet[prey_idx] if diet[prey_idx] is not None else 0.0
+            row_values.append(_csv_float(val))
+        writer.writerow(row_values)
+
+    csv_content = output.getvalue()
+
+    # Step 5: Optionally write to VM host file (write_host_file is not
+    # available in all plugin versions; CSV content is always returned)
+    written_to_host = False
+    if path:
+        _reject_path_traversal(path)
+        if not path.lower().endswith('.csv'):
+            raise ValueError("Path must have a .csv extension")
+        try:
+            await _send("write_host_file", {"path": path, "content": csv_content})
+            written_to_host = True
+        except (RuntimeError, ConnectionError, OSError, Exception):
+            logger.warning(
+                "export_diet_csv: write_host_file not available on this plugin version. "
+                "CSV content is returned in the 'csv' field."
+            )
+
+    return {
+        "status": "success",
+        "n_groups": n_groups,
+        "n_predators": len(group_indices),
+        "csv": csv_content,
+        "written_to_host": written_to_host,
+        "path": path,
+    }
+
+
+@mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
+async def import_diet_csv(
+    data: str | None = None,
+    path: str | None = None,
+) -> dict[str, Any]:
+    """Import diet composition from CSV.
+
+    Accepts either a CSV string or a path to a CSV file on the EwE host.
+    The CSV must have a header row starting with 'Predator' followed by
+    prey group names, and one data row per predator with fraction values.
+
+    Format:
+
+        Predator,Group1,Group2,...,GroupN
+        PredatorName,0.10,0.00,0.25,...,0.00
+
+    Args:
+        data: CSV string content to import.
+        path: Path to a CSV file on the EwE host machine to read and import.
+
+    Returns:
+        Dict with import status, count of imported predators, and
+        per-predator results from set_diet_matrix.
+    """
+    import csv
+    import io as _io
+
+    # Read from path if data not provided directly
+    if not data and path:
+        _reject_path_traversal(path)
+        if not path.lower().endswith('.csv'):
+            raise ValueError("Path must have a .csv extension")
+        read_result = await _send("read_host_file", {"path": path})
+        data = read_result.get("content", "")
+        if not data:
+            raise ValueError(f"File at {path} is empty or unreadable")
+
+    if not data or not data.strip():
+        raise ValueError(
+            "Either 'data' or 'path' must be provided with non-empty content"
+        )
+
+    # Parse CSV
+    reader = csv.reader(_io.StringIO(data))
+    rows = list(reader)
+    if len(rows) < 2:
+        raise ValueError("CSV must have at least a header row and one data row")
+
+    header = rows[0]
+    if not header or header[0].strip().lower() != "predator":
+        raise ValueError(
+            "CSV header must start with 'Predator' as the first column. "
+            f"Got: {header[0] if header else '(empty)'}"
+        )
+
+    # Prey group names from CSV header (columns after 'Predator')
+    csv_prey_names = [h.strip() for h in header[1:]]
+
+    # Verify model connectivity and group list exists
+    try:
+        groups_result = await _send("list_ecopath_groups")
+        model_groups = groups_result.get("groups", [])
+    except Exception as exc:
+        return {"status": "failed", "error": f"Cannot list model groups: {exc}"}
+
+    if not model_groups:
+        return {"status": "failed", "error": "No groups found in the current model"}
+
+    # Build diets dict for set_diet_matrix
+    diets: dict[str, dict[str, float]] = {}
+    skipped_predators: list[dict[str, Any]] = []
+    row_count = 0
+
+    for row in rows[1:]:
+        if not any(cell.strip() for cell in row):
+            continue
+        row_count += 1
+        pred_name = row[0].strip()
+        if not pred_name:
+            skipped_predators.append({
+                "row": row_count,
+                "reason": "Empty predator name",
+            })
+            continue
+
+        fractions: dict[str, float] = {}
+        has_nonzero = False
+        for i, cell in enumerate(row[1:]):
+            if i >= len(csv_prey_names):
+                break
+            prey_name = csv_prey_names[i]
+            try:
+                val = float(cell.strip())
+            except (ValueError, TypeError):
+                skipped_predators.append({
+                    "predator": pred_name,
+                    "prey": prey_name,
+                    "row": row_count,
+                    "reason": f"Invalid numeric value: {cell!r}",
+                })
+                continue
+            if val != 0.0:
+                fractions[prey_name] = val
+                has_nonzero = True
+
+        if not has_nonzero:
+            skipped_predators.append({
+                "predator": pred_name,
+                "row": row_count,
+                "reason": "All diet fractions are zero; skipping",
+            })
+            continue
+
+        diets[pred_name] = fractions
+
+    if not diets:
+        return {
+            "status": "failed",
+            "error": "No valid predator diet rows found in CSV",
+            "total_csv_rows": row_count,
+            "skipped_predators": skipped_predators or None,
+        }
+
+    # Delegate to set_diet_matrix (name-resolution + batch mutation)
+    result = await set_diet_matrix(diets=diets)
+
+    # Add import-specific metadata
+    result["import_type"] = "csv"
+    result["total_csv_rows"] = row_count
+    result["parsed_predators"] = len(diets)
+    result["skipped_predators"] = skipped_predators or None
+    result["csv_prey_count"] = len(csv_prey_names)
+
+    return result
+
+
+# ── Ecopath Groups CSV import/export ──────────────────────────────
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+async def export_ecopath_groups_csv(path: str | None = None) -> dict[str, Any]:
+    """Export Ecopath group parameters to CSV.
+
+    Returns a CSV string with columns: Group,Biomass,PB,QB,EE,GroupType.
+    Sentinel (-9999) and None values are replaced with empty strings.
+    If a path is provided on the EwE host, attempts to write the CSV there.
+    The CSV is always returned in the response as well.
+
+    Args:
+        path: Optional path on the EwE host to write the CSV file.
+
+    Returns:
+        Dict with status, group_count, csv (content), and path info.
+    """
+    import csv
+    import io as _io
+
+    # Step 1: Get all groups
+    groups_result = await _send("list_ecopath_groups")
+    groups = groups_result.get("groups", [])
+    if not groups:
+        raise ValueError("No groups found in the current model")
+
+    # Step 2: Build CSV
+    output = _io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["Group", "Biomass", "PB", "QB", "EE", "GroupType"])
+
+    for group in groups:
+        name = group.get("name", "")
+        gtype = group.get("type", "")
+        inp = group.get("input", {})
+
+        def _val(field: str) -> str:
+            v = inp.get(field)
+            if v is None or v == -9999:
+                return ""
+            return str(v)
+
+        # NOTE: Export reads display-field names (biomass_area, pb, qb, ee) from
+        # list_ecopath_groups, while import_ecopath_groups_csv writes input-field
+        # names (biomass_area_input, pbinput, qbinput, eeinput) via set_values_by_name_batch.
+        # These are different database columns but their values are equivalent for
+        # a balanced model — this is NOT a data corruption issue in practice.
+        writer.writerow([
+            name,
+            _val("biomass_area"),
+            _val("pb"),
+            _val("qb"),
+            _val("ee"),
+            gtype,
+        ])
+
+    csv_content = output.getvalue()
+
+    # Step 3: Optionally write to VM host file
+    written_to_host = False
+    if path:
+        _reject_path_traversal(path)
+        if not path.lower().endswith('.csv'):
+            raise ValueError("Path must have a .csv extension")
+        try:
+            await _send("write_host_file", {"path": path, "content": csv_content})
+            written_to_host = True
+        except (RuntimeError, ConnectionError, OSError, Exception):
+            logger.warning(
+                "export_ecopath_groups_csv: write_host_file not available on this plugin version. "
+                "CSV content is returned in the 'csv' field."
+            )
+
+    return {
+        "status": "success",
+        "group_count": len(groups),
+        "csv": csv_content,
+        "written_to_host": written_to_host,
+        "path": path,
+    }
+
+
+@mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
+async def import_ecopath_groups_csv(
+    data: str | None = None,
+    path: str | None = None,
+) -> dict[str, Any]:
+    """Import Ecopath group parameters from CSV.
+
+    CSV format: Group,Biomass,PB,QB,EE
+    The GroupType column is informational and ignored on import.
+    Accepts either a CSV string (data) or a path on the EwE host (path).
+    Uses set_values_by_name_batch for efficient bulk update.
+
+    Column mapping:
+        Group    → entity name (used for resolution)
+        Biomass  → ba
+        PB       → pb
+        QB       → qb
+        EE       → ee
+        GroupType → informational, skipped
+
+    Args:
+        data: CSV string content to import.
+        path: Path to a CSV file on the EwE host machine to read and import.
+
+    Returns:
+        Dict with import status, total/applied/skipped counts, and results.
+    """
+    import csv
+    import io as _io
+
+    # Read from path if data not provided directly
+    if not data and path:
+        _reject_path_traversal(path)
+        if not path.lower().endswith('.csv'):
+            raise ValueError("Path must have a .csv extension")
+        read_result = await _send("read_host_file", {"path": path})
+        data = read_result.get("content", "")
+        if not data:
+            raise ValueError(f"File at {path} is empty or unreadable")
+
+    if not data or not data.strip():
+        raise ValueError(
+            "Must provide CSV data via 'data' parameter or 'path' to a file on the EwE host"
+        )
+
+    # Parse CSV
+    reader = csv.reader(_io.StringIO(data))
+    rows = list(reader)
+    if len(rows) < 2:
+        raise ValueError("CSV must have at least a header row and one data row")
+
+    header = rows[0]
+    if not header or header[0].strip().lower() != "group":
+        raise ValueError(
+            "CSV header first column must be 'Group'. "
+            f"Got: {header[0] if header else '(empty)'}"
+        )
+
+    # Map CSV columns to ecopath_group writable field names
+    # Known columns: Group (ignored, used as name), Biomass→biomass_area_input, PB→pbinput, QB→qbinput, EE→eeinput, GroupType→skipped
+    col_map: dict[str, str | None] = {
+        "group": None,        # used as entity name, not a field
+        "biomass": "biomass_area_input",
+        "pb": "pbinput",
+        "qb": "qbinput",
+        "ee": "eeinput",
+        "grouptype": None,    # informational, skipped
+    }
+
+    col_headers = [h.strip() for h in header]
+
+    # Build list of (csv_col_index, ewe_field) for columns we recognise
+    field_cols: list[tuple[int, str]] = []
+    for i, hdr in enumerate(col_headers[1:], start=1):
+        hdr_lower = hdr.lower()
+        mapped = col_map.get(hdr_lower)
+        if mapped:
+            field_cols.append((i, mapped))
+        # None means recognised but skipped; absent means unrecognised (also skipped)
+
+    # Build operations for set_values_by_name_batch
+    operations: list[dict[str, Any]] = []
+    row_count = 0
+
+    for row in rows[1:]:
+        row_count += 1
+        group_name = row[0].strip() if row else ""
+        if not group_name:
+            continue
+
+        # Check if all value columns are empty — skip such rows
+        values: dict[str, float] = {}
+        all_empty = True
+        for col_idx, ewe_field in field_cols:
+            cell = row[col_idx].strip() if col_idx < len(row) else ""
+            if cell == "":
+                continue
+            all_empty = False
+            try:
+                values[ewe_field] = float(cell)
+            except (ValueError, TypeError):
+                # Skip invalid numeric values gracefully
+                continue
+
+        if all_empty:
+            continue
+
+        operations.append({
+            "domain": "ecopath_group",
+            "name": group_name,
+            "values": values,
+        })
+
+    if not operations:
+        return {
+            "status": "failed",
+            "error": "No valid group data rows found in CSV",
+            "total_csv_rows": row_count,
+        }
+
+    # Delegate to set_values_by_name_batch
+    result = await set_values_by_name_batch(
+        operations,
+        options={"include_suggestions": True},
+    )
+
+    # Add import-specific metadata
+    result["import_type"] = "csv"
+    result["total_csv_rows"] = row_count
+
+    return result
+
+
+# ── Ecosim Vulnerability Multiplier CSV ───────────────────────────
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+async def export_ecosim_vul_csv(path: str | None = None) -> dict[str, Any]:
+    """Export the current Ecosim vulnerability multiplier matrix as a CSV.
+
+    Builds a CSV of prey × predator vulnerability multipliers from the active
+    Ecosim scenario and returns the CSV content. If a path is provided on the
+    EwE host, also attempts to write the file there.
+
+    The CSV uses group names as column headers:
+
+        Prey,Predator1,Predator2,...,PredatorN
+        PreyName,1.0,2.5,1.0,...,1.0
+
+    Args:
+        path: Optional path on the EwE host to write the CSV file.
+              The CSV content is always returned regardless.
+
+    Returns:
+        Dict with status, n_groups, csv (content), and path info.
+    """
+    import csv
+    import io as _io
+
+    # Step 1: Get all groups (name + index)
+    groups_result = await _send("list_ecopath_groups")
+    groups = groups_result.get("groups", [])
+    if not groups:
+        raise ValueError("No groups found in the current model")
+
+    group_names: list[str] = []
+    group_indices: list[int] = []
+    for g in groups:
+        gname = g.get("name", "")
+        gidx = g.get("index")
+        if gname and gidx is not None:
+            group_names.append(gname)
+            group_indices.append(int(gidx))
+
+    n_groups = len(group_names)
+    if n_groups == 0:
+        raise ValueError("No valid groups found in the current model")
+
+    # Step 2: vul_mult is an indexed property (C# indexer), not a regular array.
+    # Read it via get_indexed_value for each (prey, predator) pair.
+    # Build ONE batch with all N×M sub-commands (instead of N separate batches).
+    all_batch_cmds: list[dict[str, Any]] = []
+    for prey_idx in group_indices:
+        for pred_idx in group_indices:
+            all_batch_cmds.append({
+                "type": "get_indexed_value",
+                "params": {
+                    "domain": "ecosim_group_input",
+                    "variable": "vul_mult",
+                    "index": prey_idx,
+                    "indices": [pred_idx],
+                    "navigate": False,
+                },
+            })
+
+    batch_result = await _send("batch", {"commands": all_batch_cmds}, timeout=TIMEOUT_LONG)
+    all_results = batch_result.get("results", []) if isinstance(batch_result, dict) else []
+
+    # Reshape flat results list back into per-prey vul_matrix
+    vul_matrix: dict[int, list[float]] = {}
+    for pi, prey_idx in enumerate(group_indices):
+        start = pi * n_groups
+        end = start + n_groups
+        pred_results = all_results[start:end] if end <= len(all_results) else []
+        vul_array: list[float] = []
+        for sub in pred_results:
+            if isinstance(sub, dict) and sub.get("status") != "error":
+                val = sub.get("value")
+                if val is not None:
+                    vul_array.append(float(val))
+                else:
+                    vul_array.append(1.0)
+            else:
+                vul_array.append(1.0)
+        vul_matrix[prey_idx] = vul_array
+
+    # Step 3: Build CSV
+    output = _io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["Prey"] + group_names)
+
+    for idx in group_indices:
+        row_name = group_names[idx - 1]  # groups are 1-based
+        vul = vul_matrix.get(idx, [])
+        row_values: list[str] = [row_name]
+        for pred_idx in range(n_groups):
+            val = 1.0
+            if pred_idx < len(vul):
+                val = vul[pred_idx] if vul[pred_idx] is not None else 1.0
+            row_values.append(_csv_float(val))
+        writer.writerow(row_values)
+
+    csv_content = output.getvalue()
+
+    # Step 5: Optionally write to VM host file
+    written_to_host = False
+    if path:
+        _reject_path_traversal(path)
+        if not path.lower().endswith('.csv'):
+            raise ValueError("Path must have a .csv extension")
+        try:
+            await _send("write_host_file", {"path": path, "content": csv_content})
+            written_to_host = True
+        except (RuntimeError, ConnectionError, OSError, Exception):
+            logger.warning(
+                "export_ecosim_vul_csv: write_host_file not available on this plugin version. "
+                "CSV content is returned in the 'csv' field."
+            )
+
+    return {
+        "status": "success",
+        "n_groups": n_groups,
+        "n_prey": len(group_indices),
+        "csv": csv_content,
+        "written_to_host": written_to_host,
+        "path": path,
+    }
+
+
+@mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
+async def import_ecosim_vul_csv(
+    data: str | None = None,
+    path: str | None = None,
+) -> dict[str, Any]:
+    """Import Ecosim vulnerability multipliers from CSV.
+
+    Accepts either a CSV string or a path to a CSV file on the EwE host.
+    The CSV must have a header row starting with 'Prey' followed by
+    predator group names, and one data row per prey group with multiplier
+    values. Values of 1.0 are skipped (they represent the default).
+
+    Format:
+
+        Prey,Predator1,Predator2,...,PredatorN
+        PreyName,1.0,2.5,1.0,...,1.0
+
+    Args:
+        data: CSV string content to import.
+        path: Path to a CSV file on the EwE host machine to read and import.
+
+    Returns:
+        Dict with import status, counts, and per-entry results.
+    """
+    import csv
+    import io as _io
+
+    # Read from path if data not provided directly
+    if not data and path:
+        _reject_path_traversal(path)
+        if not path.lower().endswith('.csv'):
+            raise ValueError("Path must have a .csv extension")
+        read_result = await _send("read_host_file", {"path": path})
+        data = read_result.get("content", "")
+        if not data:
+            raise ValueError(f"File at {path} is empty or unreadable")
+
+    if not data or not data.strip():
+        raise ValueError(
+            "Either 'data' or 'path' must be provided with non-empty content"
+        )
+
+    # Parse CSV
+    reader = csv.reader(_io.StringIO(data))
+    rows = list(reader)
+    if len(rows) < 2:
+        raise ValueError("CSV must have at least a header row and one data row")
+
+    header = rows[0]
+    if not header or header[0].strip().lower() != "prey":
+        raise ValueError(
+            "CSV header must start with 'Prey' as the first column. "
+            f"Got: {header[0] if header else '(empty)'}"
+        )
+
+    # Predator group names from CSV header (columns after 'Prey')
+    csv_pred_names = [h.strip() for h in header[1:]]
+
+    # Build name → index mapping from model
+    groups_result = await _send("list_ecopath_groups")
+    model_groups = groups_result.get("groups", [])
+    if not model_groups:
+        return {"status": "failed", "error": "No groups found in the current model"}
+
+    name_to_index: dict[str, int] = {}
+    for g in model_groups:
+        gname = g.get("name", "")
+        gidx = g.get("index")
+        if gname and gidx is not None:
+            name_to_index[gname] = int(gidx)
+
+    # Resolve CSV predator column names to indices
+    pred_indices: list[int] = []
+    pred_resolution_errors: list[dict[str, Any]] = []
+    for pname in csv_pred_names:
+        pidx = name_to_index.get(pname)
+        if pidx is not None:
+            pred_indices.append(pidx)
+        else:
+            pred_resolution_errors.append({"name": pname, "error": "Not found in model"})
+
+    n_predators = len(pred_indices)
+    if pred_resolution_errors:
+        return {
+            "status": "failed",
+            "error": "One or more predator column names could not be resolved",
+            "resolution_errors": pred_resolution_errors,
+        }
+
+    # Build batch_commands for non-1.0 entries
+    batch_cmds: list[dict[str, Any]] = []
+    set_count = 0
+    row_count = 0
+    skipped_rows: list[dict[str, Any]] = []
+
+    for row in rows[1:]:
+        if not any(cell.strip() for cell in row):
+            continue
+        row_count += 1
+        prey_name = row[0].strip()
+        if not prey_name:
+            skipped_rows.append({"row": row_count, "reason": "Empty prey name"})
+            continue
+
+        prey_idx = name_to_index.get(prey_name)
+        if prey_idx is None:
+            skipped_rows.append({
+                "row": row_count,
+                "prey": prey_name,
+                "reason": "Not found in model",
+            })
+            continue
+
+        for i, cell in enumerate(row[1:]):
+            if i >= n_predators:
+                break
+            try:
+                val = float(cell.strip())
+            except (ValueError, TypeError):
+                skipped_rows.append({
+                    "row": row_count,
+                    "prey": prey_name,
+                    "predator": csv_pred_names[i] if i < len(csv_pred_names) else str(i),
+                    "reason": f"Invalid numeric value: {cell!r}",
+                })
+                continue
+            if val == 1.0:
+                continue  # skip defaults
+
+            batch_cmds.append({
+                "type": "set_indexed_value",
+                "params": {
+                    "domain": "ecosim_group_input",
+                    "index": prey_idx,
+                    "variable": "vul_mult",
+                    "indices": [pred_indices[i]],
+                    "value": val,
+                    "navigate": False,
+                },
+            })
+            set_count += 1
+
+    if not batch_cmds:
+        return {
+            "status": "success",
+            "message": "No non-default vul_mult values to set",
+            "total_csv_rows": row_count,
+            "skipped_rows": skipped_rows or None,
+        }
+
+    # Execute batch
+    send_errors: list[dict[str, Any]] = []
+    n_applied = 0
+    try:
+        batch_result = await _send("batch", {"commands": batch_cmds}, timeout=TIMEOUT_LONG)
+        results_list = batch_result.get("results", []) if isinstance(batch_result, dict) else []
+        for i, sub in enumerate(results_list):
+            if isinstance(sub, dict) and sub.get("status") == "error":
+                send_errors.append({"index": i, "error": sub.get("message", str(sub))})
+            else:
+                n_applied += 1
+    except Exception as exc:
+        send_errors.append({"error": str(exc)})
+
+    status = "success"
+    if send_errors or skipped_rows:
+        status = "partial_success" if n_applied else "failed"
+
+    return {
+        "status": status,
+        "total_csv_rows": row_count,
+        "n_sets_requested": set_count,
+        "n_applied": n_applied,
+        "n_errors": len(send_errors),
+        "errors": send_errors or None,
+        "skipped_rows": skipped_rows or None,
+        "csv_predator_count": len(csv_pred_names),
+    }
+
+
+# ── Fleet Landings/Discards CSV ───────────────────────────────────
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+async def export_fleet_landings_csv(path: str | None = None) -> dict[str, Any]:
+    """Export fleet landings and discards to CSV.
+
+    Builds a long-format CSV with one row per fleet-group pair that has
+    non-zero landings or discards. Returns the CSV content. If a path is
+    provided on the EwE host, also attempts to write the file there.
+
+    CSV format:
+
+        Fleet,TargetGroup,Landings,Discards
+        Gillnet,Snook,0.500000,0.000000
+
+    Args:
+        path: Optional path on the EwE host to write the CSV file.
+              The CSV content is always returned regardless.
+
+    Returns:
+        Dict with status, fleet_count, group_count, csv (content), and path info.
+    """
+    import csv
+    import io as _io
+
+    # Step 1: Get all fleets (name + index)
+    fleets_result = await _send("list_ecopath_fleets")
+    fleets = fleets_result.get("fleets", [])
+    if not fleets:
+        raise ValueError("No fleets found in the current model")
+
+    fleet_names: list[str] = []
+    fleet_indices: list[int] = []
+    for f in fleets:
+        fname = f.get("name", "")
+        fci = f.get("index")
+        if fname and fci is not None:
+            fleet_names.append(fname)
+            fleet_indices.append(int(fci))
+
+    # Step 2: Get all groups (name + index)
+    groups_result = await _send("list_ecopath_groups")
+    groups = groups_result.get("groups", [])
+    group_names: list[str] = []
+    group_indices: list[int] = []
+    for g in groups:
+        gname = g.get("name", "")
+        gidx = g.get("index")
+        if gname and gidx is not None:
+            group_names.append(gname)
+            group_indices.append(int(gidx))
+
+    n_groups = len(group_names)
+    if n_groups == 0:
+        raise ValueError("No valid groups found in the current model")
+
+    # Step 3: Batch get fleet details for ALL fleets
+    batch_cmds: list[dict[str, Any]] = []
+    for fi in fleet_indices:
+        batch_cmds.append({
+            "type": "get_ecopath_fleet",
+            "params": {"index": fi},
+        })
+
+    batch_result = await _send("batch", {"commands": batch_cmds}, timeout=TIMEOUT_LONG)
+    results_list = batch_result.get("results", [])
+
+    # Step 4: Build CSV in long format (one row per fleet-group pair with non-zero values)
+    output = _io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["Fleet", "TargetGroup", "Landings", "Discards"])
+
+    non_zero_rows = 0
+    for i, sub in enumerate(results_list):
+        if not isinstance(sub, dict) or sub.get("status") == "error":
+            continue
+        fleet_name = sub.get("name", fleet_names[i] if i < len(fleet_names) else "")
+
+        landings = sub.get("landings", []) or []
+        discards = sub.get("discards", []) or []
+
+        for g_idx, g_name in zip(group_indices, group_names):
+            l_val = 0.0
+            if g_idx - 1 < len(landings) and landings[g_idx - 1] is not None:
+                l_val = float(landings[g_idx - 1])
+            d_val = 0.0
+            if g_idx - 1 < len(discards) and discards[g_idx - 1] is not None:
+                d_val = float(discards[g_idx - 1])
+
+            if l_val != 0.0 or d_val != 0.0:
+                writer.writerow([
+                    fleet_name,
+                    g_name,
+                    _csv_float(l_val),
+                    _csv_float(d_val),
+                ])
+                non_zero_rows += 1
+
+    csv_content = output.getvalue()
+
+    # Step 5: Optionally write to VM host file
+    written_to_host = False
+    if path:
+        _reject_path_traversal(path)
+        if not path.lower().endswith('.csv'):
+            raise ValueError("Path must have a .csv extension")
+        try:
+            await _send("write_host_file", {"path": path, "content": csv_content})
+            written_to_host = True
+        except (RuntimeError, ConnectionError, OSError, Exception):
+            logger.warning(
+                "export_fleet_landings_csv: write_host_file not available on this plugin version. "
+                "CSV content is returned in the 'csv' field."
+            )
+
+    return {
+        "status": "success",
+        "fleet_count": len(fleet_indices),
+        "group_count": n_groups,
+        "non_zero_rows": non_zero_rows,
+        "csv": csv_content,
+        "written_to_host": written_to_host,
+        "path": path,
+    }
+
+
+@mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
+async def import_fleet_landings_csv(
+    data: str | None = None,
+    path: str | None = None,
+) -> dict[str, Any]:
+    """Import fleet landings and discards from CSV.
+
+    Accepts either a CSV string or a path to a CSV file on the EwE host.
+    CSV must have columns: Fleet,TargetGroup,Landings,Discards (long format,
+    one row per fleet-group pair).
+
+    Only non-zero values are set. Uses set_indexed_value with navigate=False
+    via batch_commands.
+
+    Args:
+        data: CSV string content to import.
+        path: Path to a CSV file on the EwE host machine to read and import.
+
+    Returns:
+        Dict with import status, counts, and results.
+    """
+    import csv
+    import io as _io
+
+    # Read from path if data not provided directly
+    if not data and path:
+        _reject_path_traversal(path)
+        if not path.lower().endswith('.csv'):
+            raise ValueError("Path must have a .csv extension")
+        read_result = await _send("read_host_file", {"path": path})
+        data = read_result.get("content", "")
+        if not data:
+            raise ValueError(f"File at {path} is empty or unreadable")
+
+    if not data or not data.strip():
+        raise ValueError(
+            "Either 'data' or 'path' must be provided with non-empty content"
+        )
+
+    # Parse CSV
+    reader = csv.reader(_io.StringIO(data))
+    rows = list(reader)
+    if len(rows) < 2:
+        raise ValueError("CSV must have at least a header row and one data row")
+
+    header = rows[0]
+    expected_header = ["fleet", "targetgroup", "landings", "discards"]
+    header_lower = [h.strip().lower() for h in header]
+    if header_lower != expected_header:
+        raise ValueError(
+            f"CSV columns must be: {expected_header}, got: {header_lower}"
+        )
+
+    # Build name → index mappings
+    fleets_result = await _send("list_ecopath_fleets")
+    fleets = fleets_result.get("fleets", [])
+    fleet_name_to_idx: dict[str, int] = {}
+    for f in fleets:
+        fname = f.get("name", "")
+        fci = f.get("index")
+        if fname and fci is not None:
+            fleet_name_to_idx[fname] = int(fci)
+
+    groups_result = await _send("list_ecopath_groups")
+    groups = groups_result.get("groups", [])
+    group_name_to_idx: dict[str, int] = {}
+    for g in groups:
+        gname = g.get("name", "")
+        gidx = g.get("index")
+        if gname and gidx is not None:
+            group_name_to_idx[gname] = int(gidx)
+
+    # Build batch commands for each non-zero value
+    batch_cmds: list[dict[str, Any]] = []
+    set_count = 0
+    row_count = 0
+    skipped: list[dict[str, Any]] = []
+
+    for row in rows[1:]:
+        if not any(cell.strip() for cell in row):
+            continue
+        row_count += 1
+        fleet_name = row[0].strip()
+        group_name = row[1].strip() if len(row) > 1 else ""
+
+        if not fleet_name or not group_name:
+            skipped.append({"row": row_count, "reason": "Empty fleet or group name"})
+            continue
+
+        fleet_idx = fleet_name_to_idx.get(fleet_name)
+        if fleet_idx is None:
+            skipped.append({"row": row_count, "reason": f"Fleet '{fleet_name}' not found in model"})
+            continue
+
+        group_idx = group_name_to_idx.get(group_name)
+        if group_idx is None:
+            skipped.append({"row": row_count, "reason": f"Group '{group_name}' not found in model"})
+            continue
+
+        landings_str = row[2].strip() if len(row) > 2 else "0"
+        discards_str = row[3].strip() if len(row) > 3 else "0"
+
+        try:
+            landings_val = float(landings_str)
+        except (ValueError, TypeError):
+            skipped.append({"row": row_count, "reason": f"Invalid landings value: {landings_str!r}"})
+            continue
+
+        try:
+            discards_val = float(discards_str)
+        except (ValueError, TypeError):
+            skipped.append({"row": row_count, "reason": f"Invalid discards value: {discards_str!r}"})
+            continue
+
+        if landings_val != 0.0:
+            batch_cmds.append({
+                "type": "set_indexed_value",
+                "params": {
+                    "domain": "ecopath_fleet",
+                    "index": fleet_idx,
+                    "variable": "landings",
+                    "indices": [group_idx],
+                    "value": landings_val,
+                    "navigate": False,
+                },
+            })
+            set_count += 1
+
+        if discards_val != 0.0:
+            batch_cmds.append({
+                "type": "set_indexed_value",
+                "params": {
+                    "domain": "ecopath_fleet",
+                    "index": fleet_idx,
+                    "variable": "discards",
+                    "indices": [group_idx],
+                    "value": discards_val,
+                    "navigate": False,
+                },
+            })
+            set_count += 1
+
+    if not batch_cmds:
+        return {
+            "status": "success",
+            "message": "No non-zero values to import from CSV",
+            "total_csv_rows": row_count,
+            "skipped": skipped or None,
+        }
+
+    # Execute batch
+    send_errors: list[dict[str, Any]] = []
+    n_applied = 0
+    try:
+        batch_result = await _send("batch", {"commands": batch_cmds}, timeout=TIMEOUT_LONG)
+        results_list = batch_result.get("results", []) if isinstance(batch_result, dict) else []
+        for i, sub in enumerate(results_list):
+            if isinstance(sub, dict) and sub.get("status") == "error":
+                send_errors.append({"index": i, "error": sub.get("message", str(sub))})
+            else:
+                n_applied += 1
+    except Exception as exc:
+        send_errors.append({"error": str(exc)})
+
+    status = "success"
+    if send_errors or skipped:
+        status = "partial_success" if n_applied else "failed"
+
+    return {
+        "status": status,
+        "total_csv_rows": row_count,
+        "n_sets_requested": set_count,
+        "n_applied": n_applied,
+        "n_errors": len(send_errors),
+        "errors": send_errors or None,
+        "skipped": skipped or None,
+    }
+
+
+# ── Ecosim Group Inputs CSV ───────────────────────────────────────
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+async def export_ecosim_inputs_csv(path: str | None = None) -> dict[str, Any]:
+    """Export Ecosim group input parameters to CSV.
+
+    Returns a CSV string with columns:
+    Group,MaxRelPB,MaxRelFeedingTime,FeedingTimeAdjustRate,DenDepCatchability.
+    Sentinel (-9999) and None values are replaced with empty strings.
+    Vulnerability multipliers are handled separately by export_ecosim_vul_csv.
+
+    If a path is provided on the EwE host, attempts to write the CSV there.
+    The CSV is always returned in the response as well.
+
+    Args:
+        path: Optional path on the EwE host to write the CSV file.
+
+    Returns:
+        Dict with status, input_count, csv (content), and path info.
+    """
+    import csv
+    import io as _io
+
+    # Step 1: Get all Ecosim group inputs
+    inputs_result = await _send("list_ecosim_group_inputs")
+    inputs = inputs_result.get("groups", []) if isinstance(inputs_result, dict) else []
+    if not inputs:
+        raise ValueError(
+            "No Ecosim group inputs found — is an Ecosim scenario loaded?"
+        )
+
+    # Step 2: Build CSV
+    output = _io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow([
+        "Group",
+        "MaxRelPB",
+        "MaxRelFeedingTime",
+        "FeedingTimeAdjustRate",
+        "DenDepCatchability",
+    ])
+
+    for inp in inputs:
+        name = inp.get("name", "")
+        values = inp.get("values", {}) if isinstance(inp, dict) else {}
+
+        def _val(field: str) -> str:
+            v = values.get(field)
+            if v is None or v == -9999:
+                return ""
+            return str(v)
+
+        writer.writerow([
+            name,
+            _val("max_rel_pb"),
+            _val("max_rel_feeding_time"),
+            _val("feeding_time_adjust_rate"),
+            _val("den_dep_catchability"),
+        ])
+
+    csv_content = output.getvalue()
+
+    # Step 3: Optionally write to VM host file
+    written_to_host = False
+    if path:
+        _reject_path_traversal(path)
+        if not path.lower().endswith('.csv'):
+            raise ValueError("Path must have a .csv extension")
+        try:
+            await _send("write_host_file", {"path": path, "content": csv_content})
+            written_to_host = True
+        except (RuntimeError, ConnectionError, OSError, Exception):
+            logger.warning(
+                "export_ecosim_inputs_csv: write_host_file not available on this plugin version. "
+                "CSV content is returned in the 'csv' field."
+            )
+
+    return {
+        "status": "success",
+        "input_count": len(inputs),
+        "csv": csv_content,
+        "written_to_host": written_to_host,
+        "path": path,
+    }
+
+
+@mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
+async def import_ecosim_inputs_csv(
+    data: str | None = None,
+    path: str | None = None,
+) -> dict[str, Any]:
+    """Import Ecosim group input parameters from CSV.
+
+    CSV format: Group,MaxRelPB,MaxRelFeedingTime,FeedingTimeAdjustRate,DenDepCatchability
+    Accepts either a CSV string (data) or a path on the EwE host (path).
+    Uses set_values_by_name_batch for efficient bulk update.
+
+    Column mapping:
+        Group               → entity name (used for resolution)
+        MaxRelPB            → max_rel_pb
+        MaxRelFeedingTime   → max_rel_feeding_time
+        FeedingTimeAdjustRate → feeding_time_adjust_rate
+        DenDepCatchability  → den_dep_catchability
+
+    Args:
+        data: CSV string content to import.
+        path: Path to a CSV file on the EwE host machine to read and import.
+
+    Returns:
+        Dict with import status, total/applied/skipped counts, and results.
+    """
+    import csv
+    import io as _io
+
+    # Read from path if data not provided directly
+    if not data and path:
+        _reject_path_traversal(path)
+        if not path.lower().endswith('.csv'):
+            raise ValueError("Path must have a .csv extension")
+        read_result = await _send("read_host_file", {"path": path})
+        data = read_result.get("content", "")
+        if not data:
+            raise ValueError(f"File at {path} is empty or unreadable")
+
+    if not data or not data.strip():
+        raise ValueError(
+            "Must provide CSV data via 'data' parameter or 'path' to a file on the EwE host"
+        )
+
+    # Parse CSV
+    reader = csv.reader(_io.StringIO(data))
+    rows = list(reader)
+    if len(rows) < 2:
+        raise ValueError("CSV must have at least a header row and one data row")
+
+    header = rows[0]
+    if not header or header[0].strip().lower() != "group":
+        raise ValueError(
+            "CSV header first column must be 'Group'. "
+            f"Got: {header[0] if header else '(empty)'}"
+        )
+
+    # Map CSV column names to ecosim_group_input field names
+    col_map: dict[str, str | None] = {
+        "group": None,                    # used as entity name, not a field
+        "maxrelpb": "max_rel_pb",
+        "maxrelfeedingtime": "max_rel_feeding_time",
+        "feedingtimeadjustrate": "feeding_time_adjust_rate",
+        "dendepcatchability": "den_dep_catchability",
+    }
+
+    col_headers = [h.strip() for h in header]
+
+    # Build list of (csv_col_index, ewe_field) for columns we recognise
+    field_cols: list[tuple[int, str]] = []
+    for i, hdr in enumerate(col_headers[1:], start=1):
+        hdr_lower = hdr.lower()
+        mapped = col_map.get(hdr_lower)
+        if mapped:
+            field_cols.append((i, mapped))
+        # None means recognised but skipped; absent means unrecognised (also skipped)
+
+    # Build operations for set_values_by_name_batch
+    operations: list[dict[str, Any]] = []
+    row_count = 0
+
+    for row in rows[1:]:
+        row_count += 1
+        group_name = row[0].strip() if row else ""
+        if not group_name:
+            continue
+
+        # Check if all value columns are empty — skip such rows
+        values: dict[str, float] = {}
+        all_empty = True
+        for col_idx, ewe_field in field_cols:
+            cell = row[col_idx].strip() if col_idx < len(row) else ""
+            if cell == "":
+                continue
+            all_empty = False
+            try:
+                values[ewe_field] = float(cell)
+            except (ValueError, TypeError):
+                # Skip invalid numeric values gracefully
+                continue
+
+        if all_empty:
+            continue
+
+        operations.append({
+            "domain": "ecosim_group_input",
+            "name": group_name,
+            "values": values,
+        })
+
+    if not operations:
+        return {
+            "status": "failed",
+            "error": "No valid Ecosim group input data rows found in CSV",
+            "total_csv_rows": row_count,
+        }
+
+    # Delegate to set_values_by_name_batch
+    result = await set_values_by_name_batch(
+        operations,
+        options={"include_suggestions": True},
+    )
+
+    # Add import-specific metadata
+    result["import_type"] = "csv"
+    result["total_csv_rows"] = row_count
+
+    return result
+
+
+# ── Ecotracer Group Inputs CSV ─────────────────────────────────────
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+async def export_ecotracer_inputs_csv(path: str | None = None) -> dict[str, Any]:
+    """Export Ecotracer group input parameters to CSV.
+
+    Requires an Ecotracer scenario to be loaded first.
+    Returns a CSV string with Group and Ecotracer-specific parameter columns.
+    If a path is provided on the EwE host, attempts to write the CSV there.
+    The CSV is always returned in the response as well.
+
+    Args:
+        path: Optional path on the EwE host to write the CSV file.
+
+    Returns:
+        Dict with status, group_count, csv (content), and path info.
+    """
+    import csv
+    import io as _io
+
+    # Check if an Ecotracer scenario is loaded
+    try:
+        tracer_state = await _send("get_ecotracer_run_state")
+        if not tracer_state.get("has_ecotracer_loaded", False):
+            return {"status": "error", "message": "No Ecotracer scenario loaded"}
+    except (RuntimeError, ConnectionError, OSError) as exc:
+        return {"status": "error", "message": f"Cannot check Ecotracer state: {exc}"}
+
+    # List Ecotracer group inputs
+    list_result = await _send("list_ecotracer_group_inputs")
+    items = list_result.get("items", []) if isinstance(list_result, dict) else []
+    if not items:
+        raise ValueError("No Ecotracer group inputs found")
+
+    # Batch-get values for all groups
+    batch_cmds: list[dict[str, Any]] = []
+    indices: list[int] = []
+    names: list[str] = []
+    for item in items:
+        idx = item.get("index")
+        name = item.get("name", "")
+        if idx is not None and name:
+            indices.append(int(idx))
+            names.append(name)
+            batch_cmds.append({
+                "type": "get_ecotracer_group_input",
+                "params": {"index": int(idx)},
+            })
+
+    if not batch_cmds:
+        raise ValueError("No valid Ecotracer group inputs found")
+
+    batch_result = await _send("batch", {"commands": batch_cmds}, timeout=TIMEOUT_LONG)
+    results_list = batch_result.get("results", []) if isinstance(batch_result, dict) else []
+
+    # Collect all unique field names from the values dicts
+    all_field_names: set[str] = set()
+    group_values: dict[int, dict[str, Any]] = {}
+    for i, sub in enumerate(results_list):
+        if isinstance(sub, dict) and sub.get("status") != "error":
+            sub_idx = sub.get("index")
+            if sub_idx is not None:
+                values = sub.get("values", {}) if isinstance(sub, dict) else {}
+                if isinstance(values, dict):
+                    group_values[int(sub_idx)] = values
+                    all_field_names.update(k for k in values
+                                           if k != "name" and values[k] is not None)
+
+    sorted_fields = sorted(all_field_names)
+
+    # Build CSV
+    output = _io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["Group"] + sorted_fields)
+
+    for idx, name in zip(indices, names):
+        vals = group_values.get(idx, {})
+        row = [name]
+        for field in sorted_fields:
+            v = vals.get(field)
+            if v is None or v == -9999:
+                row.append("")
+            else:
+                row.append(str(v))
+        writer.writerow(row)
+
+    csv_content = output.getvalue()
+
+    # Optionally write to VM host file
+    written_to_host = False
+    if path:
+        _reject_path_traversal(path)
+        if not path.lower().endswith('.csv'):
+            raise ValueError("Path must have a .csv extension")
+        try:
+            await _send("write_host_file", {"path": path, "content": csv_content})
+            written_to_host = True
+        except (RuntimeError, ConnectionError, OSError, Exception):
+            logger.warning(
+                "export_ecotracer_inputs_csv: write_host_file not available. "
+                "CSV content is returned in the 'csv' field."
+            )
+
+    return {
+        "status": "success",
+        "group_count": len(indices),
+        "csv": csv_content,
+        "written_to_host": written_to_host,
+        "path": path,
+    }
+
+
+@mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
+async def import_ecotracer_inputs_csv(
+    data: str | None = None,
+    path: str | None = None,
+) -> dict[str, Any]:
+    """Import Ecotracer group input parameters from CSV.
+
+    CSV must have a header row starting with 'Group' followed by
+    Ecotracer parameter columns matching the field names returned by
+    get_ecotracer_group_input. Uses set_values_by_name_batch for import.
+
+    Args:
+        data: CSV string content to import.
+        path: Path to a CSV file on the EwE host machine to read and import.
+
+    Returns:
+        Dict with import status, total/applied/skipped counts, and results.
+    """
+    import csv
+    import io as _io
+
+    # Read from path if data not provided directly
+    if not data and path:
+        _reject_path_traversal(path)
+        if not path.lower().endswith('.csv'):
+            raise ValueError("Path must have a .csv extension")
+        read_result = await _send("read_host_file", {"path": path})
+        data = read_result.get("content", "")
+        if not data:
+            raise ValueError(f"File at {path} is empty or unreadable")
+
+    if not data or not data.strip():
+        raise ValueError(
+            "Must provide CSV data via 'data' parameter or 'path' to a file on the EwE host"
+        )
+
+    # Parse CSV
+    reader = csv.reader(_io.StringIO(data))
+    rows = list(reader)
+    if len(rows) < 2:
+        raise ValueError("CSV must have at least a header row and one data row")
+
+    header = rows[0]
+    if not header or header[0].strip().lower() != "group":
+        raise ValueError(
+            "CSV header first column must be 'Group'. "
+            f"Got: {header[0] if header else '(empty)'}"
+        )
+
+    # Build operations for set_values_by_name_batch
+    col_headers = [h.strip() for h in header]
+    operations: list[dict[str, Any]] = []
+    row_count = 0
+
+    for row in rows[1:]:
+        row_count += 1
+        group_name = row[0].strip() if row else ""
+        if not group_name:
+            continue
+
+        values: dict[str, float] = {}
+        all_empty = True
+        for i in range(1, min(len(row), len(col_headers))):
+            cell = row[i].strip()
+            if cell == "":
+                continue
+            all_empty = False
+            try:
+                values[col_headers[i]] = float(cell)
+            except (ValueError, TypeError):
+                continue
+
+        if all_empty:
+            continue
+
+        operations.append({
+            "domain": "ecotracer_group_input",
+            "name": group_name,
+            "values": values,
+        })
+
+    if not operations:
+        return {
+            "status": "failed",
+            "error": "No valid Ecotracer group input data rows found in CSV",
+            "total_csv_rows": row_count,
+        }
+
+    result = await set_values_by_name_batch(
+        operations,
+        options={"include_suggestions": True},
+    )
+
+    result["import_type"] = "csv"
+    result["total_csv_rows"] = row_count
+
+    return result
+
+
+# ── Monte Carlo Group Params CSV ───────────────────────────────────
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+async def export_monte_carlo_csv(path: str | None = None) -> dict[str, Any]:
+    """Export Monte Carlo group parameters (CV values) to CSV.
+
+    Monte Carlo must be available in the current scenario.
+    Returns a CSV string with Group and CV parameter columns.
+    If a path is provided on the EwE host, attempts to write the CSV there.
+    The CSV is always returned in the response as well.
+
+    Args:
+        path: Optional path on the EwE host to write the CSV file.
+
+    Returns:
+        Dict with status, group_count, csv (content), and path info.
+    """
+    import csv
+    import io as _io
+
+    # Check Monte Carlo availability
+    try:
+        mc_params = await _send("get_monte_carlo_parameters")
+        if not isinstance(mc_params, dict) or not mc_params:
+            return {"status": "error", "message": "Monte Carlo not available"}
+    except (RuntimeError, ConnectionError, OSError) as exc:
+        error_str = str(exc)
+        if "core_unavailable" in error_str or "not available" in error_str.lower():
+            return {"status": "error", "message": "Monte Carlo not available"}
+        return {"status": "error", "message": f"Cannot check Monte Carlo state: {exc}"}
+
+    # List Monte Carlo groups
+    list_result = await _send("list_monte_carlo_groups")
+    items = list_result.get("items", []) if isinstance(list_result, dict) else []
+    if not items:
+        raise ValueError("No Monte Carlo group parameters found")
+
+    # Batch-get values for all groups
+    batch_cmds: list[dict[str, Any]] = []
+    indices: list[int] = []
+    names: list[str] = []
+    for item in items:
+        idx = item.get("index")
+        name = item.get("name", "")
+        if idx is not None and name:
+            indices.append(int(idx))
+            names.append(name)
+            batch_cmds.append({
+                "type": "get_monte_carlo_group",
+                "params": {"index": int(idx)},
+            })
+
+    if not batch_cmds:
+        raise ValueError("No valid Monte Carlo group parameters found")
+
+    batch_result = await _send("batch", {"commands": batch_cmds}, timeout=TIMEOUT_LONG)
+    results_list = batch_result.get("results", []) if isinstance(batch_result, dict) else []
+
+    # Collect all unique field names from the values dicts
+    all_field_names: set[str] = set()
+    group_values: dict[int, dict[str, Any]] = {}
+    for i, sub in enumerate(results_list):
+        if isinstance(sub, dict) and sub.get("status") != "error":
+            sub_idx = sub.get("index")
+            if sub_idx is not None:
+                values = sub.get("values", {}) if isinstance(sub, dict) else {}
+                if isinstance(values, dict):
+                    group_values[int(sub_idx)] = values
+                    all_field_names.update(k for k in values
+                                           if k != "name" and values[k] is not None)
+
+    sorted_fields = sorted(all_field_names)
+
+    # Build CSV
+    output = _io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["Group"] + sorted_fields)
+
+    for idx, name in zip(indices, names):
+        vals = group_values.get(idx, {})
+        row = [name]
+        for field in sorted_fields:
+            v = vals.get(field)
+            if v is None or v == -9999:
+                row.append("")
+            else:
+                row.append(str(v))
+        writer.writerow(row)
+
+    csv_content = output.getvalue()
+
+    # Optionally write to VM host file
+    written_to_host = False
+    if path:
+        _reject_path_traversal(path)
+        if not path.lower().endswith('.csv'):
+            raise ValueError("Path must have a .csv extension")
+        try:
+            await _send("write_host_file", {"path": path, "content": csv_content})
+            written_to_host = True
+        except (RuntimeError, ConnectionError, OSError, Exception):
+            logger.warning(
+                "export_monte_carlo_csv: write_host_file not available. "
+                "CSV content is returned in the 'csv' field."
+            )
+
+    return {
+        "status": "success",
+        "group_count": len(indices),
+        "csv": csv_content,
+        "written_to_host": written_to_host,
+        "path": path,
+    }
+
+
+@mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
+async def import_monte_carlo_csv(
+    data: str | None = None,
+    path: str | None = None,
+) -> dict[str, Any]:
+    """Import Monte Carlo group parameters (CV values) from CSV.
+
+    CSV must have a header row starting with 'Group' followed by
+    CV parameter columns matching the field names returned by
+    get_monte_carlo_group. Uses set_values_by_name_batch for import.
+
+    Args:
+        data: CSV string content to import.
+        path: Path to a CSV file on the EwE host machine to read and import.
+
+    Returns:
+        Dict with import status, total/applied/skipped counts, and results.
+    """
+    import csv
+    import io as _io
+
+    # Read from path if data not provided directly
+    if not data and path:
+        _reject_path_traversal(path)
+        if not path.lower().endswith('.csv'):
+            raise ValueError("Path must have a .csv extension")
+        read_result = await _send("read_host_file", {"path": path})
+        data = read_result.get("content", "")
+        if not data:
+            raise ValueError(f"File at {path} is empty or unreadable")
+
+    if not data or not data.strip():
+        raise ValueError(
+            "Must provide CSV data via 'data' parameter or 'path' to a file on the EwE host"
+        )
+
+    # Parse CSV
+    reader = csv.reader(_io.StringIO(data))
+    rows = list(reader)
+    if len(rows) < 2:
+        raise ValueError("CSV must have at least a header row and one data row")
+
+    header = rows[0]
+    if not header or header[0].strip().lower() != "group":
+        raise ValueError(
+            "CSV header first column must be 'Group'. "
+            f"Got: {header[0] if header else '(empty)'}"
+        )
+
+    col_headers = [h.strip() for h in header]
+    operations: list[dict[str, Any]] = []
+    row_count = 0
+
+    for row in rows[1:]:
+        row_count += 1
+        group_name = row[0].strip() if row else ""
+        if not group_name:
+            continue
+
+        values: dict[str, float] = {}
+        all_empty = True
+        for i in range(1, min(len(row), len(col_headers))):
+            cell = row[i].strip()
+            if cell == "":
+                continue
+            all_empty = False
+            try:
+                values[col_headers[i]] = float(cell)
+            except (ValueError, TypeError):
+                continue
+
+        if all_empty:
+            continue
+
+        operations.append({
+            "domain": "monte_carlo_group",
+            "name": group_name,
+            "values": values,
+        })
+
+    if not operations:
+        return {
+            "status": "failed",
+            "error": "No valid Monte Carlo group data rows found in CSV",
+            "total_csv_rows": row_count,
+        }
+
+    result = await set_values_by_name_batch(
+        operations,
+        options={"include_suggestions": True},
+    )
+
+    result["import_type"] = "csv"
+    result["total_csv_rows"] = row_count
+
+    return result
+
+
+# ── Ecospace Group Inputs CSV ──────────────────────────────────────
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+async def export_ecospace_inputs_csv(path: str | None = None) -> dict[str, Any]:
+    """Export Ecospace group input parameters to CSV.
+
+    Requires an Ecospace scenario to be loaded first.
+    Returns a CSV string with Group and Ecospace-specific parameter columns.
+    If a path is provided on the EwE host, attempts to write the CSV there.
+    The CSV is always returned in the response as well.
+
+    Args:
+        path: Optional path on the EwE host to write the CSV file.
+
+    Returns:
+        Dict with status, group_count, csv (content), and path info.
+    """
+    import csv
+    import io as _io
+
+    # Check if an Ecospace scenario is loaded
+    try:
+        space_state = await _send("get_ecospace_run_state")
+        if not space_state.get("is_ecospace_loaded", False):
+            return {"status": "error", "message": "No Ecospace scenario loaded"}
+    except (RuntimeError, ConnectionError, OSError) as exc:
+        return {"status": "error", "message": f"Cannot check Ecospace state: {exc}"}
+
+    # List Ecospace group inputs
+    list_result = await _send("list_ecospace_group_inputs")
+    items = list_result.get("group_inputs", []) if isinstance(list_result, dict) else []
+    if not items:
+        raise ValueError("No Ecospace group inputs found")
+
+    # Batch-get values for all groups
+    batch_cmds: list[dict[str, Any]] = []
+    indices: list[int] = []
+    names: list[str] = []
+    for item in items:
+        idx = item.get("index")
+        name = item.get("name", "")
+        if idx is not None and name:
+            indices.append(int(idx))
+            names.append(name)
+            batch_cmds.append({
+                "type": "get_ecospace_group_input",
+                "params": {"index": int(idx)},
+            })
+
+    if not batch_cmds:
+        raise ValueError("No valid Ecospace group inputs found")
+
+    batch_result = await _send("batch", {"commands": batch_cmds}, timeout=TIMEOUT_LONG)
+    results_list = batch_result.get("results", []) if isinstance(batch_result, dict) else []
+
+    # Collect all unique field names from the values dicts
+    all_field_names: set[str] = set()
+    group_values: dict[int, dict[str, Any]] = {}
+    for i, sub in enumerate(results_list):
+        if isinstance(sub, dict) and sub.get("status") != "error":
+            sub_idx = sub.get("index")
+            if sub_idx is not None:
+                values = sub.get("values", {}) if isinstance(sub, dict) else {}
+                if isinstance(values, dict):
+                    group_values[int(sub_idx)] = values
+                    all_field_names.update(k for k in values
+                                           if k != "name" and values[k] is not None)
+
+    sorted_fields = sorted(all_field_names)
+
+    # Build CSV
+    output = _io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["Group"] + sorted_fields)
+
+    for idx, name in zip(indices, names):
+        vals = group_values.get(idx, {})
+        row = [name]
+        for field in sorted_fields:
+            v = vals.get(field)
+            if v is None or v == -9999:
+                row.append("")
+            else:
+                row.append(str(v))
+        writer.writerow(row)
+
+    csv_content = output.getvalue()
+
+    # Optionally write to VM host file
+    written_to_host = False
+    if path:
+        _reject_path_traversal(path)
+        if not path.lower().endswith('.csv'):
+            raise ValueError("Path must have a .csv extension")
+        try:
+            await _send("write_host_file", {"path": path, "content": csv_content})
+            written_to_host = True
+        except (RuntimeError, ConnectionError, OSError, Exception):
+            logger.warning(
+                "export_ecospace_inputs_csv: write_host_file not available. "
+                "CSV content is returned in the 'csv' field."
+            )
+
+    return {
+        "status": "success",
+        "group_count": len(indices),
+        "csv": csv_content,
+        "written_to_host": written_to_host,
+        "path": path,
+    }
+
+
+@mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
+async def import_ecospace_inputs_csv(
+    data: str | None = None,
+    path: str | None = None,
+) -> dict[str, Any]:
+    """Import Ecospace group input parameters from CSV.
+
+    CSV must have a header row starting with 'Group' followed by
+    Ecospace parameter columns matching the field names returned by
+    get_ecospace_group_input. Uses set_values_by_name_batch for import.
+
+    Args:
+        data: CSV string content to import.
+        path: Path to a CSV file on the EwE host machine to read and import.
+
+    Returns:
+        Dict with import status, total/applied/skipped counts, and results.
+    """
+    import csv
+    import io as _io
+
+    # Read from path if data not provided directly
+    if not data and path:
+        _reject_path_traversal(path)
+        if not path.lower().endswith('.csv'):
+            raise ValueError("Path must have a .csv extension")
+        read_result = await _send("read_host_file", {"path": path})
+        data = read_result.get("content", "")
+        if not data:
+            raise ValueError(f"File at {path} is empty or unreadable")
+
+    if not data or not data.strip():
+        raise ValueError(
+            "Must provide CSV data via 'data' parameter or 'path' to a file on the EwE host"
+        )
+
+    # Parse CSV
+    reader = csv.reader(_io.StringIO(data))
+    rows = list(reader)
+    if len(rows) < 2:
+        raise ValueError("CSV must have at least a header row and one data row")
+
+    header = rows[0]
+    if not header or header[0].strip().lower() != "group":
+        raise ValueError(
+            "CSV header first column must be 'Group'. "
+            f"Got: {header[0] if header else '(empty)'}"
+        )
+
+    col_headers = [h.strip() for h in header]
+    operations: list[dict[str, Any]] = []
+    row_count = 0
+
+    for row in rows[1:]:
+        row_count += 1
+        group_name = row[0].strip() if row else ""
+        if not group_name:
+            continue
+
+        values: dict[str, float] = {}
+        all_empty = True
+        for i in range(1, min(len(row), len(col_headers))):
+            cell = row[i].strip()
+            if cell == "":
+                continue
+            all_empty = False
+            try:
+                values[col_headers[i]] = float(cell)
+            except (ValueError, TypeError):
+                continue
+
+        if all_empty:
+            continue
+
+        operations.append({
+            "domain": "ecospace_group_input",
+            "name": group_name,
+            "values": values,
+        })
+
+    if not operations:
+        return {
+            "status": "failed",
+            "error": "No valid Ecospace group input data rows found in CSV",
+            "total_csv_rows": row_count,
+        }
+
+    result = await set_values_by_name_batch(
+        operations,
+        options={"include_suggestions": True},
+    )
+
+    result["import_type"] = "csv"
+    result["total_csv_rows"] = row_count
+
+    return result
+
+
+# ── Ecospace Fleet Inputs CSV ────────────────────────────────────────
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+async def export_ecospace_fleet_inputs_csv(path: str | None = None) -> dict[str, Any]:
+    """Export Ecospace fleet input parameters to CSV.
+
+    Requires an Ecospace scenario to be loaded first.
+    Returns a CSV string with Fleet and Ecospace-specific parameter columns.
+    If a path is provided on the EwE host, attempts to write the CSV there.
+    The CSV is always returned in the response as well.
+
+    Args:
+        path: Optional path on the EwE host to write the CSV file.
+
+    Returns:
+        Dict with status, fleet_count, csv (content), and path info.
+    """
+    import csv
+    import io as _io
+
+    # Check if an Ecospace scenario is loaded
+    try:
+        space_state = await _send("get_ecospace_run_state")
+        if not space_state.get("is_ecospace_loaded", False):
+            return {"status": "error", "message": "No Ecospace scenario loaded"}
+    except (RuntimeError, ConnectionError, OSError) as exc:
+        return {"status": "error", "message": f"Cannot check Ecospace state: {exc}"}
+
+    # List Ecospace fleet inputs
+    list_result = await _send("list_ecospace_fleet_inputs")
+    items: list[dict[str, Any]] = []
+    if isinstance(list_result, dict):
+        # Three-key fallback: earlier plugin versions used "fleet_inputs", later
+        # builds migrated to "items", and older EwE cores emitted "fleets".  All
+        # three are checked because the C# plugin response key has not been
+        # formally standardised across every plugin + core combination.
+        items = (
+            list_result.get("fleet_inputs", [])
+            or list_result.get("items", [])
+            or list_result.get("fleets", [])
+        )
+    if not items:
+        raise ValueError("No Ecospace fleet inputs found")
+
+    # Batch-get values for all fleets
+    batch_cmds: list[dict[str, Any]] = []
+    indices: list[int] = []
+    names: list[str] = []
+    for item in items:
+        idx = item.get("index")
+        name = item.get("name", "")
+        if idx is not None and name:
+            indices.append(int(idx))
+            names.append(name)
+            batch_cmds.append({
+                "type": "get_ecospace_fleet_input",
+                "params": {"index": int(idx)},
+            })
+
+    if not batch_cmds:
+        raise ValueError("No valid Ecospace fleet inputs found")
+
+    batch_result = await _send("batch", {"commands": batch_cmds}, timeout=TIMEOUT_LONG)
+    results_list = batch_result.get("results", []) if isinstance(batch_result, dict) else []
+
+    # Collect all unique field names from the values dicts
+    all_field_names: set[str] = set()
+    fleet_values: dict[int, dict[str, Any]] = {}
+    for i, sub in enumerate(results_list):
+        if isinstance(sub, dict) and sub.get("status") != "error":
+            sub_idx = sub.get("index")
+            if sub_idx is not None:
+                values = sub.get("values", {}) if isinstance(sub, dict) else {}
+                if isinstance(values, dict):
+                    fleet_values[int(sub_idx)] = values
+                    all_field_names.update(k for k in values
+                                           if k != "name" and values[k] is not None)
+
+    sorted_fields = sorted(all_field_names)
+
+    # Build CSV
+    output = _io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["Fleet"] + sorted_fields)
+
+    for idx, name in zip(indices, names):
+        vals = fleet_values.get(idx, {})
+        row = [name]
+        for field in sorted_fields:
+            v = vals.get(field)
+            if v is None or v == -9999:
+                row.append("")
+            else:
+                row.append(str(v))
+        writer.writerow(row)
+
+    csv_content = output.getvalue()
+
+    # Optionally write to VM host file
+    written_to_host = False
+    if path:
+        _reject_path_traversal(path)
+        if not path.lower().endswith('.csv'):
+            raise ValueError("Path must have a .csv extension")
+        try:
+            await _send("write_host_file", {"path": path, "content": csv_content})
+            written_to_host = True
+        except (RuntimeError, ConnectionError, OSError, Exception):
+            logger.warning(
+                "export_ecospace_fleet_inputs_csv: write_host_file not available. "
+                "CSV content is returned in the 'csv' field."
+            )
+
+    return {
+        "status": "success",
+        "fleet_count": len(indices),
+        "csv": csv_content,
+        "written_to_host": written_to_host,
+        "path": path,
+    }
+
+
+@mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
+async def import_ecospace_fleet_inputs_csv(
+    data: str | None = None,
+    path: str | None = None,
+) -> dict[str, Any]:
+    """Import Ecospace fleet input parameters from CSV.
+
+    CSV must have a header row starting with 'Fleet' followed by
+    Ecospace parameter columns matching the field names returned by
+    get_ecospace_fleet_input. Uses set_values_by_name_batch for import.
+
+    Args:
+        data: CSV string content to import.
+        path: Path to a CSV file on the EwE host machine to read and import.
+
+    Returns:
+        Dict with import status, total/applied/skipped counts, and results.
+    """
+    import csv
+    import io as _io
+
+    # Read from path if data not provided directly
+    if not data and path:
+        _reject_path_traversal(path)
+        if not path.lower().endswith('.csv'):
+            raise ValueError("Path must have a .csv extension")
+        read_result = await _send("read_host_file", {"path": path})
+        data = read_result.get("content", "")
+        if not data:
+            raise ValueError(f"File at {path} is empty or unreadable")
+
+    if not data or not data.strip():
+        raise ValueError(
+            "Must provide CSV data via 'data' parameter or 'path' to a file on the EwE host"
+        )
+
+    # Parse CSV
+    reader = csv.reader(_io.StringIO(data))
+    rows = list(reader)
+    if len(rows) < 2:
+        raise ValueError("CSV must have at least a header row and one data row")
+
+    header = rows[0]
+    if not header or header[0].strip().lower() != "fleet":
+        raise ValueError(
+            "CSV header first column must be 'Fleet'. "
+            f"Got: {header[0] if header else '(empty)'}"
+        )
+
+    col_headers = [h.strip() for h in header]
+    operations: list[dict[str, Any]] = []
+    row_count = 0
+
+    for row in rows[1:]:
+        row_count += 1
+        fleet_name = row[0].strip() if row else ""
+        if not fleet_name:
+            continue
+
+        values: dict[str, float] = {}
+        all_empty = True
+        for i in range(1, min(len(row), len(col_headers))):
+            cell = row[i].strip()
+            if cell == "":
+                continue
+            all_empty = False
+            try:
+                values[col_headers[i]] = float(cell)
+            except (ValueError, TypeError):
+                continue
+
+        if all_empty:
+            continue
+
+        operations.append({
+            "domain": "ecospace_fleet_input",
+            "name": fleet_name,
+            "values": values,
+        })
+
+    if not operations:
+        return {
+            "status": "failed",
+            "error": "No valid Ecospace fleet input data rows found in CSV",
+            "total_csv_rows": row_count,
+        }
+
+    result = await set_values_by_name_batch(
+        operations,
+        options={"include_suggestions": True},
+    )
+
+    result["import_type"] = "csv"
+    result["total_csv_rows"] = row_count
+
+    return result
+
+
+# ── Fleet Indexed Value Matrix CSV ────────────────────────────────────
+
+_VALID_FLEET_INDEXED_VARIABLES = frozenset({
+    "off_vessel_price",
+    "off_vessel_value",
+    "discard_fate",
+    "discard_mortality",
+})
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+async def export_fleet_indexed_csv(
+    variable: str,
+    path: str | None = None,
+) -> dict[str, Any]:
+    """Export a fleet×group indexed value matrix as CSV.
+
+    Supported variables: off_vessel_price, off_vessel_value, discard_fate,
+    discard_mortality.
+
+    Builds a CSV with Fleet as the first column and group names as subsequent
+    column headers. One row per fleet with the indexed values for each group.
+
+    Args:
+        variable: The indexed variable to export.
+        path: Optional path on the EwE host to write the CSV file.
+              The CSV content is always returned regardless.
+
+    Returns:
+        Dict with status, fleet_count, group_count, csv (content), and path info.
+    """
+    import csv
+    import io as _io
+
+    var_lower = variable.lower()
+    if var_lower not in _VALID_FLEET_INDEXED_VARIABLES:
+        raise ValueError(
+            f"Unsupported variable '{variable}'. "
+            f"Supported: {sorted(_VALID_FLEET_INDEXED_VARIABLES)}"
+        )
+
+    # Step 1: Get all fleets
+    fleets_result = await _send("list_ecopath_fleets")
+    fleets = fleets_result.get("fleets", [])
+    if not fleets:
+        raise ValueError("No fleets found in the current model")
+
+    fleet_names: list[str] = []
+    fleet_indices: list[int] = []
+    for f in fleets:
+        fname = f.get("name", "")
+        fci = f.get("index")
+        if fname and fci is not None:
+            fleet_names.append(fname)
+            fleet_indices.append(int(fci))
+
+    # Step 2: Get all groups
+    groups_result = await _send("list_ecopath_groups")
+    groups = groups_result.get("groups", [])
+    group_names: list[str] = []
+    group_indices: list[int] = []
+    for g in groups:
+        gname = g.get("name", "")
+        gidx = g.get("index")
+        if gname and gidx is not None:
+            group_names.append(gname)
+            group_indices.append(int(gidx))
+
+    n_groups = len(group_names)
+    if n_groups == 0:
+        raise ValueError("No valid groups found in the current model")
+
+    # Step 3: Batch get the indexed variable for ALL fleets
+    batch_cmds: list[dict[str, Any]] = []
+    for fi in fleet_indices:
+        batch_cmds.append({
+            "type": "get_values",
+            "params": {
+                "domain": "ecopath_fleet",
+                "index": fi,
+                "variables": [var_lower],
+                "navigate": False,
+            },
+        })
+
+    batch_result = await _send("batch", {"commands": batch_cmds}, timeout=TIMEOUT_LONG)
+    results_list = batch_result.get("results", [])
+
+    # Step 4: Build matrix: fleet_index → array of values
+    fleet_array: dict[int, list[float]] = {}
+    for i, sub in enumerate(results_list):
+        if isinstance(sub, dict) and sub.get("status") != "error":
+            sub_idx = sub.get("index")
+            if sub_idx is None and i < len(fleet_indices):
+                sub_idx = fleet_indices[i]
+            if sub_idx is not None:
+                values = sub.get("values", {}) if isinstance(sub, dict) else {}
+                arr = values.get(var_lower, [])
+                if isinstance(arr, list):
+                    fleet_array[int(sub_idx)] = [
+                        float(v) if v is not None else 0.0 for v in arr
+                    ]
+
+    # Step 5: Build CSV
+    output = _io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["Fleet"] + group_names)
+
+    for idx in fleet_indices:
+        row_name = fleet_names[idx - 1]  # fleets are 1-based
+        arr = fleet_array.get(idx, [])
+        row_values: list[str] = [row_name]
+        for g_idx in range(n_groups):
+            val = 0.0
+            if g_idx < len(arr):
+                val = arr[g_idx] if arr[g_idx] is not None else 0.0
+            if val == 0.0:
+                row_values.append("0.0")
+            else:
+                row_values.append(f"{val:.6f}")
+        writer.writerow(row_values)
+
+    csv_content = output.getvalue()
+
+    # Step 6: Optionally write to VM host file
+    written_to_host = False
+    if path:
+        _reject_path_traversal(path)
+        if not path.lower().endswith('.csv'):
+            raise ValueError("Path must have a .csv extension")
+        try:
+            await _send("write_host_file", {"path": path, "content": csv_content})
+            written_to_host = True
+        except (RuntimeError, ConnectionError, OSError, Exception):
+            logger.warning(
+                "export_fleet_indexed_csv: write_host_file not available on this plugin version. "
+                "CSV content is returned in the 'csv' field."
+            )
+
+    return {
+        "status": "success",
+        "variable": var_lower,
+        "fleet_count": len(fleet_indices),
+        "group_count": n_groups,
+        "csv": csv_content,
+        "written_to_host": written_to_host,
+        "path": path,
+    }
+
+
+@mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
+async def import_fleet_indexed_csv(
+    variable: str,
+    data: str | None = None,
+    path: str | None = None,
+) -> dict[str, Any]:
+    """Import a fleet×group indexed value matrix from CSV.
+
+    CSV must have 'Fleet' as the first column header followed by group
+    names as subsequent column headers. One row per fleet.
+
+    For each non-zero value, uses set_indexed_value with navigate=False
+    via batch_commands.
+
+    Args:
+        variable: The indexed variable to import into.
+        data: CSV string content to import.
+        path: Path to a CSV file on the EwE host machine to read and import.
+
+    Returns:
+        Dict with import status, counts, and results.
+    """
+    import csv
+    import io as _io
+
+    var_lower = variable.lower()
+    if var_lower not in _VALID_FLEET_INDEXED_VARIABLES:
+        raise ValueError(
+            f"Unsupported variable '{variable}'. "
+            f"Supported: {sorted(_VALID_FLEET_INDEXED_VARIABLES)}"
+        )
+
+    # Read from path if data not provided directly
+    if not data and path:
+        _reject_path_traversal(path)
+        if not path.lower().endswith('.csv'):
+            raise ValueError("Path must have a .csv extension")
+        read_result = await _send("read_host_file", {"path": path})
+        data = read_result.get("content", "")
+        if not data:
+            raise ValueError(f"File at {path} is empty or unreadable")
+
+    if not data or not data.strip():
+        raise ValueError(
+            "Either 'data' or 'path' must be provided with non-empty content"
+        )
+
+    # Parse CSV
+    reader = csv.reader(_io.StringIO(data))
+    rows = list(reader)
+    if len(rows) < 2:
+        raise ValueError("CSV must have at least a header row and one data row")
+
+    header = rows[0]
+    if not header or header[0].strip().lower() != "fleet":
+        raise ValueError(
+            "CSV header must start with 'Fleet' as the first column. "
+            f"Got: {header[0] if header else '(empty)'}"
+        )
+
+    # Build name → index mappings
+    fleets_result = await _send("list_ecopath_fleets")
+    fleets = fleets_result.get("fleets", [])
+    fleet_name_to_idx: dict[str, int] = {}
+    for f in fleets:
+        fname = f.get("name", "")
+        fci = f.get("index")
+        if fname and fci is not None:
+            fleet_name_to_idx[fname] = int(fci)
+
+    groups_result = await _send("list_ecopath_groups")
+    groups = groups_result.get("groups", [])
+    group_name_to_idx: dict[str, int] = {}
+    for g in groups:
+        gname = g.get("name", "")
+        gidx = g.get("index")
+        if gname and gidx is not None:
+            group_name_to_idx[gname] = int(gidx)
+
+    # CSV group column names (after 'Fleet')
+    csv_group_names = [h.strip() for h in header[1:]]
+
+    # Build batch commands for each non-zero value
+    batch_cmds: list[dict[str, Any]] = []
+    set_count = 0
+    row_count = 0
+    skipped: list[dict[str, Any]] = []
+
+    for row in rows[1:]:
+        if not any(cell.strip() for cell in row):
+            continue
+        row_count += 1
+        fleet_name = row[0].strip()
+        if not fleet_name:
+            skipped.append({"row": row_count, "reason": "Empty fleet name"})
+            continue
+
+        fleet_idx = fleet_name_to_idx.get(fleet_name)
+        if fleet_idx is None:
+            skipped.append({"row": row_count, "reason": f"Fleet '{fleet_name}' not found in model"})
+            continue
+
+        for ci, csv_group_name in enumerate(csv_group_names, start=1):
+            cell = row[ci].strip() if ci < len(row) else "0"
+            if cell == "" or cell == "0" or cell == "0.0":
+                continue
+
+            try:
+                val = float(cell)
+            except (ValueError, TypeError):
+                skipped.append({"row": row_count, "reason": f"Invalid value '{cell}' for group '{csv_group_name}'"})
+                continue
+
+            if val == 0.0:
+                continue
+
+            group_idx = group_name_to_idx.get(csv_group_name)
+            if group_idx is None:
+                # Try case-insensitive match
+                matched = False
+                for gname, gidx in group_name_to_idx.items():
+                    if gname.lower() == csv_group_name.lower():
+                        group_idx = gidx
+                        matched = True
+                        break
+                if not matched:
+                    skipped.append({"row": row_count, "reason": f"Group '{csv_group_name}' not found in model"})
+                    continue
+
+            batch_cmds.append({
+                "type": "set_indexed_value",
+                "params": {
+                    "domain": "ecopath_fleet",
+                    "index": fleet_idx,
+                    "variable": var_lower,
+                    "indices": [group_idx],
+                    "value": val,
+                    "navigate": False,
+                },
+            })
+            set_count += 1
+
+    if not batch_cmds:
+        return {
+            "status": "success",
+            "message": "No non-zero values to import from CSV",
+            "variable": var_lower,
+            "total_csv_rows": row_count,
+            "skipped": skipped or None,
+        }
+
+    # Execute batch
+    send_errors: list[dict[str, Any]] = []
+    n_applied = 0
+    try:
+        batch_result = await _send("batch", {"commands": batch_cmds}, timeout=TIMEOUT_LONG)
+        results_list = batch_result.get("results", []) if isinstance(batch_result, dict) else []
+        for i, sub in enumerate(results_list):
+            if isinstance(sub, dict) and sub.get("status") == "error":
+                send_errors.append({"index": i, "error": sub.get("message", str(sub))})
+            else:
+                n_applied += 1
+    except Exception as exc:
+        send_errors.append({"error": str(exc)})
+
+    status = "success"
+    if send_errors or skipped:
+        status = "partial_success" if n_applied else "failed"
+
+    return {
+        "status": status,
+        "variable": var_lower,
+        "total_csv_rows": row_count,
+        "n_sets_requested": set_count,
+        "n_applied": n_applied,
+        "n_errors": len(send_errors),
+        "errors": send_errors or None,
+        "skipped": skipped or None,
+    }
+
+
+# ── Detritus Fate CSV ────────────────────────────────────────────────
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+async def export_detritus_fate_csv(path: str | None = None) -> dict[str, Any]:
+    """Export detritus fate fractions for all groups as CSV.
+
+    Builds a CSV with Group as the first column and detritus group names
+    as subsequent column headers. One row per non-detritus group with
+    the detritus fate fractions.
+
+    Args:
+        path: Optional path on the EwE host to write the CSV file.
+              The CSV content is always returned regardless.
+
+    Returns:
+        Dict with status, group_count, detritus_count, csv (content), and path info.
+    """
+    import csv
+    import io as _io
+
+    # Step 1: Get all groups
+    groups_result = await _send("list_ecopath_groups")
+    groups = groups_result.get("groups", [])
+    if not groups:
+        raise ValueError("No groups found in the current model")
+
+    # Identify detritus groups and non-detritus groups
+    detritus_group_indices: list[int] = []
+    detritus_group_names: list[str] = []
+    non_detritus_indices: list[int] = []
+    non_detritus_names: list[str] = []
+
+    for g in groups:
+        gname = g.get("name", "")
+        gidx = g.get("index")
+        gtype = g.get("type", "").lower()
+        if gname and gidx is not None:
+            if gtype == "detritus" or gtype == 2 or gtype == "2":
+                detritus_group_indices.append(int(gidx))
+                detritus_group_names.append(gname)
+            else:
+                non_detritus_indices.append(int(gidx))
+                non_detritus_names.append(gname)
+
+    n_detritus = len(detritus_group_indices)
+    fallback_mode = False
+    if n_detritus == 0:
+        fallback_mode = True
+        # Fallback: use index-based detritus detection — the last group is
+        # often detritus, but we'll check if detritus_fate has values.
+        # For safety, treat group 1 as the likely detritus group (common in
+        # many EwE models) and report all groups.
+        non_detritus_indices = []
+        non_detritus_names = []
+        for g in groups:
+            gname = g.get("name", "")
+            gidx = g.get("index")
+            if gname and gidx is not None:
+                non_detritus_indices.append(int(gidx))
+                non_detritus_names.append(gname)
+
+    # Step 2: Batch get detritus_fate for all non-detritus groups
+    batch_cmds: list[dict[str, Any]] = []
+    for idx in non_detritus_indices:
+        batch_cmds.append({
+            "type": "get_values",
+            "params": {
+                "domain": "ecopath_group",
+                "index": idx,
+                "variables": ["detritus_fate"],
+                "navigate": False,
+            },
+        })
+
+    batch_result = await _send("batch", {"commands": batch_cmds}, timeout=TIMEOUT_LONG)
+    results_list = batch_result.get("results", [])
+
+    # Step 3: Build detritus fate matrix: group_index → array
+    fate_matrix: dict[int, list[float]] = {}
+    for i, sub in enumerate(results_list):
+        if isinstance(sub, dict) and sub.get("status") != "error":
+            sub_idx = sub.get("index")
+            if sub_idx is None and i < len(non_detritus_indices):
+                sub_idx = non_detritus_indices[i]
+            if sub_idx is not None:
+                values = sub.get("values", {}) if isinstance(sub, dict) else {}
+                fate = values.get("detritus_fate", [])
+                if isinstance(fate, list):
+                    fate_matrix[int(sub_idx)] = [
+                        float(v) if v is not None else 0.0 for v in fate
+                    ]
+
+    # Step 4: Determine detritus group count from data if we didn't find them by type
+    if n_detritus == 0:
+        # Use the max array length from any group's detritus_fate
+        n_from_data = max((len(arr) for arr in fate_matrix.values()), default=0)
+        if n_from_data == 0 and non_detritus_names:
+            # At least 1 detritus column
+            n_from_data = 1
+        detritus_names_for_csv = [f"Detritus{i+1}" for i in range(n_from_data)]
+    else:
+        detritus_names_for_csv = detritus_group_names
+
+    # Step 5: Build CSV
+    output = _io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["Group"] + detritus_names_for_csv)
+
+    row_count = 0
+    for idx, name in zip(non_detritus_indices, non_detritus_names):
+        fate = fate_matrix.get(idx, [])
+        row_values: list[str] = [name]
+        has_non_zero = False
+        for d_idx in range(len(detritus_names_for_csv)):
+            val = 0.0
+            if d_idx < len(fate):
+                val = fate[d_idx] if fate[d_idx] is not None else 0.0
+            if val != 0.0:
+                has_non_zero = True
+                row_values.append(f"{val:.6f}")
+            else:
+                row_values.append("0.0")
+        if has_non_zero or any(v != "0.0" for v in row_values[1:]):
+            writer.writerow(row_values)
+            row_count += 1
+        else:
+            # Still write the row even if all zeros — gives complete picture
+            writer.writerow(row_values)
+            row_count += 1
+
+    csv_content = output.getvalue()
+
+    # Step 6: Optionally write to VM host file
+    written_to_host = False
+    if path:
+        _reject_path_traversal(path)
+        if not path.lower().endswith('.csv'):
+            raise ValueError("Path must have a .csv extension")
+        try:
+            await _send("write_host_file", {"path": path, "content": csv_content})
+            written_to_host = True
+        except (RuntimeError, ConnectionError, OSError, Exception):
+            logger.warning(
+                "export_detritus_fate_csv: write_host_file not available on this plugin version. "
+                "CSV content is returned in the 'csv' field."
+            )
+
+    return {
+        "status": "success",
+        "group_count": len(non_detritus_indices),
+        "detritus_count": len(detritus_names_for_csv),
+        "fallback_mode": fallback_mode,
+        "csv": csv_content,
+        "written_to_host": written_to_host,
+        "path": path,
+    }
+
+
+@mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
+async def import_detritus_fate_csv(
+    data: str | None = None,
+    path: str | None = None,
+) -> dict[str, Any]:
+    """Import detritus fate fractions from CSV.
+
+    CSV must have 'Group' as the first column header followed by detritus
+    group names (or 'DetritusFraction' for single-detritus models). Uses
+    set_indexed_value with navigate=False via batch_commands.
+
+    Args:
+        data: CSV string content to import.
+        path: Path to a CSV file on the EwE host machine to read and import.
+
+    Returns:
+        Dict with import status, counts, and results.
+    """
+    import csv
+    import io as _io
+
+    # Read from path if data not provided directly
+    if not data and path:
+        _reject_path_traversal(path)
+        if not path.lower().endswith('.csv'):
+            raise ValueError("Path must have a .csv extension")
+        read_result = await _send("read_host_file", {"path": path})
+        data = read_result.get("content", "")
+        if not data:
+            raise ValueError(f"File at {path} is empty or unreadable")
+
+    if not data or not data.strip():
+        raise ValueError(
+            "Either 'data' or 'path' must be provided with non-empty content"
+        )
+
+    # Parse CSV
+    reader = csv.reader(_io.StringIO(data))
+    rows = list(reader)
+    if len(rows) < 2:
+        raise ValueError("CSV must have at least a header row and one data row")
+
+    header = rows[0]
+    if not header or header[0].strip().lower() != "group":
+        raise ValueError(
+            "CSV header must start with 'Group' as the first column. "
+            f"Got: {header[0] if header else '(empty)'}"
+        )
+
+    # CSV detritus column names (after 'Group')
+    csv_detritus_names = [h.strip() for h in header[1:]]
+    if not csv_detritus_names:
+        raise ValueError("CSV must have at least one detritus column after 'Group'")
+
+    # Build name → index mapping for groups
+    groups_result = await _send("list_ecopath_groups")
+    groups = groups_result.get("groups", [])
+    group_name_to_idx: dict[str, int] = {}
+    for g in groups:
+        gname = g.get("name", "")
+        gidx = g.get("index")
+        if gname and gidx is not None:
+            group_name_to_idx[gname] = int(gidx)
+
+    # Determine detritus group indices
+    # First try to find groups with type 'detritus'
+    detritus_name_to_idx: dict[str, int] = {}
+    for g in groups:
+        gname = g.get("name", "")
+        gidx = g.get("index")
+        gtype = g.get("type", "").lower()
+        if gname and gidx is not None and (gtype == "detritus" or gtype == 2 or gtype == "2"):
+            detritus_name_to_idx[gname] = int(gidx)
+
+    # Map CSV detritus column names to detritus group indices
+    detritus_col_map: list[tuple[int, int]] = []  # (csv_col_index, detritus_group_index)
+    for ci, csv_name in enumerate(csv_detritus_names, start=1):
+        # Try exact match first
+        det_idx = detritus_name_to_idx.get(csv_name)
+        if det_idx is None:
+            # Try case-insensitive match
+            d_lower = csv_name.lower()
+            for gname, gidx in detritus_name_to_idx.items():
+                if gname.lower() == d_lower:
+                    det_idx = gidx
+                    break
+        if det_idx is None:
+            # If there's only one detritus group, use it regardless of name
+            if len(detritus_name_to_idx) == 1:
+                det_idx = next(iter(detritus_name_to_idx.values()))
+            else:
+                # If multiple detritus groups but CSV has a name we can't match
+                # try numeric: "Detritus1" → first, "Detritus2" → second
+                if csv_name.lower().startswith("detritus"):
+                    try:
+                        det_num = int(csv_name[len("detritus"):])
+                        sorted_names = sorted(detritus_name_to_idx.keys(),
+                                              key=lambda n: detritus_name_to_idx[n])
+                        if 1 <= det_num <= len(sorted_names):
+                            det_idx = detritus_name_to_idx[sorted_names[det_num - 1]]
+                    except (ValueError, IndexError):
+                        pass
+                if det_idx is None:
+                    # If all else fails and we have any detritus groups, use the first
+                    if detritus_name_to_idx:
+                        sorted_names = sorted(detritus_name_to_idx.keys(),
+                                              key=lambda n: detritus_name_to_idx[n])
+                        if ci - 1 < len(sorted_names):
+                            det_idx = detritus_name_to_idx[sorted_names[ci - 1]]
+        if det_idx is not None:
+            detritus_col_map.append((ci, det_idx))
+
+    if not detritus_col_map:
+        # Fallback: if no detritus groups found, use group 1 as default detritus
+        raise ValueError(
+            "No detritus groups found in the model. "
+            "Cannot import detritus fate fractions."
+        )
+
+    # Build batch commands
+    batch_cmds: list[dict[str, Any]] = []
+    set_count = 0
+    row_count = 0
+    skipped: list[dict[str, Any]] = []
+
+    for row in rows[1:]:
+        if not any(cell.strip() for cell in row):
+            continue
+        row_count += 1
+        group_name = row[0].strip()
+        if not group_name:
+            skipped.append({"row": row_count, "reason": "Empty group name"})
+            continue
+
+        group_idx = group_name_to_idx.get(group_name)
+        if group_idx is None:
+            # Try case-insensitive match
+            matched = False
+            for gname, gidx in group_name_to_idx.items():
+                if gname.lower() == group_name.lower():
+                    group_idx = gidx
+                    matched = True
+                    break
+            if not matched:
+                skipped.append({"row": row_count, "reason": f"Group '{group_name}' not found in model"})
+                continue
+
+        for ci, det_idx in detritus_col_map:
+            cell = row[ci].strip() if ci < len(row) else "0"
+            if cell == "" or cell == "0" or cell == "0.0":
+                continue
+
+            try:
+                val = float(cell)
+            except (ValueError, TypeError):
+                skipped.append({"row": row_count, "reason": f"Invalid value '{cell}' for detritus index {det_idx}"})
+                continue
+
+            if val == 0.0:
+                continue
+
+            batch_cmds.append({
+                "type": "set_indexed_value",
+                "params": {
+                    "domain": "ecopath_group",
+                    "index": group_idx,
+                    "variable": "detritus_fate",
+                    "indices": [det_idx],
+                    "value": val,
+                    "navigate": False,
+                },
+            })
+            set_count += 1
+
+    if not batch_cmds:
+        return {
+            "status": "success",
+            "message": "No non-zero values to import from CSV",
+            "total_csv_rows": row_count,
+            "skipped": skipped or None,
+        }
+
+    # Execute batch
+    send_errors: list[dict[str, Any]] = []
+    n_applied = 0
+    try:
+        batch_result = await _send("batch", {"commands": batch_cmds}, timeout=TIMEOUT_LONG)
+        results_list = batch_result.get("results", []) if isinstance(batch_result, dict) else []
+        for i, sub in enumerate(results_list):
+            if isinstance(sub, dict) and sub.get("status") == "error":
+                send_errors.append({"index": i, "error": sub.get("message", str(sub))})
+            else:
+                n_applied += 1
+    except Exception as exc:
+        send_errors.append({"error": str(exc)})
+
+    status = "success"
+    if send_errors or skipped:
+        status = "partial_success" if n_applied else "failed"
+
+    return {
+        "status": status,
+        "total_csv_rows": row_count,
+        "n_sets_requested": set_count,
+        "n_applied": n_applied,
+        "n_errors": len(send_errors),
+        "errors": send_errors or None,
+        "skipped": skipped or None,
+    }
+
+
 # ── Name-based entity access ──────────────────────────────────────
 
 
@@ -1833,6 +5227,9 @@ async def set_values_by_name(
 
     Resolves the entity name to its index internally, then writes the
     given values. Safer than managing numeric indices manually.
+
+    For multi-domain edits, prefer set_values_by_name_batch over ad-hoc
+    index lookup loops.
 
     Args:
         domain: Domain name (e.g., 'ecopath_group', 'ecosim_group_input').
@@ -1995,9 +5392,126 @@ async def export_ecosim_results(path: str) -> dict[str, Any]:
     return await _send("export_ecosim_results", {"path": path}, timeout=TIMEOUT_LONG)
 
 
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+async def validate_model_readiness() -> dict[str, Any]:
+    """Check model state before running Ecopath and return a readiness report.
+
+    Inspects all groups for:
+    - Whether all consumer groups have diet composition entries (list any missing)
+    - Whether any groups have sentinel (-9999) values in critical fields
+      (biomass, P/B, Q/B, EE)
+    - Whether the model is loaded
+    - Any other issues that would prevent Ecopath from running
+
+    Returns a dict with:
+    - ready: bool (True if all checks pass)
+    - model_loaded: bool
+    - issues: list of strings describing each problem found
+    - consumer_groups_without_diet: list of group names/indices
+    - groups_with_sentinel_values: list of group info
+    - total_groups: int
+    - consumer_count: int
+    - _errors_if_any: optional error message
+    """
+    issues: list[str] = []
+    consumer_groups_without_diet: list[str] = []
+    groups_with_sentinel_values: list[dict[str, Any]] = []
+
+    try:
+        groups_result = await _send("list_ecopath_groups")
+    except Exception as exc:
+        return {
+            "ready": False,
+            "model_loaded": False,
+            "issues": [f"Cannot read groups: {exc}"],
+            "consumer_groups_without_diet": [],
+            "groups_with_sentinel_values": [],
+            "total_groups": 0,
+            "consumer_count": 0,
+        }
+
+    groups = groups_result.get("groups", [])
+    total_groups = groups_result.get("total_count", len(groups))
+
+    if total_groups == 0:
+        issues.append("No groups found — model may not be loaded.")
+
+    consumer_count = 0
+    for group in groups:
+        if group.get("type") == "consumer":
+            consumer_count += 1
+            idx = group["index"]
+            try:
+                enriched = await _send("get_ecopath_group_enriched", {"index": idx})
+            except Exception:
+                issues.append(f"Cannot inspect group {group['name']} (idx {idx})")
+                continue
+            diet = enriched.get("diet", [])
+            if not diet:
+                label = f"{group['name']} (idx {idx})"
+                consumer_groups_without_diet.append(label)
+                issues.append(f"Consumer group {label} has no diet composition entries.")
+
+        # Check for sentinel values in critical input fields
+        sentinel_fields = {"biomass_area", "pb", "qb", "ee"}
+        group_sentinels: list[str] = []
+        inp = group.get("input", {})
+        for field in sentinel_fields:
+            val = inp.get(field)
+            if val is not None and val == -9999:
+                group_sentinels.append(field)
+        if group_sentinels:
+            groups_with_sentinel_values.append({
+                "index": group["index"],
+                "name": group["name"],
+                "type": group.get("type", "unknown"),
+                "sentinel_fields": group_sentinels,
+            })
+            issues.append(
+                f"Group {group['name']} (idx {group['index']}) has sentinel "
+                f"values (-9999) in: {', '.join(group_sentinels)}."
+            )
+
+    ready = len(issues) == 0
+    return {
+        "ready": ready,
+        "model_loaded": total_groups > 0,
+        "issues": issues,
+        "consumer_groups_without_diet": consumer_groups_without_diet,
+        "groups_with_sentinel_values": groups_with_sentinel_values,
+        "total_groups": total_groups,
+        "consumer_count": consumer_count,
+    }
+
+
 @mcp.tool()
 async def run_ecopath() -> dict[str, Any]:
-    """Run Ecopath mass balance. Returns whether the model balanced and the Ecopath run state."""
+    """Run Ecopath mass balance. Returns whether the model balanced and the Ecopath run state.
+
+    Validates that all consumer groups have diet composition entries before running.
+    If any consumer groups have empty or incomplete diets, a clear ValueError is
+    raised listing which groups need attention and how to fix them.
+    """
+    # Pre-run validation: check all consumer groups have diet composition
+    groups_result = await _send("list_ecopath_groups")
+    groups = groups_result.get("groups", [])
+    missing_diet_groups: list[str] = []
+    for group in groups:
+        if group.get("type") == "consumer":
+            idx = group["index"]
+            enriched = await _send("get_ecopath_group_enriched", {"index": idx})
+            diet = enriched.get("diet", [])
+            if not diet:
+                missing_diet_groups.append(f"{group['name']} (idx {idx})")
+    if missing_diet_groups:
+        raise ValueError(
+            "Cannot run Ecopath: diet composition is missing or incomplete for these consumer groups: "
+            + ", ".join(missing_diet_groups)
+            + ". Each consumer group must have diet entries summing to 1.0. "
+            "Use set_indexed_value(domain='ecopath_group', variable='diet_comp', "
+            "index=<predator_idx>, indices=[<prey_idx>], value=<fraction>, navigate=False) "
+            "to set each diet entry. For bulk setting, use batch_commands with set_values + diet_comp flat array."
+        )
     return await _send("run_ecopath", timeout=TIMEOUT_LONG)
 
 
@@ -2211,7 +5725,13 @@ async def export_active_plot(target: str = "auto") -> dict[str, Any]:
 async def set_values(
     domain: str, values: dict[str, Any], index: int | None = None, navigate: bool = True
 ) -> dict[str, Any]:
-    """Set values for an EwE entity and refresh the UI. Pass navigate=False to avoid changing the visible EwE screen."""
+    """Set values for an EwE entity and refresh the UI. Pass navigate=False to avoid changing the visible EwE screen.
+
+    For bulk updates, prefer set_values_by_name_batch or batch_commands with navigate=False.
+    For setting diet compositions for multiple predators at once, use set_diet_matrix.
+    For setting group parameters in bulk, also consider import_ecopath_groups_csv,
+    import_ecosim_inputs_csv, and related CSV import tools.
+    """
     params: dict[str, Any] = {"domain": domain, "values": values, "navigate": navigate}
     if index is not None:
         params["index"] = index
@@ -2230,7 +5750,11 @@ async def set_indexed_value(
     index: int | None = None,
     navigate: bool = True,
 ) -> dict[str, Any]:
-    """Set one indexed EwE value and refresh the UI. Pass navigate=False to avoid changing the visible EwE screen."""
+    """Set one indexed EwE value and refresh the UI. Pass navigate=False to avoid changing the visible EwE screen.
+
+    For setting diet compositions for multiple predators at once, use set_diet_matrix instead.
+    For bulk indexed updates, consider building a batch_commands payload with navigate=False.
+    """
     params: dict[str, Any] = {
         "domain": domain,
         "variable": variable,
@@ -2487,12 +6011,21 @@ async def batch_commands(commands: list[dict[str, Any]]) -> dict[str, Any]:
     # Use cached value or hardcoded fallback (non-blocking).
     blocked = get_batch_blocked_commands()
 
+    _NAVIGATE_GATED_COMMANDS = frozenset({"set_values", "set_indexed_value", "set_values_range"})
+
     normalized_commands = []
     for command in commands:
         command_type = command.get("command_type") if "command_type" in command else command.get("type")
         if command_type is None:
             raise ValueError("Each batch command must have a 'type' field")
         if command_type in blocked:
+            # Allow set_values/set_indexed_value/set_values_range when navigate=False
+            if command_type in _NAVIGATE_GATED_COMMANDS:
+                params = command.get("params", {})
+                if not params.get("navigate", True):
+                    # Explicit navigate=False — allow it
+                    normalized_commands.append({"type": command_type, "params": params})
+                    continue
             raise ValueError(f"Command {command_type!r} is not allowed in batch")
         normalized_commands.append({"type": command_type, "params": command.get("params", {})})
     result = await _send("batch", {"commands": normalized_commands}, timeout=TIMEOUT_LONG)
@@ -2600,20 +6133,78 @@ _AGENT_INSTRUCTIONS = (
     "get_ecospace_group_results, get_ecospace_fleet_results\n"
     "- **Value access**: get_values, set_values, get_indexed_value, "
     "set_indexed_value, validate_values (pass navigate=False for background access)\n"
+    "- **Model readiness**: validate_model_readiness (pre-flight check before run_ecopath)\n"
+    "- **Bulk Operations**:\n"
+    "  - batch_commands: execute multiple read-only or value-set operations (with \n"
+    "  navigate=False) in one round-trip. Blocked commands include model lifecycle, \n"
+    "  simulation runs/stops, exports, view captures, and scenario mutations.\n"
+    "  - set_values_by_name_batch: resolve exact entity names to indices and apply \n"
+    "  mixed-domain set_values in one request. Use list_name_batch_capabilities first \n"
+    "  to discover supported domains and writable fields.\n"
+    "  - create_ecopath_groups: batch-create Ecopath groups. Use ~14 groups per call\n"
+    "  with auto_reload=False for speed, then one save_model + load_model at the end.\n"
+    "  - create_ecopath_fleets: batch-create Ecopath fleets. Same pattern as groups.\n"
+    "  - set_diet_matrix: set diet compositions for multiple predator groups in one \n"
+    "  call using structured predator->{prey: fraction} format. Resolves names to \n"
+    "  indices and sends a single batch internally.\n"
+    "  - set_values with diet_comp flat array: set diet compositions inside \n"
+    "  batch_commands by passing diet_comp as a flat array of prey fractions.\n"
+    "  - navigate=False must be set on every batched mutation to avoid UI flicker.\n"
+    "- **CSV Import/Export**:\n"
+    "  - export/import_ecopath_groups_csv: bulk group params (Biomass, PB, QB, EE)\n"
+    "  - export/import_diet_csv: bulk diet composition matrix (predator x prey)\n"
+    "  - export/import_ecosim_vul_csv: Ecosim vulnerability multiplier matrix\n"
+    "  - export/import_ecosim_inputs_csv: Ecosim scalar group parameters\n"
+    "  - export/import_fleet_landings_csv: fleet landings and discards\n"
+    "  - export/import_fleet_indexed_csv: fleet x group indexed values\n"
+    "  - export/import_ecotracer_inputs_csv: Ecotracer group inputs\n"
+    "  - export/import_monte_carlo_csv: Monte Carlo CV parameters\n"
+    "  - export/import_ecospace_inputs_csv: Ecospace group inputs\n"
+    "  - export/import_ecospace_fleet_inputs_csv: Ecospace fleet parameters\n"
+    "  - export/import_detritus_fate_csv: per-group detritus allocation\n"
+    "  Prefer CSV import for loading bulk data: export current state, edit in\n"
+    "  spreadsheet, import back. One round-trip per domain instead of N calls.\n"
+    "  When building new models, use import_ecopath_groups_csv with CSV data\n"
+    "  instead of many individual set_values calls. CSV is faster and atomic.\n"
     "- **Diagnostics**: ping, diagnose, get_ewe_info, get_runtime_state\n\n"
+    "## 🚨 Dialog Events (CRITICAL)\n"
+    "**Every command response may contain a `_dialog_events` key with pending EwE "
+    "modal dialog information. ALWAYS check this key after any command that times out "
+    "or returns an unexpected result. Dialogs that block the GUI will prevent ALL "
+    "subsequent commands from working.**\n"
+    "Use get_dialog_events() to inspect and clear pending dialogs. If you see "
+    "unexpected timeouts or failures, check for `_dialog_events` first.\n\n"
     "## Safety Rules\n"
     "- execute_ewe_code and shutdown_server are disabled by default\n"
     "- Do not batch model lifecycle, simulation run/stop, export/capture, "
     "or scenario mutation commands\n"
     "- Use validate_values before set_values\n"
     "- Prefer save_model_as to a copy path when mutating models\n\n"
+    "## Efficient Model Creation Pattern\n"
+    "When building a new model from scratch, use this batching pattern to avoid timeouts:\n"
+    "1. create_model to create the blank model\n"
+    "2. create_ecopath_groups(groups=[14], auto_reload=False) — first batch\n"
+    "3. create_ecopath_groups(groups=[13], auto_reload=False) — second batch\n"
+    "4. set_values to fix Detritus params (biomass_area_input=50, eeinput=0.4)\n"
+    "5. save_model + load_model — one refresh after all groups created\n"
+    "6. set_diet_matrix(diets={...}) — all 25+ predator diets in one call\n"
+    "7. create_ecopath_fleets(names=[...], auto_reload=False) — all fleets at once\n"
+    "8. save_model + load_model — refresh fleet counts\n"
+    "9. validate_model_readiness() — confirm all diets entered, no sentinels\n"
+    "10. run_ecopath() — balance the model\n\n"
+    "For parameter loading after groups exist, use CSV import tools:\n"
+    "- import_ecopath_groups_csv for bulk group params (Biomass, PB, QB, EE)\n"
+    "- import_diet_csv for bulk diet composition matrix\n"
+    "- import_ecosim_inputs_csv for Ecosim group parameters\n"
+    "These use set_values_by_name_batch internally — one round-trip per domain.\n\n"
     "## First Steps\n"
     "1. Call ping to verify connectivity\n"
     "2. Call diagnose to check server configuration\n"
     "3. Call load_model with the path to an EwE model file\n"
     "4. Call list_ecopath_groups to explore the model structure\n"
-    "5. Call run_ecopath to balance the model\n"
-    "6. Proceed to Ecosim or Ecospace scenarios for dynamic simulations"
+    "5. Call validate_model_readiness before run_ecopath to check for missing diets or sentinel values\n"
+    "6. Call run_ecopath to balance the model\n"
+    "7. Proceed to Ecosim or Ecospace scenarios for dynamic simulations"
 )
 
 

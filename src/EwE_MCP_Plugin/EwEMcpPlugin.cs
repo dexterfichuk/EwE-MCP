@@ -2793,6 +2793,11 @@ case "list_ecosim_scenarios":
         int maxRows = SafeIntProperty(basemap, "InRow");
         int maxCols = SafeIntProperty(basemap, "InCol");
 
+        // cEcospaceLayer.Cell has signature:
+        //   Cell(iRow As Integer, iCol As Integer,
+        //        Optional iIndexSec As Integer = cCore.NULL_VALUE) As Object
+        const int NULL_VALUE = -9999; // cCore.NULL_VALUE
+
         foreach (var cellPair in cellsToken)
         {
             if (cellPair is JArray arr && arr.Count >= 2)
@@ -2807,12 +2812,15 @@ case "list_ecosim_scenarios":
                 try
                 {
                     // Set Cell(row, col) = 1 on the MPA layer (1 = MPA active)
+                    //   Cell(iRow As Integer, iCol As Integer,
+                    //        Optional iIndexSec As Integer = cCore.NULL_VALUE) As Object
+                    // Passing -9999 for the optional iIndexSec parameter.
                     mpaLayer.GetType().InvokeMember(
                         "Cell",
                         BindingFlags.Instance | BindingFlags.Public | BindingFlags.SetProperty,
                         null,
                         mpaLayer,
-                        new object[] { 1, row, col }
+                        new object[] { row, col, NULL_VALUE, 1 }
                     );
                     cellsSet++;
                 }
@@ -2823,7 +2831,36 @@ case "list_ecosim_scenarios":
             }
         }
 
-        return new JObject { ["set"] = true, ["mpa_index"] = mpaIndex, ["cells_set"] = cellsSet, ["cells_skipped"] = cellsSkipped, ["cells_failed"] = cellsFailed };
+        // Verify: read back cell values to confirm correct positions
+        var verified = new JArray();
+        foreach (var cellPair in cellsToken)
+        {
+            if (cellPair is JArray arr && arr.Count >= 2)
+            {
+                int row = arr[0].Value<int>();
+                int col = arr[1].Value<int>();
+                if (row < 1 || row > maxRows || col < 1 || col > maxCols) continue;
+                try
+                {
+                    // Read back with the optional iIndexSec parameter
+                    var readVal = SafeGetIndexedProperty(mpaLayer, "Cell", row, col, NULL_VALUE);
+                    verified.Add(new JObject { ["row"] = row, ["col"] = col, ["value"] = ToJToken(readVal) });
+                }
+                catch
+                {
+                    verified.Add(new JObject { ["row"] = row, ["col"] = col, ["value"] = "read_error" });
+                }
+            }
+        }
+
+        return new JObject {
+            ["set"] = true,
+            ["mpa_index"] = mpaIndex,
+            ["cells_set"] = cellsSet,
+            ["cells_skipped"] = cellsSkipped,
+            ["cells_failed"] = cellsFailed,
+            ["_verified"] = verified
+        };
     }
 
     private JObject CreateRegionsFromMPAs(JObject parameters)
@@ -2871,12 +2908,14 @@ case "list_ecosim_scenarios":
                             if (mpaCellVal != null && Convert.ToInt32(mpaCellVal) > 0)
                             {
                                 // Assign this cell to the MPA's region number
+                                // cEcospaceLayer.Cell has optional iIndexSec param
+                                const int NULL_VALUE = -9999;
                                 regionLayer.GetType().InvokeMember(
                                     "Cell",
                                     BindingFlags.Instance | BindingFlags.Public | BindingFlags.SetProperty,
                                     null,
                                     regionLayer,
-                                    new object[] { mpaIdx, r, c }
+                                    new object[] { r, c, NULL_VALUE, mpaIdx }
                                 );
                                 cellsAssigned++;
                             }
@@ -4828,11 +4867,68 @@ case "list_ecosim_scenarios":
                     throw new EwEMcpException("invalid_parameter", "path must not contain directory traversal");
                 }
             }
+
+            var originalPath = string.IsNullOrWhiteSpace(path)
+                ? null
+                : SafeGetProperty(core, "DataSource")?.ToString();
+
             bool ok;
-            if (string.IsNullOrWhiteSpace(path))
+            try
+            {
                 ok = core.Save();
-            else
-                ok = core.Save(path);
+            }
+            catch (NullReferenceException nre)
+            {
+                EwEMcpFileLog.Error($"core.Save() failed with NullReferenceException: {nre.Message}", nre);
+                return new JObject { ["saved"] = false, ["path"] = path ?? string.Empty,
+                    ["error"] = "EwE core Save() threw NullReferenceException — the database may be in an inconsistent state. Try reloading the model." };
+            }
+            catch (Exception ex)
+            {
+                EwEMcpFileLog.Error($"core.Save() failed: {ex.Message}", ex);
+                return new JObject { ["saved"] = false, ["path"] = path ?? string.Empty,
+                    ["error"] = $"core.Save() failed: {ex.Message}" };
+            }
+
+            if (saveAs && ok && !string.IsNullOrWhiteSpace(path) && !string.IsNullOrWhiteSpace(originalPath))
+            {
+                // Safe save-as path: save first (already done above), then copy, then
+                // load the copy. At every step, if the operation fails, the core's
+                // DataSource still points at the original file.
+                try
+                {
+                    System.IO.File.Copy(originalPath, path, overwrite: true);
+                }
+                catch (Exception ex)
+                {
+                    EwEMcpFileLog.Error($"Save-as file copy failed: {ex.Message}", ex);
+                    ok = false;
+                }
+
+                if (ok)
+                {
+                    try
+                    {
+                        ok = core.LoadModel(path);
+                        if (!ok)
+                        {
+                            EwEMcpFileLog.Warn($"Save-as LoadModel returned false for '{path}'");
+                            try { core.LoadModel(originalPath); } catch { }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        EwEMcpFileLog.Error($"Save-as LoadModel threw: {ex.Message}", ex);
+                        ok = false;
+                        try { core.LoadModel(originalPath); } catch { }
+                    }
+                }
+            }
+            else if (saveAs && ok)
+            {
+                EwEMcpFileLog.Warn("Save-as: DataSource path unavailable or path empty, cannot copy file");
+                ok = false;
+            }
 
             // After core.Save() triggers SaveEcopathDietComp (DELETE+INSERT from the
             // in-memory DC array), re-apply any pending diet writes for newly created
@@ -7370,10 +7466,8 @@ private static PropertyInfo FindReadableProperty(object entity, string variable,
                     return domain == "ecopath_group_outputs" ? "BiomassArea" : "BiomassAreaInput";
                 case "catch":
                     return "TcatchInput";
-                case "landings":
-                    return "LandingsInput";
-                case "discards":
-                    return "DiscardsInput";
+                case "off_vessel_price":
+                    return "OffVesselValue";
                 case "pb":
                     return "PBInput";
                 case "qb":
@@ -8134,6 +8228,26 @@ private static PropertyInfo FindReadableProperty(object entity, string variable,
                     .GetProperties(BindingFlags.Instance | BindingFlags.Public)
                     .FirstOrDefault(p => p.Name == propertyName && p.GetIndexParameters().Length == 2);
                 return property?.GetValue(obj, new object[] { index1, index2 });
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static object SafeGetIndexedProperty(object obj, string propertyName, int index1, int index2, int index3)
+        {
+            if (obj == null)
+            {
+                return null;
+            }
+
+            try
+            {
+                var property = obj.GetType()
+                    .GetProperties(BindingFlags.Instance | BindingFlags.Public)
+                    .FirstOrDefault(p => p.Name == propertyName && p.GetIndexParameters().Length == 3);
+                return property?.GetValue(obj, new object[] { index1, index2, index3 });
             }
             catch
             {
