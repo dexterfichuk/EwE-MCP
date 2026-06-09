@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 from ewe_mcp.client import EwEMCPClient
 
-FIXTURE_MODEL = os.path.join(os.path.dirname(__file__), "fixtures", "Tampa_Bay.EwEmdb")
+FIXTURE_MODEL = os.path.join(os.path.dirname(__file__), "fixtures", "Sample_Model.EwEmdb")
 
 SPATIAL_MODEL = os.path.join(
     os.path.dirname(__file__), "fixtures", "Anchovy_Bay_Spatial_Mosaic.eweaccdb"
@@ -28,7 +28,7 @@ def sample_model_path():
         if os.environ.get("EWE_MODEL_PATH"):
             return os.environ["EWE_MODEL_PATH"]
         root = _remote_root().rstrip("/\\")
-        return f"{root}\\tests\\fixtures\\Tampa_Bay.EwEmdb"
+        return f"{root}\\tests\\fixtures\\Sample_Model.EwEmdb"
     return FIXTURE_MODEL
 
 

@@ -65,7 +65,7 @@ Create `opencode.jsonc` in your project and point it at the installed `ewe-mcp.e
 }
 ```
 
-Now ask opencode: *"Load the Tampa Bay model at C:\Users\<you>\EwE-MCP\tests\fixtures\Tampa_Bay.EwEmdb and run Ecopath."*
+Now ask opencode: *"Load the sample model at C:\Users\<you>\EwE-MCP\tests\fixtures\Sample_Model.EwEmdb and run Ecopath."*
 
 ### ChatGPT (paid plan with MCP)
 

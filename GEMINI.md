@@ -6,7 +6,7 @@ This project is an MCP bridge for Ecopath with Ecosim (EwE). It consists of a C#
 
 - **Shared State:** Treat the live EwE process and models as shared state. Inspect before mutating.
 - **Mutations:** Prefer testing mutations against copied models (`save_model_as`).
-- **Cleanup:** If you mutate a shared model (like `Tampa_Bay.EwEmdb`), always restore original values in a `finally` block and call `discard_changes` to clear dirty flags.
+- **Cleanup:** If you mutate a shared model (like `Sample_Model.EwEmdb`), always restore original values in a `finally` block and call `discard_changes` to clear dirty flags.
 - **Eval Gating:** `execute_ewe_code` and `shutdown_server` are disabled by default. Do not enable unless explicitly requested and risks are understood. Requires `EWE_MCP_ENABLE_EVAL=1`.
 - **Batching:** Never batch model lifecycle, simulation run/stop, export/capture, or scenario load/mutation commands. `execute_ewe_code` and `shutdown_server` are also blocked from batching.
 - **Range Validation:** Use `validate_values` before `set_values`. Respect EwE's range constraints (e.g., `den_dep_catchability` >= 1.0).

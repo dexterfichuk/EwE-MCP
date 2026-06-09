@@ -245,7 +245,7 @@ Focused VM probes verified:
 - `diagnose` reports healthy core, UI context, command handler, token, and log path.
 - Dialog watcher is disabled by default.
 - `invoke_ui_command` rejects `ImportTimeSeries` with `dialog_command_blocked`.
-- `run_ecopath` on `Tampa_Bay.EwEmdb` returns `ecopath_run_state: balanced`.
+- `run_ecopath` on `Sample_Model.EwEmdb` returns `ecopath_run_state: balanced`.
 - `ecopath_detail` returns `Balanced`.
 - Mutation cleanup path uses `discard_changes` and `close_model`.
 

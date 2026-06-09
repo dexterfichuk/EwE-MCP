@@ -11,7 +11,7 @@ This repo builds an MCP bridge for a live Ecopath with Ecosim (EwE) desktop proc
 - Default plugin socket inside VM: `127.0.0.1:9877`
 - Recommended local tunnel: `127.0.0.1:19877 -> VM 127.0.0.1:9877`
 - Development token: `ewe-mcp-local-dev`
-- Sample model: `C:\Users\dexter\Eii.Ecopath\Database\Tampa_Bay.EwEmdb`
+- Sample model: `C:\Users\dexter\EwE-MCP\tests\fixtures\Sample_Model.EwEmdb`
 
 ## MCP Client Config
 
@@ -142,7 +142,7 @@ assert client.connect()
 print(client.command_result("ping"))
 print(client.command_result("diagnose"))
 print(client.command_result("get_ewe_info"))
-print(client.command_result("load_model", {"path": r"C:\Users\dexter\EwE-MCP\tests\fixtures\Tampa_Bay.EwEmdb"}, timeout=60))
+print(client.command_result("load_model", {"path": r"C:\Users\dexter\EwE-MCP\tests\fixtures\Sample_Model.EwEmdb"}, timeout=60))
 print(client.command_result("get_core_counters"))
 client.disconnect()
 PY
@@ -208,7 +208,7 @@ uv run pytest
 
 Expected local baseline with live tests skipped is currently `199 passed, 105 skipped`.
 
-The sample model (`tests/fixtures/Tampa_Bay.EwEmdb`) is bundled under the same GPL-3.0 license as EwE and does not require a separate `EWE_MODEL_PATH` environment variable.
+The sample model (`tests/fixtures/Sample_Model.EwEmdb`) is a custom model built for testing purposes.
 
 Expected full live result is `297 passed, 7 skipped`.
 

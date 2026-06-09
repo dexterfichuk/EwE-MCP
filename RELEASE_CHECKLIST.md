@@ -21,7 +21,7 @@
 
 - [ ] All mutation tests restore original values in `finally` blocks
 - [ ] `discard_changes` called after test mutations
-- [ ] No test writes to the shared `Tampa_Bay.EwEmdb` fixture
+- [ ] No test writes to the shared `Sample_Model.EwEmdb` fixture
 
 ## Packaging Checks
 

@@ -15,7 +15,7 @@ from ewe_mcp.client import EwEMCPClient
 
 # ── Configuration ──────────────────────────────────────────────────────────
 VM_MODEL_PATH = r"C:\Users\dexter\EwE-MCP\tests\fixtures\Great_Lakes_Quagga_Mussel.EwEmdb"
-TAMPA_MODEL_PATH = r"C:\Users\dexter\EwE-MCP\tests\fixtures\Tampa_Bay.EwEmdb"
+SAMPLE_MODEL_PATH = r"C:\Users\dexter\EwE-MCP\tests\fixtures\Sample_Model.EwEmdb"
 HOST = "127.0.0.1"
 PORT = 19877
 TOKEN = "ewe-mcp-local-dev"
@@ -223,13 +223,13 @@ def main():
         model_created = True
     except Exception as e:
         print(f"  create_model failed: {e}")
-        print("  Falling back: loading Tampa_Bay and saving as Great Lakes...")
+        print("  Falling back: loading Sample_Model and saving as Great Lakes...")
         try:
             # Close any existing model
             safe_call(client, "close_model")
-            # Load Tampa Bay
-            result = client.command_result("load_model", {"path": TAMPA_MODEL_PATH}, timeout=TIMEOUT_LONG)
-            print(f"  Loaded Tampa_Bay: {result.get('loaded', '?')}")
+            # Load sample model
+            result = client.command_result("load_model", {"path": SAMPLE_MODEL_PATH}, timeout=TIMEOUT_LONG)
+            print(f"  Loaded Sample_Model: {result.get('loaded', '?')}")
             # Save as new
             result = client.command_result("save_model_as", {"path": VM_MODEL_PATH}, timeout=TIMEOUT_LONG)
             print(f"  Saved as Great Lakes: {result.get('result', '?')}")
