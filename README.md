@@ -28,10 +28,17 @@ For the full VM workflow (build, deploy, launch, tunnel, smoke test), see [AGENT
 
 ## Installation
 
+EwE runs on Windows only. On a Mac, use a Windows VM such as Parallels. There are two ways to install:
+
+- **Installer:** download `EwE-MCP-Setup.exe` from the [latest release](https://github.com/dexterfichuk/EwE-MCP/releases) and follow the steps in the release notes. You don't need Python or a build toolchain.
+- **Let your AI agent do it:** in Claude Code, Codex or OpenCode on the EwE machine, say *"Follow https://github.com/dexterfichuk/EwE-MCP/blob/main/AGENT_INSTALL.md to install EwE MCP."* The agent builds the plugin against your EwE install, copies it into `Plugins`, installs the server and configures your MCP client. See [AGENT_INSTALL.md](AGENT_INSTALL.md).
+
+To install only the Python server (for example, when EwE runs in a VM and you connect through an SSH tunnel):
+
 ```bash
-pip install ewe-mcp
-# or from source:
-uv build && pip install dist/ewe_mcp-0.1.0-py3-none-any.whl
+uv tool install git+https://github.com/dexterfichuk/EwE-MCP.git
+# or from a clone:
+uv sync && uv run ewe-mcp
 ```
 
 Set required environment variables before running:
